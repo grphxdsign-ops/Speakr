@@ -34,6 +34,14 @@ def _expose_nvidia_dlls():
     log.info("Exposed NVIDIA DLL dirs from %s", nvidia_dir)
 
 
+def _resolve_model_name(name: str, device: str) -> str:
+    """"auto" picks the best model the hardware can run at dictation speed:
+    large-v3-turbo needs a GPU; small is the practical ceiling on CPU."""
+    if name != "auto":
+        return name
+    return "large-v3-turbo" if device == "cuda" else "small"
+
+
 class Transcriber:
     def __init__(self, config, dictionary, learner=None):
         self.config = config
@@ -43,6 +51,7 @@ class Transcriber:
         self._ready = threading.Event()
         self._load_lock = threading.Lock()
         self.device_in_use = None
+        self.model_in_use = None
 
     def load_async(self):
         threading.Thread(target=self.load, name="model-loader", daemon=True).start()
@@ -69,19 +78,21 @@ class Transcriber:
         _expose_nvidia_dlls()
         last_exc = None
         for dev, ctype in attempts:
+            resolved = _resolve_model_name(model_name, dev)
             try:
-                log.info("Loading model %s on %s (%s)...", model_name, dev, ctype)
-                model = WhisperModel(model_name, device=dev, compute_type=ctype, cpu_threads=cpu_threads)
+                log.info("Loading model %s on %s (%s)...", resolved, dev, ctype)
+                model = WhisperModel(resolved, device=dev, compute_type=ctype, cpu_threads=cpu_threads)
                 # Missing CUDA DLLs only surface at inference time, so run a
                 # short silent warm-up before committing to this device.
                 segments, _ = model.transcribe(np.zeros(8000, dtype=np.float32), beam_size=1)
                 list(segments)
                 self.device_in_use = dev
-                log.info("Model %s ready on %s", model_name, dev)
+                self.model_in_use = resolved
+                log.info("Model %s ready on %s", resolved, dev)
                 return model
             except Exception as exc:
                 last_exc = exc
-                log.warning("Could not load on %s: %s", dev, exc)
+                log.warning("Could not load %s on %s: %s", resolved, dev, exc)
         raise RuntimeError(f"Failed to load model {model_name}: {last_exc}")
 
     def wait_ready(self, timeout=None) -> bool:
@@ -105,6 +116,13 @@ class Transcriber:
             language=self.config.get("language"),
             beam_size=self.config.get("beam_size", default=1),
             vad_filter=True,
+            # Gentler VAD than the defaults: don't drop quiet speech, and pad
+            # segment edges so soft starts/ends aren't clipped.
+            vad_parameters={
+                "threshold": self.config.get("vad_threshold", default=0.35),
+                "min_speech_duration_ms": 100,
+                "speech_pad_ms": 400,
+            },
             initial_prompt=prompt,
         )
         text = " ".join(seg.text.strip() for seg in segments).strip()

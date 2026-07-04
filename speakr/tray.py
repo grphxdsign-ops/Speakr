@@ -17,7 +17,7 @@ STATE_COLORS = {
     "error": "#805ad5",
 }
 
-MODELS = ["tiny", "base", "small", "medium", "large-v3"]
+MODELS = ["auto", "tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"]
 
 
 def _make_icon(color: str) -> Image.Image:

@@ -34,7 +34,7 @@ class Dictionary:
             self.path.write_text(STARTER, encoding="utf-8")
         self.hints = []
         self.replacements = []
-        for raw in self.path.read_text(encoding="utf-8").splitlines():
+        for raw in self.path.read_text(encoding="utf-8-sig").splitlines():
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue

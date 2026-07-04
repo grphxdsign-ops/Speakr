@@ -95,7 +95,9 @@ Created next to the app on first run. Highlights:
 | Setting | Default | Notes |
 |---|---|---|
 | `hotkey` | `"right ctrl"` | Single key = hold-to-talk. A combo like `"ctrl+shift+space"` becomes toggle (press to start, press to stop). |
-| `model` | `"base"` | `tiny`/`base`/`small`/`medium`/`large-v3`. Switchable from the tray menu. |
+| `model` | `"auto"` | Picks `large-v3-turbo` on GPU (near-flagship accuracy, ~0.2s) and `small` on CPU. Or pin `tiny`/`base`/`small`/`medium`/`large-v3-turbo`/`large-v3` from the tray menu — smaller = faster, bigger = more accurate. |
+| `preroll_seconds` | `0.4` | Rolling mic buffer prepended to each dictation so words started just before the keypress aren't clipped. |
+| `vad_threshold` | `0.35` | Lower hears quiet speech better; raise toward `0.5` in noisy rooms. |
 | `device` | `"auto"` | Tries the GPU, verifies it actually works, falls back to CPU. |
 | `language` | `null` | Auto-detect. Set e.g. `"en"` to pin it and save a little latency. |
 | `injection` | `"paste"` | `"paste"` = clipboard + Ctrl+V (most compatible). `"type"` = simulated keystrokes. |

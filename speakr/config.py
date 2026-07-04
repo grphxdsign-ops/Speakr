@@ -22,8 +22,9 @@ DEFAULTS = {
     # option, right ctrl, caps lock, ...
     "hotkey": "fn" if IS_MAC else "right ctrl",
     "toggle_mode": False,
-    # faster-whisper model: tiny, base, small, medium, large-v3, distil-large-v3
-    "model": "base",
+    # faster-whisper model. "auto" = large-v3-turbo on GPU, small on CPU.
+    # Or pin one: tiny, base, small, medium, large-v3-turbo, large-v3, ...
+    "model": "auto",
     # "auto" tries CUDA and falls back to CPU. Or "cpu" / "cuda".
     "device": "auto",
     # "auto" -> float16 on GPU, int8 on CPU
@@ -39,6 +40,12 @@ DEFAULTS = {
     "keep_mic_stream_open": True,
     "min_duration_seconds": 0.3,
     "max_duration_seconds": 120,
+    # Seconds of mic audio kept in a rolling RAM buffer and prepended to each
+    # recording, so words started just before the keypress aren't clipped.
+    "preroll_seconds": 0.4,
+    # Voice-activity threshold (0-1). Lower hears quiet speech better;
+    # higher rejects more background noise.
+    "vad_threshold": 0.35,
     "sample_rate": 16000,
     # null = system default input device; or a sounddevice index/name
     "input_device": None,
@@ -120,7 +127,8 @@ class Config:
     def load(self):
         if self.path.exists():
             try:
-                user = json.loads(self.path.read_text(encoding="utf-8"))
+                # utf-8-sig: tolerate the BOM Notepad/PowerShell like to add
+                user = json.loads(self.path.read_text(encoding="utf-8-sig"))
                 self.data = _merge(DEFAULTS, user)
             except (json.JSONDecodeError, OSError) as exc:
                 logging.getLogger("speakr").error("Failed to read %s: %s", self.path, exc)

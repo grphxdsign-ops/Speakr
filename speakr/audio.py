@@ -2,6 +2,7 @@
 
 import logging
 import threading
+from collections import deque
 
 import numpy as np
 import sounddevice as sd
@@ -10,10 +11,17 @@ log = logging.getLogger("speakr.audio")
 
 
 class AudioRecorder:
-    def __init__(self, sample_rate=16000, input_device=None, keep_stream_open=True):
+    def __init__(self, sample_rate=16000, input_device=None, keep_stream_open=True,
+                 preroll_seconds=0.4):
         self.sample_rate = sample_rate
         self.input_device = input_device
         self.keep_stream_open = keep_stream_open
+        # Rolling pre-roll (RAM only, continuously discarded): people start
+        # talking a beat before the key lands; without this the first
+        # syllable is clipped. Needs the stream to be open to exist.
+        self.preroll_samples = int(preroll_seconds * sample_rate)
+        self._preroll: deque = deque()
+        self._preroll_total = 0
         self._stream = None
         self._frames = []
         self._recording = False
@@ -22,9 +30,14 @@ class AudioRecorder:
     def _callback(self, indata, frames, time_info, status):
         if status:
             log.warning("Audio stream status: %s", status)
-        if self._recording:
-            with self._lock:
+        with self._lock:
+            if self._recording:
                 self._frames.append(indata.copy())
+            elif self.preroll_samples > 0:
+                self._preroll.append(indata.copy())
+                self._preroll_total += len(indata)
+                while self._preroll_total - len(self._preroll[0]) >= self.preroll_samples:
+                    self._preroll_total -= len(self._preroll.popleft())
 
     def _open_stream(self):
         if self._stream is not None:
@@ -52,7 +65,9 @@ class AudioRecorder:
 
     def start_recording(self):
         with self._lock:
-            self._frames = []
+            self._frames = list(self._preroll)
+            self._preroll.clear()
+            self._preroll_total = 0
         self._open_stream()
         self._recording = True
 

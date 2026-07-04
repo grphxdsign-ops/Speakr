@@ -36,6 +36,7 @@ class SpeakrApp:
             sample_rate=self.config.get("sample_rate"),
             input_device=self.config.get("input_device"),
             keep_stream_open=self.config.get("keep_mic_stream_open"),
+            preroll_seconds=self.config.get("preroll_seconds", default=0.4),
         )
         self.learner = VocabLearner(self.config, cfg_mod.LEARNED_PATH)
         self.transcriber = Transcriber(self.config, self.dictionary, self.learner)
@@ -65,7 +66,9 @@ class SpeakrApp:
 
     def _announce_ready(self):
         if self.transcriber.wait_ready(timeout=600) and not self._recording:
-            self.tray.set_state("idle", f"model on {self.transcriber.device_in_use}")
+            self.tray.set_state(
+                "idle", f"{self.transcriber.model_in_use} on {self.transcriber.device_in_use}"
+            )
 
     def quit(self):
         self.log.info("Speakr shutting down")
@@ -146,20 +149,23 @@ class SpeakrApp:
                 if not self.transcriber.wait_ready(timeout=0):
                     self.tray.set_state("processing", "waiting for model")
                 text = self.transcriber.transcribe(audio, self.config.get("sample_rate"))
+                t_asr = time.monotonic()
                 if text:
                     text = self.formatter.format(text, app_context)
                     text = self.dictionary.apply(text)
+                    t_fmt = time.monotonic()
                     inject(
                         text,
                         method=self.config.get("injection"),
                         restore_clipboard=self.config.get("restore_clipboard"),
                     )
+                    t_inj = time.monotonic()
                     self.formatter.note_result(text)
                     self.learner.observe(text)
                     self.log.info(
-                        "Inserted %d chars into %s in %.2fs",
+                        "Inserted %d chars into %s in %.2fs (asr %.2f, format %.2f, inject %.2f)",
                         len(text), app_context.get("exe") or "unknown app",
-                        time.monotonic() - started,
+                        t_inj - started, t_asr - started, t_fmt - t_asr, t_inj - t_fmt,
                     )
             except Exception as exc:
                 self.log.exception("Pipeline error: %s", exc)

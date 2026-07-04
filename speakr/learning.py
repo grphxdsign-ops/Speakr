@@ -37,7 +37,7 @@ class VocabLearner:
         self._entries: dict[str, dict] = {}
         if path.exists():
             try:
-                self._entries = json.loads(path.read_text(encoding="utf-8"))
+                self._entries = json.loads(path.read_text(encoding="utf-8-sig"))
             except (json.JSONDecodeError, OSError) as exc:
                 log.warning("Could not read %s: %s", path, exc)
 

@@ -5,6 +5,7 @@ import logging
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections import deque
 
@@ -101,6 +102,7 @@ class Formatter:
         self._ollama_ok = None
         self._ollama_checked_at = 0.0
         self._autostart_attempted = False
+        self._reprobing = False
         self._recent: deque[str] = deque(maxlen=3)
 
     def note_result(self, text: str):
@@ -121,6 +123,7 @@ class Formatter:
         if (
             fmt.get("enabled", True)
             and tone != "literal"
+            and len(cleaned.split()) >= 3  # nothing for the LLM to fix in 1-2 words
             and fmt.get("use_ollama", True)
             and self._ollama_available()
         ):
@@ -141,6 +144,7 @@ class Formatter:
             return
         if self._probe():
             self._warn_if_model_missing()
+            self._prewarm()
             return
         self._autostart_attempted = True
         if sys.platform == "win32":
@@ -163,8 +167,30 @@ class Formatter:
             if self._probe():
                 log.info("Started local Ollama server")
                 self._warn_if_model_missing()
+                self._prewarm()
                 return
         log.warning("Ollama did not come up; using rule-based formatting")
+
+    def _prewarm(self):
+        """Load the formatting model into memory now so the first dictation
+        doesn't pay the multi-second cold start."""
+        fmt = self.config.get("formatting")
+        try:
+            started = time.monotonic()
+            requests.post(
+                f"{fmt['ollama_url']}/api/chat",
+                json={
+                    "model": fmt["ollama_model"],
+                    "stream": False,
+                    "keep_alive": "2h",
+                    "messages": [{"role": "user", "content": "ok"}],
+                    "options": {"num_predict": 1},
+                },
+                timeout=120,
+            ).raise_for_status()
+            log.info("Ollama model %s pre-warmed in %.1fs", fmt["ollama_model"], time.monotonic() - started)
+        except requests.RequestException as exc:
+            log.warning("Ollama pre-warm failed: %s", exc)
 
     def _warn_if_model_missing(self):
         fmt = self.config.get("formatting")
@@ -190,12 +216,26 @@ class Formatter:
         return self._ollama_ok
 
     def _ollama_available(self) -> bool:
-        # Cache the probe; recheck failures once a minute so starting Ollama
-        # mid-session gets picked up.
-        now = time.monotonic()
-        if self._ollama_ok is not None and (self._ollama_ok or now - self._ollama_checked_at < 60):
-            return self._ollama_ok
-        return self._probe()
+        # Never block the dictation pipeline on a probe: return the cached
+        # status and, when it's stale-negative, recheck in the background so
+        # starting Ollama mid-session still gets picked up within a minute.
+        if self._ollama_ok is None:
+            return self._probe()  # only ever the very first call
+        if (
+            not self._ollama_ok
+            and time.monotonic() - self._ollama_checked_at >= 60
+            and not self._reprobing
+        ):
+            self._reprobing = True
+            threading.Thread(target=self._background_probe, daemon=True).start()
+        return self._ollama_ok
+
+    def _background_probe(self):
+        try:
+            if self._probe():
+                self._prewarm()
+        finally:
+            self._reprobing = False
 
     def _ollama_clean(self, text: str, tone: str, exe: str, title: str) -> str | None:
         fmt = self.config.get("formatting")
@@ -217,7 +257,7 @@ class Formatter:
                 json={
                     "model": fmt["ollama_model"],
                     "stream": False,
-                    "keep_alive": "30m",  # hold the model in VRAM between dictations
+                    "keep_alive": "2h",  # hold the model in VRAM between dictations
                     "options": {"temperature": 0.1},
                     "messages": [
                         {
