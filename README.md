@@ -99,7 +99,16 @@ open /Applications/Speakr.app
   Settings → Privacy & Security). Quit and reopen Speakr after granting.
 - Your config, dictionary, learned words, and logs live in
   `~/Library/Application Support/Speakr/` — updating the app never touches
-  them. To update: `git pull && bash package_mac.sh` and replace the app.
+  them, and the venv there is reused (no re-download unless requirements.txt
+  changed). To update:
+  ```
+  # Quit Speakr first (menu bar icon -> Quit)
+  cd Speakr && git pull && bash package_mac.sh
+  rm -rf /Applications/Speakr.app && mv dist/Speakr.app /Applications/
+  open /Applications/Speakr.app
+  ```
+  (`Speakr.app` already exists in `/Applications` after the first install, so
+  it must be removed before the `mv`, not overwritten in place.)
 - Start at login: System Settings → General → Login Items → add Speakr.
 - No Dock icon by design — it's a menu-bar app.
 
