@@ -61,9 +61,15 @@ Use `run_debug.bat` to run with a console and live logs.
 
 ## Quick start — macOS
 
-1. Copy this folder to the Mac **without** `.venv`, `config.json`, or
-   `speakr.log` (they're machine-specific; `dictionary.txt` and
-   `learned_words.json` are worth bringing along).
+1. Clone it (the repo excludes machine-specific files by design, so a fresh
+   clone is exactly what you want):
+   ```
+   git clone https://github.com/grphxdsign-ops/Speakr.git
+   cd Speakr
+   ```
+   Your personal `dictionary.txt` and `learned_words.json` aren't in the repo
+   (they're private). They regenerate empty on first run — copy them over from
+   another machine by hand if you want that vocabulary to follow you.
 2. In Terminal: `bash run.sh` (first run sets up the environment and
    downloads the model).
 3. Grant the permissions macOS prompts for, all under System Settings →
