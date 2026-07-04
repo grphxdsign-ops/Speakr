@@ -93,6 +93,13 @@ DEFAULTS = {
         # for speed — it's still solid on the easier majority of dictation.
         "ollama_model": "llama3.1:8b",
         "timeout_seconds": 15,
+        # How long Ollama keeps the model resident in VRAM after your last
+        # dictation before unloading it automatically. Shorter frees VRAM
+        # back for other apps/games during idle stretches, at the cost of a
+        # few-second reload on the next dictation after that gap. Longer
+        # (e.g. "2h") keeps every dictation instantly fast but holds the
+        # ~5GB permanently, even while Speakr sits unused.
+        "keep_alive": "10m",
     },
     # Tone per foreground app: casual | formal | neutral | literal.
     # "literal" skips the LLM pass entirely (good for code/terminals).

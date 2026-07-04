@@ -216,7 +216,7 @@ class Formatter:
                 json={
                     "model": fmt["ollama_model"],
                     "stream": False,
-                    "keep_alive": "2h",
+                    "keep_alive": fmt.get("keep_alive", "10m"),
                     "messages": [{"role": "user", "content": "ok"}],
                     "options": {"num_predict": 1},
                 },
@@ -297,7 +297,7 @@ class Formatter:
                 json={
                     "model": fmt["ollama_model"],
                     "stream": False,
-                    "keep_alive": "2h",  # hold the model in VRAM between dictations
+                    "keep_alive": fmt.get("keep_alive", "10m"),
                     "format": RESPONSE_SCHEMA,  # constrained decoding: always valid JSON
                     "options": {"temperature": 0.1},
                     "messages": [

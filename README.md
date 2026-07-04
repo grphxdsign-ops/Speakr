@@ -136,8 +136,9 @@ Created next to the app on first run. Highlights:
 | `keep_mic_stream_open` | `true` | Lower latency, but the mic indicator stays on. Set `false` to open the mic only while the hotkey is held. |
 | `formatting.use_ollama` | `true` | Used only if Ollama is running at `ollama_url`. Otherwise rule-based cleanup applies. |
 | `formatting.autostart_ollama` | `true` | If Ollama is installed but not running, Speakr starts `ollama serve` itself at launch. |
-| `formatting.ollama_model` | `"llama3.2"` | Any local model you've pulled. `llama3.1:8b` is also on this machine if you want a bigger formatter. |
+| `formatting.ollama_model` | `"llama3.1:8b"` | Any local model you've pulled. Benchmarked 12/12 on hard cases vs 11/12 for `llama3.2` (see "AI formatting" below). |
 | `formatting.include_recent_context` | `true` | Give the LLM your last few dictations (memory only) for continuity. |
+| `formatting.keep_alive` | `"10m"` | How long Ollama keeps the model resident in VRAM after your last dictation before unloading it. Shorter frees VRAM back for other apps/games during idle stretches, at the cost of a few-second reload on the next dictation after that gap. Set to `"2h"` (or higher) for always-instant response at the cost of permanently holding the ~5GB. |
 | `voice_commands` | `true` | "new line" / "new paragraph" / "bullet point" spoken commands. |
 | `streaming` | on, 10s chunks | Mid-speech chunked transcription for long dictations. |
 | `screen_context` | on, 1200 chars | Focused-field text capture for spelling context (Windows). Note: the first query can switch a Chromium-based app (Chrome, Slack, Discord) into accessibility mode, a small ongoing cost in that app — disable here if you notice it. |
@@ -179,6 +180,14 @@ On a memory-constrained machine (e.g. an 8GB Mac), set
 `formatting.ollama_model` back to `"llama3.2"` (2GB, ~0.3-0.7s) — it's
 still solid on the everyday majority of dictation, just weaker on chained
 corrections.
+
+If VRAM is tight but you're on a GPU that could fit llama3.1:8b (like this
+machine's 12GB card), don't reach for a smaller quantization of the same
+model — tested `q4_0` and `q3_K_M` against the hard-case suite and both
+were worse (real regressions, one outright flaky, for barely any size
+saved). The actual free lever is `formatting.keep_alive` (see the config
+table above): shortening it frees the ~5GB back automatically whenever
+Speakr's been idle, without touching model quality at all.
 
 List formatting uses Ollama's structured-output mode (a JSON schema, not
 free-form prose) — the model only classifies list-intent and extracts
