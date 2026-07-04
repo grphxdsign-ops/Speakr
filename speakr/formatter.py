@@ -127,7 +127,10 @@ class Formatter:
             and fmt.get("use_ollama", True)
             and self._ollama_available()
         ):
-            polished = self._ollama_clean(cleaned, tone, exe, title)
+            polished = self._ollama_clean(
+                cleaned, tone, exe, title,
+                screen_text=(app_context or {}).get("screen_text", ""),
+            )
             if polished:
                 out = polished
         if self.config.get("voice_commands", default=True):
@@ -237,7 +240,8 @@ class Formatter:
         finally:
             self._reprobing = False
 
-    def _ollama_clean(self, text: str, tone: str, exe: str, title: str) -> str | None:
+    def _ollama_clean(self, text: str, tone: str, exe: str, title: str,
+                      screen_text: str = "") -> str | None:
         fmt = self.config.get("formatting")
         app_line = ""
         if exe:
@@ -245,6 +249,11 @@ class Formatter:
             if title:
                 app_line += f' (window: "{title[:120]}")'
             app_line += "."
+        if screen_text:
+            app_line += (
+                "\nText near their cursor, for spelling of names/terms only — "
+                f"never copy or answer it: \"{screen_text[:500]}\""
+            )
         recent_line = ""
         if fmt.get("include_recent_context", True) and self._recent:
             recent_line = (

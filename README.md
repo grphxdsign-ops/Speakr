@@ -41,6 +41,16 @@ Everything runs on this machine. The only network access, ever:
 - **Context awareness** — the foreground app and window title steer tone and
   formatting, and your last few dictations are given to the LLM as context
   (kept in memory only) so follow-on dictations read naturally.
+- **On-screen text context** (Windows) — when you press the hotkey, Speakr
+  reads the focused text field once via UI Automation and uses names/jargon
+  found there to spell your words right (dictate a reply mentioning
+  "Kowalczyk" and it's spelled like the message on screen). One capped query
+  per dictation on a background thread — no polling, no screenshots, nothing
+  stored or logged. Toggle: tray → "Screen context".
+- **Streaming transcription** — long dictations are transcribed in chunks at
+  natural pauses *while you speak*, so text appears fast on release no matter
+  how long you talked. Chunks only split at real silences and carry context
+  across boundaries; short dictations use a single pass, unchanged.
 - **Vocabulary learning** — recurring uncommon words (names, jargon,
   CamelCase terms) from your dictations are counted in `learned_words.json`;
   once a word shows up 3 times it's fed to the transcriber as a hint, so
@@ -107,6 +117,8 @@ Created next to the app on first run. Highlights:
 | `formatting.ollama_model` | `"llama3.2"` | Any local model you've pulled. `llama3.1:8b` is also on this machine if you want a bigger formatter. |
 | `formatting.include_recent_context` | `true` | Give the LLM your last few dictations (memory only) for continuity. |
 | `voice_commands` | `true` | "new line" / "new paragraph" / "bullet point" spoken commands. |
+| `streaming` | on, 10s chunks | Mid-speech chunked transcription for long dictations. |
+| `screen_context` | on, 1200 chars | Focused-field text capture for spelling context (Windows). Note: the first query can switch a Chromium-based app (Chrome, Slack, Discord) into accessibility mode, a small ongoing cost in that app — disable here if you notice it. |
 | `learning.enabled` | `true` | Vocabulary learning; `min_occurrences` (3) and `max_hints` (40) tune it. |
 | `app_tones` | see file | Per-app tone: `casual` / `formal` / `neutral` / `literal`. `literal` (code editors, terminals) skips the LLM pass so nothing rewrites your commands. |
 | `log_transcripts` | `false` | Keep dictated text out of `speakr.log` unless you opt in. |

@@ -50,6 +50,9 @@ class Transcriber:
         self._model = None
         self._ready = threading.Event()
         self._load_lock = threading.Lock()
+        # Serializes inference: mid-dictation chunk commits and the final
+        # pass may otherwise overlap on the same ctranslate2 model.
+        self._infer_lock = threading.Lock()
         self.device_in_use = None
         self.model_in_use = None
 
@@ -98,19 +101,29 @@ class Transcriber:
     def wait_ready(self, timeout=None) -> bool:
         return self._ready.wait(timeout)
 
-    def _initial_prompt(self) -> str | None:
-        """Vocabulary bias: manual dictionary entries first, then words the
-        learner has picked up from past dictations."""
+    def _initial_prompt(self, extra_hints=None, prior_text="") -> str | None:
+        """Vocabulary bias: manual dictionary entries first, then on-screen
+        vocabulary for this dictation, then learned words. prior_text carries
+        continuity across streaming chunk boundaries."""
         manual = list(self.dictionary.hints)
-        learned = self.learner.hints(exclude=manual) if self.learner else []
-        words = (manual + learned)[:100]
-        if not words:
-            return None
-        return "Glossary: " + ", ".join(words) + "."
+        seen = {w.lower() for w in manual}
+        extra = [h for h in (extra_hints or []) if h.lower() not in seen]
+        learned = self.learner.hints(exclude=manual + extra) if self.learner else []
+        words = (manual + extra + learned)[:100]
+        parts = []
+        if words:
+            parts.append("Glossary: " + ", ".join(words) + ".")
+        if prior_text:
+            parts.append(prior_text[-200:])
+        return " ".join(parts) or None
 
-    def transcribe(self, audio, sample_rate=16000) -> str:
+    def transcribe(self, audio, sample_rate=16000, extra_hints=None, prior_text="") -> str:
         self._ready.wait()
-        prompt = self._initial_prompt()
+        prompt = self._initial_prompt(extra_hints, prior_text)
+        with self._infer_lock:
+            return self._transcribe_locked(audio, sample_rate, prompt)
+
+    def _transcribe_locked(self, audio, sample_rate, prompt) -> str:
         segments, info = self._model.transcribe(
             audio,
             language=self.config.get("language"),

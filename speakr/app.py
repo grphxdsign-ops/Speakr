@@ -10,12 +10,13 @@ import time
 from speakr import config as cfg_mod
 from speakr.audio import AudioRecorder
 from speakr.config import Config, setup_logging
-from speakr.context import get_active_app
+from speakr.context import get_active_app, get_screen_context
 from speakr.dictionary import Dictionary
 from speakr.formatter import Formatter
 from speakr.injector import inject
 from speakr.inputs import HotkeyListener
-from speakr.learning import VocabLearner
+from speakr.learning import VocabLearner, extract_notable_tokens
+from speakr.streaming import DictationSession
 from speakr.transcriber import Transcriber
 from speakr.tray import Tray
 
@@ -47,6 +48,7 @@ class SpeakrApp:
         self._record_started_at = 0.0
         self._queue: queue.Queue = queue.Queue()
         self._listener = None
+        self._session = None
 
     # ----- lifecycle -------------------------------------------------------
 
@@ -118,24 +120,41 @@ class SpeakrApp:
             self.log.error("Mic error: %s", exc)
             self.tray.set_state("error", "mic unavailable")
             return
+        session = DictationSession(self.transcriber, self.recorder, self.config)
+        self._session = session
+        # Capture the target app and on-screen text in the background while
+        # the user is speaking — costs the dictation nothing.
+        threading.Thread(target=self._capture_context, args=(session,), daemon=True).start()
+        session.start()
         self._recording = True
         self._record_started_at = time.monotonic()
         self.tray.set_state("recording")
 
+    def _capture_context(self, session):
+        context = get_active_app()
+        sc = self.config.get("screen_context", default={})
+        if sc.get("enabled", True):
+            screen_text = get_screen_context(
+                max_chars=sc.get("max_chars", 1200),
+                timeout=sc.get("timeout_seconds", 1.0),
+            )
+            if screen_text:
+                context["screen_text"] = screen_text
+                session.extra_hints = extract_notable_tokens(screen_text)
+        session.app_context = context
+
     def _end_recording(self):
         self._recording = False
-        audio = self.recorder.stop_recording()
-        duration = len(audio) / self.config.get("sample_rate")
+        session, self._session = self._session, None
+        if session is None:
+            return
+        session.stop()
+        duration = session.duration()
         if duration < self.config.get("min_duration_seconds"):
             self.log.info("Ignoring %.2fs tap", duration)
             self.tray.set_state("idle")
             return
-        max_dur = self.config.get("max_duration_seconds")
-        if duration > max_dur:
-            audio = audio[: int(max_dur * self.config.get("sample_rate"))]
-        # Capture the target app now, while its window still has focus.
-        app_context = get_active_app()
-        self._queue.put((audio, app_context))
+        self._queue.put(session)
         self.tray.set_state("processing")
 
     def _worker(self):
@@ -143,12 +162,13 @@ class SpeakrApp:
             item = self._queue.get()
             if item is None:
                 return
-            audio, app_context = item
+            session = item
+            app_context = session.app_context or {}
             started = time.monotonic()
             try:
                 if not self.transcriber.wait_ready(timeout=0):
                     self.tray.set_state("processing", "waiting for model")
-                text = self.transcriber.transcribe(audio, self.config.get("sample_rate"))
+                text = session.finalize()
                 t_asr = time.monotonic()
                 if text:
                     text = self.formatter.format(text, app_context)
@@ -186,6 +206,10 @@ class SpeakrApp:
     def toggle_learning(self):
         current = self.config.get("learning", "enabled")
         self.config.set("learning", "enabled", value=not current)
+
+    def toggle_screen_context(self):
+        current = self.config.get("screen_context", "enabled")
+        self.config.set("screen_context", "enabled", value=not current)
 
     def change_model(self, name):
         self.tray.set_state("loading", f"switching to {name}")

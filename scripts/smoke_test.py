@@ -164,6 +164,96 @@ def test_config_defaults():
     assert cfg.get("app_tones", "code.exe") == "literal"
 
 
+def test_silence_cut():
+    from speakr.streaming import find_silence_cut
+
+    rng = np.random.default_rng(0)
+    sr = 16000
+    speech = (rng.standard_normal(int(3.5 * sr)) * 0.1).astype(np.float32)
+    silence = (rng.standard_normal(int(0.7 * sr)) * 0.001).astype(np.float32)
+    tail = (rng.standard_normal(int(2.0 * sr)) * 0.1).astype(np.float32)
+    audio = np.concatenate([speech, silence, tail])
+    cut = find_silence_cut(audio, sr)
+    assert cut is not None, "no cut found"
+    assert len(speech) <= cut <= len(speech) + len(silence), f"cut {cut} outside silence"
+    # Continuous loud audio must NOT be cut mid-word.
+    assert find_silence_cut(np.concatenate([speech, tail]), sr) is None
+
+
+def test_notable_tokens():
+    from speakr.learning import extract_notable_tokens
+
+    tokens = extract_notable_tokens(
+        "Re: Kubernetes rollout — ping @sarah-jones about the GraphQL schema and JIRA-4521 today"
+    )
+    assert "Kubernetes" in tokens and "GraphQL" in tokens and "JIRA-4521" in tokens, tokens
+    assert "today" not in [t.lower() for t in tokens]
+    assert "about" not in [t.lower() for t in tokens]
+
+
+class _FakeRecorder:
+    """Recorder stand-in that exposes a fixed clip as if it were live."""
+
+    def __init__(self, audio, sample_rate=16000):
+        self._audio = audio
+        self.sample_rate = sample_rate
+
+    def recorded_samples(self):
+        return len(self._audio)
+
+    def snapshot(self):
+        return self._audio
+
+    def stop_recording(self):
+        return self._audio
+
+
+def test_streaming_equivalence():
+    import time
+
+    from speakr.config import Config
+    from speakr.dictionary import Dictionary
+    from speakr.streaming import DictationSession
+    from speakr.transcriber import Transcriber
+    import speakr.config as cfg_mod
+
+    wav_path = Path(sys.argv[1])
+    with wave.open(str(wav_path), "rb") as wf:
+        raw = wf.readframes(wf.getnframes())
+    clip = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    gap = np.zeros(int(0.7 * 16000), dtype=np.float32)
+    long_audio = np.concatenate([clip, gap, clip, gap, clip])
+
+    config = Config()
+    transcriber = Transcriber(config, Dictionary(cfg_mod.DICTIONARY_PATH))
+    transcriber.load()
+
+    reference = transcriber.transcribe(long_audio)
+
+    session = DictationSession(transcriber, _FakeRecorder(long_audio), config)
+    session.start()
+    deadline = time.monotonic() + 20
+    while session.committed == 0 and time.monotonic() < deadline:
+        time.sleep(0.25)
+    session.stop()
+    t0 = time.monotonic()
+    streamed = session.finalize()
+    finalize_s = time.monotonic() - t0
+
+    from difflib import SequenceMatcher
+    import re as re_mod
+
+    def words(t):
+        return re_mod.findall(r"[a-z0-9']+", t.lower())
+
+    similarity = SequenceMatcher(None, words(reference), words(streamed)).ratio()
+    print(f"        chunks committed mid-speech: {len(session.chunks) - 1}, "
+          f"finalize {finalize_s:.2f}s for {len(long_audio)/16000:.1f}s audio")
+    print(f"        similarity to single-pass: {similarity:.3f}")
+    assert session.committed > 0, "streaming never committed a chunk"
+    assert similarity >= 0.9, f"streamed text diverged: {streamed!r} vs {reference!r}"
+
+
 def test_transcription_e2e():
     from speakr.config import Config
     from speakr.dictionary import Dictionary
@@ -195,6 +285,8 @@ print("Speakr smoke test")
 check("imports", test_imports)
 check("formatter rules", test_formatter_rules)
 check("voice commands", test_voice_commands)
+check("silence-cut detection", test_silence_cut)
+check("notable-token extraction", test_notable_tokens)
 check("vocabulary learning", test_vocab_learning)
 check("ollama formatting", test_ollama_formatting)
 check("personal dictionary", test_dictionary)
@@ -203,8 +295,10 @@ check("clipboard roundtrip", test_clipboard_roundtrip)
 check("config defaults", test_config_defaults)
 if len(sys.argv) > 1:
     check("transcription end-to-end", test_transcription_e2e)
+    check("streaming equivalence", test_streaming_equivalence)
 else:
     print("  SKIP  transcription end-to-end (no wav path given)")
+    print("  SKIP  streaming equivalence (no wav path given)")
 
 print(f"\n{len(passed)} passed, {len(failed)} failed")
 sys.exit(1 if failed else 0)

@@ -74,6 +74,11 @@ class Tray:
                 lambda _icon, _item: app.toggle_learning(),
                 checked=lambda item: app.config.get("learning", "enabled"),
             ),
+            pystray.MenuItem(
+                "Screen context",
+                lambda _icon, _item: app.toggle_screen_context(),
+                checked=lambda item: app.config.get("screen_context", "enabled"),
+            ),
             pystray.MenuItem("Model", pystray.Menu(*model_items)),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Open config", lambda _icon, _item: app.open_config()),

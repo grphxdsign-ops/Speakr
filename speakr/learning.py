@@ -29,6 +29,31 @@ gonna want need let lets don didn won isn aren
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9'’\-]{2,}")
 
 
+def _looks_notable(token: str) -> bool:
+    return (
+        token[0].isupper()
+        or any(ch.isdigit() for ch in token)
+        or "-" in token
+        or any(ch.isupper() for ch in token[1:])  # CamelCase / acronyms
+    )
+
+
+def extract_notable_tokens(text: str, limit: int = 20) -> list[str]:
+    """Distinctive vocabulary (names, jargon, identifiers) from arbitrary
+    text — used to bias transcription toward what's on screen."""
+    out, seen = [], set()
+    for match in TOKEN_RE.finditer(text):
+        token = match.group(0)
+        lower = token.lower()
+        if lower in seen or lower in COMMON_WORDS or not _looks_notable(token):
+            continue
+        seen.add(lower)
+        out.append(token)
+        if len(out) >= limit:
+            break
+    return out
+
+
 class VocabLearner:
     def __init__(self, config, path):
         self.config = config
@@ -54,15 +79,7 @@ class VocabLearner:
                 if sentence_start:
                     continue  # capitalization there is grammar, not identity
                 lower = token.lower()
-                if lower in COMMON_WORDS:
-                    continue
-                looks_notable = (
-                    token[0].isupper()
-                    or any(ch.isdigit() for ch in token)
-                    or "-" in token
-                    or any(ch.isupper() for ch in token[1:])  # CamelCase / acronyms
-                )
-                if not looks_notable:
+                if lower in COMMON_WORDS or not _looks_notable(token):
                     continue
                 entry = self._entries.setdefault(lower, {"count": 0, "form": token})
                 entry["count"] += 1

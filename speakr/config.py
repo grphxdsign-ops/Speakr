@@ -46,6 +46,21 @@ DEFAULTS = {
     # Voice-activity threshold (0-1). Lower hears quiet speech better;
     # higher rejects more background noise.
     "vad_threshold": 0.35,
+    # Long dictations: transcribe committed chunks at natural pauses while
+    # you're still speaking, so release-to-text stays fast at any length.
+    "streaming": {
+        "enabled": True,
+        "chunk_seconds": 10,
+        "min_silence_seconds": 0.45,
+    },
+    # Read the focused control's text once per dictation (UI Automation) to
+    # bias transcription toward on-screen names/jargon. Local-only, held in
+    # memory for that one dictation. Windows only for now.
+    "screen_context": {
+        "enabled": True,
+        "max_chars": 1200,
+        "timeout_seconds": 1.0,
+    },
     "sample_rate": 16000,
     # null = system default input device; or a sounddevice index/name
     "input_device": None,

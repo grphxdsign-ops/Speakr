@@ -24,6 +24,7 @@ class AudioRecorder:
         self._preroll_total = 0
         self._stream = None
         self._frames = []
+        self._recorded_total = 0
         self._recording = False
         self._lock = threading.Lock()
 
@@ -33,6 +34,7 @@ class AudioRecorder:
         with self._lock:
             if self._recording:
                 self._frames.append(indata.copy())
+                self._recorded_total += len(indata)
             elif self.preroll_samples > 0:
                 self._preroll.append(indata.copy())
                 self._preroll_total += len(indata)
@@ -66,10 +68,24 @@ class AudioRecorder:
     def start_recording(self):
         with self._lock:
             self._frames = list(self._preroll)
+            self._recorded_total = self._preroll_total
             self._preroll.clear()
             self._preroll_total = 0
         self._open_stream()
         self._recording = True
+
+    def recorded_samples(self) -> int:
+        """Cheap poll of how much audio the current recording holds."""
+        with self._lock:
+            return self._recorded_total
+
+    def snapshot(self) -> np.ndarray:
+        """Copy of everything recorded so far, without stopping."""
+        with self._lock:
+            frames = list(self._frames)
+        if not frames:
+            return np.zeros(0, dtype=np.float32)
+        return np.concatenate(frames).flatten()
 
     def stop_recording(self) -> np.ndarray:
         self._recording = False
