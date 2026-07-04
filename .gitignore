@@ -1,7 +1,19 @@
 # Python environment
 .venv/
+.venv-train/
+.venv-gguf/
 __pycache__/
 *.pyc
+
+# LoRA fine-tune experiment artifacts (training/*.py scripts are kept and
+# committed; generated datasets, checkpoints, and exported models are not --
+# multi-GB and fully reproducible by re-running the scripts).
+training/*.jsonl
+training/adapter/
+training/adapter_final/
+training/merged/
+training/gguf/
+training/smoke_out/
 
 # Machine-specific / regenerated on first run.
 # config.json is excluded on purpose so each machine gets its own defaults
