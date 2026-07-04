@@ -86,8 +86,13 @@ DEFAULTS = {
         # Feed the last few dictations to the LLM as context (in memory only)
         "include_recent_context": True,
         "ollama_url": "http://127.0.0.1:11434",
-        "ollama_model": "llama3.2",
-        "timeout_seconds": 10,
+        # llama3.1:8b: benchmarked 12/12 on hard cases (chained corrections,
+        # instruction-injection resistance) vs 11/12 for llama3.2, at
+        # 0.4-1.2s/utterance once warm. Needs ~5GB RAM/VRAM. On a memory-
+        # constrained machine (e.g. 8GB Mac), set this back to "llama3.2"
+        # for speed — it's still solid on the easier majority of dictation.
+        "ollama_model": "llama3.1:8b",
+        "timeout_seconds": 15,
     },
     # Tone per foreground app: casual | formal | neutral | literal.
     # "literal" skips the LLM pass entirely (good for code/terminals).

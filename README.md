@@ -161,11 +161,30 @@ jira => Jira          # hard replacement after transcription
 
 ## AI formatting
 
-The LLM polish (self-corrections, lists, per-app tone) uses Ollama with
-`llama3.2` (already pulled). Speakr starts Ollama automatically if it isn't
-running, and re-detects it once a minute if it comes up later. Without it,
-rule-based cleanup still strips fillers, fixes spacing/capitalization, and
-honors the spoken layout commands.
+The LLM polish (self-corrections, lists, per-app tone, instruction-injection
+resistance) uses Ollama with **`llama3.1:8b`** — benchmarked against smaller
+and larger local models on a deliberately hard test set (chained
+corrections, nested list items, prompt-injection attempts) and won cleanly:
+12/12 vs 9/12 for the earlier `llama3.2` default, at 0.4–1.2s per dictation
+once warm — still well under Wispr Flow's published 2–4s cloud round trip.
+Pull it once: `ollama pull llama3.1:8b`.
+
+Speakr starts Ollama automatically if it isn't running, pre-warms the model
+at launch so the first real dictation isn't slow, and re-detects Ollama once
+a minute if it comes up later. Without Ollama, rule-based cleanup still
+strips fillers, fixes spacing/capitalization, and honors spoken layout
+commands.
+
+On a memory-constrained machine (e.g. an 8GB Mac), set
+`formatting.ollama_model` back to `"llama3.2"` (2GB, ~0.3-0.7s) — it's
+still solid on the everyday majority of dictation, just weaker on chained
+corrections.
+
+List formatting uses Ollama's structured-output mode (a JSON schema, not
+free-form prose) — the model only classifies list-intent and extracts
+items; a deterministic formatter in code does the actual numbering and
+typesetting. This avoids small models echoing prompt examples into your
+text, a failure mode hit and fixed during development.
 
 ## GPU
 

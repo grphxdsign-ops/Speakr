@@ -123,6 +123,13 @@ def test_ollama_formatting():
     print(f"        inline: {inline!r}")
     assert "\n" not in inline, f"list wrongly forced on flowing sentence: {inline!r}"
 
+    chained = formatter.format("call John, no wait Mike, actually just call Dave instead", ctx)
+    print(f"        chained correction: {chained!r}")
+    assert "dave" in chained.lower(), f"chained correction lost final target: {chained!r}"
+    assert "john" not in chained.lower() and "mike" not in chained.lower(), (
+        f"chained correction kept a retracted name: {chained!r}"
+    )
+
     # A dictated question must pass through cleaned — never be answered.
     from speakr.formatter import looks_like_answer
 
