@@ -1,0 +1,25 @@
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+
+# Machine-specific / regenerated on first run.
+# config.json is excluded on purpose so each machine gets its own defaults
+# (e.g. the Mac generates a config with the fn hotkey instead of Right Ctrl).
+config.json
+speakr.log
+.speakr.lock
+
+# Personal data — never publish. Both regenerate empty on first run.
+# Copy them between your own machines by hand if you want them to follow you.
+dictionary.txt
+learned_words.json
+
+# Editor / tooling
+.claude/
+.DS_Store
+Thumbs.db
+
+# Test scratch files
+scripts/_*.json
+scripts/_*.txt

@@ -1,0 +1,4 @@
+# Optional: GPU transcription. Installs NVIDIA CUDA 12 runtime DLLs into the
+# venv so faster-whisper can use the graphics card. CPU works fine without.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
