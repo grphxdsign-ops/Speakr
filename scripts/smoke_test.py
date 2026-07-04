@@ -114,6 +114,15 @@ def test_ollama_formatting():
     print(f"        list: {listed!r}")
     assert listed.count("\n") >= 2, f"expected multi-line list, got: {listed!r}"
 
+    numbered = formatter.format("i need to buy 3 things, an apple, orange, and banana", ctx)
+    print(f"        numbered: {numbered!r}")
+    assert "1. Apple\n2. Orange\n3. Banana" in numbered, f"numbered list wrong: {numbered!r}"
+    assert ":\n\n" in numbered, f"missing blank line after intro: {numbered!r}"
+
+    inline = formatter.format("We grabbed coffee, toast, and eggs before our flight.", ctx)
+    print(f"        inline: {inline!r}")
+    assert "\n" not in inline, f"list wrongly forced on flowing sentence: {inline!r}"
+
     # A dictated question must pass through cleaned — never be answered.
     from speakr.formatter import looks_like_answer
 

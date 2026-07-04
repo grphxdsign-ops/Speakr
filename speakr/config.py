@@ -4,10 +4,13 @@ import copy
 import json
 import logging
 import logging.handlers
+import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+# SPEAKR_HOME overrides where user data (config, dictionary, learned words,
+# log) lives — the Mac .app launcher points it at Application Support.
+ROOT = Path(os.environ.get("SPEAKR_HOME") or Path(__file__).resolve().parent.parent)
 CONFIG_PATH = ROOT / "config.json"
 DICTIONARY_PATH = ROOT / "dictionary.txt"
 LEARNED_PATH = ROOT / "learned_words.json"

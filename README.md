@@ -69,7 +69,29 @@ gray = loading/disabled.
 
 Use `run_debug.bat` to run with a console and live logs.
 
-## Quick start — macOS
+## Quick start — macOS (as a real app)
+
+```
+git clone https://github.com/grphxdsign-ops/Speakr.git
+cd Speakr
+bash package_mac.sh
+mv dist/Speakr.app /Applications/
+open /Applications/Speakr.app
+```
+
+- First launch sets up its Python environment and downloads the model — give
+  it a few minutes; the mic icon appears in the menu bar when ready.
+  Progress logs: `~/Library/Application Support/Speakr/setup.log`.
+- Grant the permissions macOS prompts for — they're attributed to **Speakr**
+  itself now (Microphone, Input Monitoring, Accessibility under System
+  Settings → Privacy & Security). Quit and reopen Speakr after granting.
+- Your config, dictionary, learned words, and logs live in
+  `~/Library/Application Support/Speakr/` — updating the app never touches
+  them. To update: `git pull && bash package_mac.sh` and replace the app.
+- Start at login: System Settings → General → Login Items → add Speakr.
+- No Dock icon by design — it's a menu-bar app.
+
+## Quick start — macOS (from Terminal instead)
 
 1. Clone it (the repo excludes machine-specific files by design, so a fresh
    clone is exactly what you want):

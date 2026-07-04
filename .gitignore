@@ -15,6 +15,9 @@ speakr.log
 dictionary.txt
 learned_words.json
 
+# Build output
+dist/
+
 # Editor / tooling
 .claude/
 .DS_Store
