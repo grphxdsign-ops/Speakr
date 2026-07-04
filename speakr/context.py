@@ -22,6 +22,20 @@ def get_screen_context(max_chars=1200, timeout=1.0) -> str:
     thread.join(timeout)
     return result.get("text", "")
 
+
+def get_selected_text(max_chars=4000, timeout=1.0) -> str:
+    """Currently selected text in the focused control (for Edit Mode), with
+    the same thread+timeout budget as get_screen_context."""
+    result = {}
+
+    def worker():
+        result["text"] = _read_selected_text(max_chars)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    return result.get("text", "")
+
 if sys.platform == "darwin":
 
     def get_active_app() -> dict:
@@ -52,6 +66,10 @@ if sys.platform == "darwin":
 
     def _read_focused_text(max_chars) -> str:
         # macOS equivalent (AXUIElement) not implemented yet.
+        return ""
+
+    def _read_selected_text(max_chars) -> str:
+        # macOS equivalent (AXSelectedText) not implemented yet.
         return ""
 
 else:
@@ -138,4 +156,42 @@ else:
             return (element.CurrentName or "")[:max_chars]
         except Exception as exc:
             log.debug("Screen-text capture unavailable: %s", exc)
+            return ""
+
+    def _read_selected_text(max_chars) -> str:
+        """Selected text of the focused control via UIA TextPattern."""
+        try:
+            import comtypes
+            import comtypes.client
+
+            try:
+                comtypes.CoInitialize()
+            except OSError:
+                pass
+            comtypes.client.GetModule("UIAutomationCore.dll")
+            from comtypes.gen.UIAutomationClient import (
+                CUIAutomation,
+                IUIAutomation,
+                IUIAutomationTextPattern,
+            )
+
+            uia = comtypes.CoCreateInstance(
+                CUIAutomation._reg_clsid_, interface=IUIAutomation,
+                clsctx=comtypes.CLSCTX_INPROC_SERVER,
+            )
+            element = uia.GetFocusedElement()
+            if not element:
+                return ""
+            UIA_TEXT_PATTERN = 10014
+            pattern = element.GetCurrentPattern(UIA_TEXT_PATTERN)
+            if not pattern:
+                return ""
+            text_pattern = pattern.QueryInterface(IUIAutomationTextPattern)
+            selection = text_pattern.GetSelection()
+            if not selection or selection.Length == 0:
+                return ""
+            text = selection.GetElement(0).GetText(max_chars) or ""
+            return text
+        except Exception as exc:
+            log.debug("Selection capture unavailable: %s", exc)
             return ""

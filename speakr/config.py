@@ -34,7 +34,8 @@ DEFAULTS = {
     "compute_type": "auto",
     # null = auto-detect language; or a code like "en"
     "language": None,
-    "beam_size": 1,
+    # "auto" = beam 5 on GPU (noticeably better word accuracy), 1 on CPU
+    "beam_size": "auto",
     # "paste" (clipboard + Ctrl+V, most compatible) or "type" (simulated keystrokes)
     "injection": "paste",
     "restore_clipboard": True,
@@ -63,6 +64,19 @@ DEFAULTS = {
         "enabled": True,
         "max_chars": 1200,
         "timeout_seconds": 1.0,
+    },
+    # Edit Mode (inspired by FreeFlow): if text is SELECTED when you press
+    # the hotkey, your dictation is treated as an instruction to transform it
+    # ("make this shorter", "turn this into bullets") and the selection is
+    # replaced with the result. Windows only for now.
+    "edit_mode": {
+        "enabled": True,
+        "max_chars": 4000,
+        # For apps whose controls don't expose selection via UI Automation
+        # (classic Notepad etc.): detect the selection by briefly sending
+        # Ctrl+C with a clipboard sentinel. Clipboard is always restored.
+        # Automatically skipped in literal-tone apps (terminals/editors).
+        "clipboard_fallback": True,
     },
     "sample_rate": 16000,
     # null = system default input device; or a sounddevice index/name

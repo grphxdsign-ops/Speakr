@@ -48,6 +48,7 @@ MODIFIER_FLAGS = {
 }
 
 KEY_V = 9  # kVK_ANSI_V
+KEY_C = 8  # kVK_ANSI_C
 
 
 class HotkeyListener:
@@ -126,13 +127,21 @@ class HotkeyListener:
             Quartz.CFRunLoopStop(self._loop)
 
 
-def send_paste():
+def _send_cmd_key(keycode):
     source = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
     for down in (True, False):
-        event = Quartz.CGEventCreateKeyboardEvent(source, KEY_V, down)
+        event = Quartz.CGEventCreateKeyboardEvent(source, keycode, down)
         Quartz.CGEventSetFlags(event, Quartz.kCGEventFlagMaskCommand)
         Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
         time.sleep(0.01)
+
+
+def send_paste():
+    _send_cmd_key(KEY_V)
+
+
+def send_copy():
+    _send_cmd_key(KEY_C)
 
 
 def type_text(text):

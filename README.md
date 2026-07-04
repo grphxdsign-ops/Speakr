@@ -56,6 +56,18 @@ Everything runs on this machine. The only network access, ever:
   once a word shows up 3 times it's fed to the transcriber as a hint, so
   recognition of *your* vocabulary improves the more you dictate. Toggle via
   tray → "Learn vocabulary".
+- **Edit Mode** (Windows) — select existing text anywhere, hold the hotkey,
+  and speak an instruction instead of dictation: "make this shorter", "turn
+  this into bullets", "make it more formal". The selection is replaced with
+  the transformed text; if the edit can't run, your selection is left
+  untouched. Uses UI Automation to read the selection, with a
+  clipboard-based fallback for apps that don't expose it (your clipboard is
+  always restored). Disabled automatically in terminals/code editors.
+  Toggle via tray → "Edit selected text".
+- **Mic self-healing** — if Windows switches audio devices while Speakr is
+  running (headset on/off, a game grabbing the mic), the stale stream is
+  detected and reopened automatically; if a recording comes back mostly
+  empty, the tray tells you to dictate again instead of silently failing.
 
 ## Quick start — Windows
 
@@ -132,6 +144,8 @@ Created next to the app on first run. Highlights:
 | `vad_threshold` | `0.35` | Lower hears quiet speech better; raise toward `0.5` in noisy rooms. |
 | `device` | `"auto"` | Tries the GPU, verifies it actually works, falls back to CPU. |
 | `language` | `null` | Auto-detect. Set e.g. `"en"` to pin it and save a little latency. |
+| `beam_size` | `"auto"` | Beam-search width for transcription: 5 on GPU (noticeably better word accuracy), 1 on CPU (speed). |
+| `edit_mode` | on | Selected text + spoken instruction = transformation (see features). `clipboard_fallback` controls the Ctrl+C-based capture for non-UIA apps. |
 | `injection` | `"paste"` | `"paste"` = clipboard + Ctrl+V (most compatible). `"type"` = simulated keystrokes. |
 | `keep_mic_stream_open` | `true` | Lower latency, but the mic indicator stays on. Set `false` to open the mic only while the hotkey is held. |
 | `formatting.use_ollama` | `true` | Used only if Ollama is running at `ollama_url`. Otherwise rule-based cleanup applies. |

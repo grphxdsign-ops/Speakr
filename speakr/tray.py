@@ -79,6 +79,11 @@ class Tray:
                 lambda _icon, _item: app.toggle_screen_context(),
                 checked=lambda item: app.config.get("screen_context", "enabled"),
             ),
+            pystray.MenuItem(
+                "Edit selected text",
+                lambda _icon, _item: app.toggle_edit_mode(),
+                checked=lambda item: app.config.get("edit_mode", "enabled"),
+            ),
             pystray.MenuItem("Model", pystray.Menu(*model_items)),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Open config", lambda _icon, _item: app.open_config()),

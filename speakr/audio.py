@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import time
 from collections import deque
 
 import numpy as np
@@ -26,9 +27,11 @@ class AudioRecorder:
         self._frames = []
         self._recorded_total = 0
         self._recording = False
+        self._last_frame_at = 0.0  # monotonic time of the last mic callback
         self._lock = threading.Lock()
 
     def _callback(self, indata, frames, time_info, status):
+        self._last_frame_at = time.monotonic()
         if status:
             log.warning("Audio stream status: %s", status)
         with self._lock:
@@ -52,6 +55,7 @@ class AudioRecorder:
             callback=self._callback,
         )
         self._stream.start()
+        self._last_frame_at = time.monotonic()
         log.info("Mic stream opened (device=%s)", self.input_device or "default")
 
     def _close_stream(self):
@@ -65,7 +69,38 @@ class AudioRecorder:
         if self.keep_stream_open:
             self._open_stream()
 
+    def _stream_is_stale(self) -> bool:
+        """A long-open stream can die silently when the Windows default audio
+        device changes (headset plugged in, a game grabbing the device) — the
+        callback just stops firing, so recordings capture only stale pre-roll.
+        Observed in the wild: multi-second dictations arriving as 0.7-1.0s of
+        nothing. Detect it by checking whether frames are still flowing."""
+        return (
+            self._stream is not None
+            and time.monotonic() - self._last_frame_at > 1.0
+        )
+
+    def reset_stream(self):
+        """Force-close so the next open re-binds to the CURRENT default device."""
+        log.warning("Resetting mic stream (stale or unhealthy)")
+        with self._lock:
+            self._preroll.clear()
+            self._preroll_total = 0
+        self._close_stream()
+        if self.keep_stream_open:
+            try:
+                self._open_stream()
+            except Exception as exc:
+                log.error("Mic stream reopen failed: %s", exc)
+
     def start_recording(self):
+        if self._stream_is_stale():
+            log.warning(
+                "Mic stream stale (no frames for %.1fs) — reopening to pick up "
+                "the current default device",
+                time.monotonic() - self._last_frame_at,
+            )
+            self._close_stream()  # _open_stream below re-binds to current default
         with self._lock:
             self._frames = list(self._preroll)
             self._recorded_total = self._preroll_total

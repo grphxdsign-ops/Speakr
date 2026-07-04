@@ -39,5 +39,9 @@ def send_paste():
     keyboard.send("ctrl+v")
 
 
+def send_copy():
+    keyboard.send("ctrl+c")
+
+
 def type_text(text):
     keyboard.write(text, delay=0.002)

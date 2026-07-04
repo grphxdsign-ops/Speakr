@@ -10,10 +10,10 @@ import time
 from speakr import config as cfg_mod
 from speakr.audio import AudioRecorder
 from speakr.config import Config, setup_logging
-from speakr.context import get_active_app, get_screen_context
+from speakr.context import get_active_app, get_screen_context, get_selected_text
 from speakr.dictionary import Dictionary
 from speakr.formatter import Formatter
-from speakr.injector import inject
+from speakr.injector import inject, read_selection_via_clipboard
 from speakr.inputs import HotkeyListener
 from speakr.learning import VocabLearner, extract_notable_tokens
 from speakr.streaming import DictationSession
@@ -132,6 +132,17 @@ class SpeakrApp:
 
     def _capture_context(self, session):
         context = get_active_app()
+        em = self.config.get("edit_mode", default={})
+        tone = self.config.get("app_tones", context.get("exe", ""), default="neutral")
+        # Never in literal-tone apps: Ctrl+C is an interrupt in terminals, and
+        # code editors copy the whole line when nothing is selected.
+        if em.get("enabled", True) and tone != "literal":
+            selected = get_selected_text(max_chars=em.get("max_chars", 4000))
+            if not selected.strip() and em.get("clipboard_fallback", True):
+                # Apps without UIA selection support (classic Edit controls)
+                selected = read_selection_via_clipboard()[: em.get("max_chars", 4000)]
+            if selected.strip():
+                context["selected_text"] = selected
         sc = self.config.get("screen_context", default={})
         if sc.get("enabled", True):
             screen_text = get_screen_context(
@@ -150,6 +161,18 @@ class SpeakrApp:
             return
         session.stop()
         duration = session.duration()
+        held = time.monotonic() - self._record_started_at
+        # Captured far less audio than the key was held: the mic stream died
+        # mid-recording (device change/game grabbing audio). Don't transcribe
+        # garbage — reset the stream and tell the user to retry.
+        if held > 1.5 and duration < held * 0.4:
+            self.log.error(
+                "Mic captured only %.1fs of a %.1fs hold — stream unhealthy, resetting",
+                duration, held,
+            )
+            self.recorder.reset_stream()
+            self.tray.set_state("error", "mic hiccup — reconnected, please dictate again")
+            return
         if duration < self.config.get("min_duration_seconds"):
             self.log.info("Ignoring %.2fs tap", duration)
             self.tray.set_state("idle")
@@ -170,7 +193,27 @@ class SpeakrApp:
                     self.tray.set_state("processing", "waiting for model")
                 text = session.finalize()
                 t_asr = time.monotonic()
-                if text:
+                selected = app_context.get("selected_text", "")
+                if text and selected:
+                    # Edit Mode: the dictation is an instruction to transform
+                    # the selected text. Pasting replaces the selection.
+                    edited = self.formatter.edit(text, selected, app_context)
+                    t_fmt = time.monotonic()
+                    if edited is None:
+                        self.log.warning("Edit mode unavailable/failed; selection left untouched")
+                        self.tray.set_state("error", "edit failed — selection unchanged")
+                        continue
+                    inject(
+                        edited,
+                        method=self.config.get("injection"),
+                        restore_clipboard=self.config.get("restore_clipboard"),
+                    )
+                    self.log.info(
+                        "Edit mode: %d chars -> %d chars in %s in %.2fs (asr %.2f, edit %.2f)",
+                        len(selected), len(edited), app_context.get("exe") or "unknown app",
+                        time.monotonic() - started, t_asr - started, t_fmt - t_asr,
+                    )
+                elif text:
                     text = self.formatter.format(text, app_context)
                     text = self.dictionary.apply(text)
                     t_fmt = time.monotonic()
@@ -210,6 +253,10 @@ class SpeakrApp:
     def toggle_screen_context(self):
         current = self.config.get("screen_context", "enabled")
         self.config.set("screen_context", "enabled", value=not current)
+
+    def toggle_edit_mode(self):
+        current = self.config.get("edit_mode", "enabled")
+        self.config.set("edit_mode", "enabled", value=not current)
 
     def change_model(self, name):
         self.tray.set_state("loading", f"switching to {name}")

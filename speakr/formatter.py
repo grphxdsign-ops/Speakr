@@ -77,6 +77,20 @@ RESPONSE_SCHEMA = {
     "required": ["cleaned", "is_list"],
 }
 
+EDIT_SYSTEM_PROMPT = """You transform a piece of TEXT by applying the user's spoken INSTRUCTION to it, and reply with a JSON object: {{"edited": "<the transformed text>"}}.
+
+Rules:
+1. Apply ONLY what the instruction asks (shorten, expand, reword, change tone, turn into a list, fix grammar, translate, ...). Keep everything else — names, numbers, facts, formatting the instruction doesn't touch — exactly as in the original.
+2. "edited" is the full replacement for the TEXT. Never include commentary, preamble, or the instruction itself.
+3. If the instruction doesn't make sense as a text transformation, return the original text unchanged.
+Tone context: the text lives in {exe}."""
+
+EDIT_SCHEMA = {
+    "type": "object",
+    "properties": {"edited": {"type": "string"}},
+    "required": ["edited"],
+}
+
 _LEADING_JUNK_RE = re.compile(r"^(?:(?:and|then|also)\s+)?(?:(?:a|an|the|some)\s+)?", re.IGNORECASE)
 
 
@@ -167,6 +181,47 @@ class Formatter:
         if self.config.get("voice_commands", default=True):
             out = apply_voice_commands(out)
         return out.strip()
+
+    def edit(self, instruction: str, selected_text: str, app_context: dict | None) -> str | None:
+        """Edit Mode: apply a spoken instruction to the selected text.
+        Returns the replacement text, or None if the edit can't run safely
+        (no LLM, bad output) — the caller must then leave the selection alone
+        rather than paste over it."""
+        fmt = self.config.get("formatting", default={})
+        if not (fmt.get("enabled", True) and fmt.get("use_ollama", True) and self._ollama_available()):
+            return None
+        exe = (app_context or {}).get("exe", "unknown app")
+        try:
+            resp = requests.post(
+                f"{fmt['ollama_url']}/api/chat",
+                json={
+                    "model": fmt["ollama_model"],
+                    "stream": False,
+                    "keep_alive": fmt.get("keep_alive", "10m"),
+                    "format": EDIT_SCHEMA,
+                    "options": {"temperature": 0.1},
+                    "messages": [
+                        {"role": "system", "content": EDIT_SYSTEM_PROMPT.format(exe=exe)},
+                        {
+                            "role": "user",
+                            "content": f'INSTRUCTION: {instruction}\n\nTEXT:\n"""\n{selected_text}\n"""',
+                        },
+                    ],
+                },
+                timeout=max(fmt.get("timeout_seconds", 15), 30),  # edits can be longer-form
+            )
+            resp.raise_for_status()
+            import json as json_mod
+
+            edited = (json_mod.loads(resp.json()["message"]["content"]).get("edited") or "").strip()
+        except (requests.RequestException, KeyError, ValueError) as exc:
+            log.warning("Edit-mode request failed: %s", exc)
+            self._ollama_ok = None
+            return None
+        if not edited:
+            log.warning("Edit-mode produced empty output; leaving selection untouched")
+            return None
+        return edited
 
     # ----- ollama ----------------------------------------------------------
 

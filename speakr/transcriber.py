@@ -117,6 +117,14 @@ class Transcriber:
             parts.append(prior_text[-200:])
         return " ".join(parts) or None
 
+    def _beam_size(self) -> int:
+        """"auto" = beam 5 on GPU (better word accuracy, still ~fast) and
+        greedy on CPU (beam search there costs real seconds)."""
+        configured = self.config.get("beam_size", default="auto")
+        if configured == "auto":
+            return 5 if self.device_in_use == "cuda" else 1
+        return int(configured)
+
     def transcribe(self, audio, sample_rate=16000, extra_hints=None, prior_text="") -> str:
         self._ready.wait()
         prompt = self._initial_prompt(extra_hints, prior_text)
@@ -127,7 +135,7 @@ class Transcriber:
         segments, info = self._model.transcribe(
             audio,
             language=self.config.get("language"),
-            beam_size=self.config.get("beam_size", default=1),
+            beam_size=self._beam_size(),
             vad_filter=True,
             # Gentler VAD than the defaults: don't drop quiet speech, and pad
             # segment edges so soft starts/ends aren't clipped.
