@@ -3,8 +3,10 @@
 1. Hard-case suite (training/hard_cases.py) -- the same 12 adversarial
    checks used to pick llama3.1:8b as the pre-fine-tune default.
 2. Held-out agreement -- similarity to the llama3.1:8b teacher's output on
-   dataset_eval_raw.jsonl, which was generated with a DIFFERENT random seed
-   than the training set, so this measures generalization, not memorization.
+   dataset_test_raw.jsonl, which was generated with a DIFFERENT random seed
+   than both the training set and the early-stopping validation set, so this
+   measures genuine generalization, not memorization or validation-set
+   leakage through checkpoint selection.
 
 Usage: python evaluate.py speakr-format llama3.2 llama3.1:8b
 """
@@ -72,7 +74,7 @@ def main():
         print("Usage: python evaluate.py <model> [<model> ...]")
         sys.exit(1)
 
-    eval_path = Path(__file__).parent / "dataset_eval_raw.jsonl"
+    eval_path = Path(__file__).parent / "dataset_test_raw.jsonl"
     rows = [json.loads(l) for l in eval_path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
     print(f"Computing teacher ({TEACHER_MODEL}) reference outputs on {len(rows)} held-out examples...")
