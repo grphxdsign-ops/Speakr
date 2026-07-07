@@ -91,7 +91,14 @@ h1 .ch{display:inline-block;opacity:0;transform:translateY(.55em) rotateX(45deg)
 h1 .ch.in{animation:chIn .7s cubic-bezier(.2,.75,.2,1) forwards}
 @keyframes chIn{to{opacity:1;transform:none;filter:blur(0)}}
 .grad{filter:drop-shadow(0 0 34px rgba(120,110,255,.35))}
-.grad .ch{-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.grad .ch{-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;
+  /* h1's tight line-height (.96) makes this inline-block's own box shorter
+     than the font size, so a background sized to "100% 100%" of it stops
+     above descenders (the "y"/"p" tails paint transparent = look cut off).
+     A taller box gives the background room to cover the full glyph; the
+     line still reads tight because h1's line-height (the strut) — not this
+     inner box — governs the gap between the two heading lines. */
+  line-height:1.2}
 .sub{margin-top:26px;font-size:clamp(1rem,2vw,1.3rem);color:var(--dim);max-width:620px;line-height:1.55;
   opacity:0;animation:fadeUp .9s 1s cubic-bezier(.2,.7,.2,1) forwards}
 .sub b{color:var(--ink);font-weight:500}
