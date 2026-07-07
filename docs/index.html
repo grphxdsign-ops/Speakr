@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speakr — Local voice dictation for Mac &amp; Windows</title>
+<meta name="description" content="Hold a key. Speak. It's typed. Fully local voice dictation for macOS and Windows — no audio or text ever leaves your machine.">
+<meta property="og:title" content="Speakr — Speak it. It's typed.">
+<meta property="og:description" content="Fully local voice dictation for Mac & Windows. Your voice never leaves this machine.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://speakr.cloud/">
+<link rel="canonical" href="https://speakr.cloud/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234D9FFF'/%3E%3Cstop offset='1' stop-color='%238B5CF6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='32' cy='32' r='30' fill='url(%23g)'/%3E%3Crect x='25' y='13' width='14' height='26' rx='7' fill='white'/%3E%3Cpath d='M18 34a14 14 0 0 0 28 0' stroke='white' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M32 48v6M24 54h16' stroke='white' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#04050a;
+  --bg2:#080a14;
+  --ink:#eef1fb;
+  --dim:#8a92ad;
+  --blue:#4d9fff;
+  --violet:#8b5cf6;
+  --pink:#c084fc;
+  --line:rgba(140,160,255,.12);
+  --glass:rgba(16,20,38,.55);
+  --font:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--font);
+  overflow-x:hidden;
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:rgba(139,92,246,.45);color:#fff}
+a{color:inherit;text-decoration:none}
+
+/* ---------- backdrop layers ---------- */
+.aurora{position:fixed;inset:-20%;z-index:0;pointer-events:none;filter:blur(90px);opacity:.55}
+.aurora span{position:absolute;border-radius:50%;mix-blend-mode:screen;will-change:transform}
+.aurora .a1{width:55vw;height:55vw;left:-10vw;top:-12vw;background:radial-gradient(circle,rgba(45,90,255,.55),transparent 65%);animation:drift1 26s ease-in-out infinite alternate}
+.aurora .a2{width:48vw;height:48vw;right:-12vw;top:6vw;background:radial-gradient(circle,rgba(139,92,246,.5),transparent 65%);animation:drift2 32s ease-in-out infinite alternate}
+.aurora .a3{width:42vw;height:42vw;left:22vw;bottom:-18vw;background:radial-gradient(circle,rgba(192,132,252,.32),transparent 65%);animation:drift3 38s ease-in-out infinite alternate}
+@keyframes drift1{to{transform:translate(9vw,7vw) scale(1.15)}}
+@keyframes drift2{to{transform:translate(-8vw,10vw) scale(.9)}}
+@keyframes drift3{to{transform:translate(6vw,-9vw) scale(1.2)}}
+#stars{position:fixed;inset:0;z-index:0;pointer-events:none}
+.grid{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(120,140,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(120,140,255,.05) 1px,transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(ellipse 90% 70% at 50% 20%,#000 30%,transparent 75%);
+  -webkit-mask-image:radial-gradient(ellipse 90% 70% at 50% 20%,#000 30%,transparent 75%);
+}
+.grain{position:fixed;inset:0;z-index:40;pointer-events:none;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E")}
+#glow{position:fixed;width:520px;height:520px;border-radius:50%;z-index:1;pointer-events:none;
+  background:radial-gradient(circle,rgba(90,130,255,.14),rgba(139,92,246,.07) 45%,transparent 70%);
+  transform:translate(-50%,-50%);mix-blend-mode:screen;left:50%;top:30%;transition:opacity .5s}
+
+/* ---------- nav ---------- */
+nav{position:fixed;top:0;left:0;right:0;z-index:30;display:flex;align-items:center;justify-content:space-between;
+  padding:18px clamp(20px,4vw,48px);
+  background:linear-gradient(rgba(4,5,10,.72),transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.15rem;letter-spacing:-.02em}
+.brand svg{width:30px;height:30px;filter:drop-shadow(0 0 12px rgba(99,132,255,.6))}
+.gh{display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--dim);border:1px solid var(--line);
+  padding:8px 16px;border-radius:99px;transition:.3s;background:rgba(10,12,24,.4)}
+.gh:hover{color:var(--ink);border-color:rgba(140,160,255,.4);box-shadow:0 0 24px rgba(99,132,255,.25)}
+.gh svg{width:16px;height:16px;fill:currentColor}
+
+/* ---------- hero ---------- */
+main{position:relative;z-index:2}
+.hero{min-height:100svh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:120px 20px 48px;position:relative}
+.eyebrow{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;
+  text-transform:uppercase;color:#9db4ff;border:1px solid rgba(120,150,255,.25);padding:9px 18px;border-radius:99px;
+  background:rgba(30,45,120,.18);box-shadow:0 0 30px rgba(70,100,255,.12) inset,0 0 24px rgba(70,100,255,.1);
+  opacity:0;animation:fadeUp .9s .15s cubic-bezier(.2,.7,.2,1) forwards}
+.eyebrow .dot{width:7px;height:7px;border-radius:50%;background:#5eff9d;box-shadow:0 0 10px #5eff9d;animation:pulse 2.2s infinite}
+@keyframes pulse{50%{opacity:.35}}
+h1{font-size:clamp(3.4rem,11.5vw,9.5rem);line-height:.96;font-weight:700;letter-spacing:-.045em;margin-top:30px;
+  text-wrap:balance;perspective:800px}
+h1 .ln{display:block}
+h1 .ch{display:inline-block;opacity:0;transform:translateY(.55em) rotateX(45deg);filter:blur(10px);white-space:pre}
+h1 .ch.in{animation:chIn .7s cubic-bezier(.2,.75,.2,1) forwards}
+@keyframes chIn{to{opacity:1;transform:none;filter:blur(0)}}
+.grad{filter:drop-shadow(0 0 34px rgba(120,110,255,.35))}
+.grad .ch{-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.sub{margin-top:26px;font-size:clamp(1rem,2vw,1.3rem);color:var(--dim);max-width:620px;line-height:1.55;
+  opacity:0;animation:fadeUp .9s 1s cubic-bezier(.2,.7,.2,1) forwards}
+.sub b{color:var(--ink);font-weight:500}
+@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+
+/* ---------- demo ---------- */
+.demo{margin-top:44px;width:min(760px,94vw);opacity:0;animation:fadeUp 1s 1.25s cubic-bezier(.2,.7,.2,1) forwards}
+.stage{position:relative;border:1px solid var(--line);border-radius:22px;background:var(--glass);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  box-shadow:0 24px 80px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.02) inset,0 0 60px rgba(80,100,255,.07);
+  padding:22px 26px 18px;overflow:hidden;transition:box-shadow .4s,border-color .4s}
+.stage.live{border-color:rgba(120,150,255,.45);box-shadow:0 24px 90px rgba(20,30,90,.65),0 0 70px rgba(100,120,255,.22)}
+.stage .bar{display:flex;align-items:center;gap:7px;margin-bottom:8px}
+.stage .bar i{width:10px;height:10px;border-radius:50%;background:#2a3050}
+.stage .bar i:nth-child(1){background:#ff5f57}.stage .bar i:nth-child(2){background:#febc2e}.stage .bar i:nth-child(3){background:#28c840}
+.stage .bar em{font-family:var(--mono);font-style:normal;font-size:.66rem;color:#4a527a;margin-left:auto;letter-spacing:.1em}
+#wave{display:block;width:100%;height:110px}
+.line{display:flex;align-items:center;gap:10px;margin-top:8px;padding:13px 16px;border-radius:12px;
+  background:rgba(6,8,18,.7);border:1px solid rgba(120,140,255,.1);font-family:var(--mono);font-size:.88rem;
+  text-align:left;min-height:48px;color:var(--ink)}
+.line .mic{flex:none;width:9px;height:9px;border-radius:50%;background:#39406b;transition:.3s}
+.line.rec .mic{background:#ff4d6a;box-shadow:0 0 12px #ff4d6a;animation:pulse 1s infinite}
+.line .txt{white-space:pre-wrap;word-break:break-word}
+.line .txt .ph{color:#535b85}
+.caret{display:inline-block;width:8px;height:1.1em;background:var(--blue);vertical-align:text-bottom;
+  margin-left:2px;animation:blink 1s steps(1) infinite;box-shadow:0 0 8px var(--blue)}
+@keyframes blink{50%{opacity:0}}
+.hint{margin-top:14px;display:flex;justify-content:center;align-items:center;gap:10px;font-family:var(--mono);
+  font-size:.72rem;color:#69719c;letter-spacing:.08em}
+kbd{font-family:var(--mono);font-size:.7rem;color:#c7d2ff;background:linear-gradient(#1b2140,#12162c);
+  border:1px solid rgba(140,160,255,.3);border-bottom-width:3px;border-radius:7px;padding:4px 14px;
+  box-shadow:0 0 18px rgba(90,110,255,.15)}
+kbd.down{transform:translateY(2px);border-bottom-width:1px;background:#2a3468;color:#fff}
+.holdbtn{display:none;margin:14px auto 0;padding:12px 26px;border-radius:99px;border:1px solid rgba(140,160,255,.35);
+  background:linear-gradient(120deg,rgba(45,90,255,.25),rgba(139,92,246,.25));color:var(--ink);
+  font-family:var(--mono);font-size:.78rem;letter-spacing:.08em;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none}
+
+/* ---------- downloads ---------- */
+.downloads{margin-top:46px;display:flex;gap:18px;flex-wrap:wrap;justify-content:center;
+  opacity:0;animation:fadeUp 1s 1.45s cubic-bezier(.2,.7,.2,1) forwards}
+.dl{position:relative;display:flex;align-items:center;gap:16px;padding:20px 30px;border-radius:18px;
+  min-width:264px;overflow:hidden;isolation:isolate;
+  border:1px solid rgba(140,160,255,.22);background:linear-gradient(150deg,rgba(22,28,58,.85),rgba(10,12,26,.85));
+  transition:border-color .35s,box-shadow .35s;will-change:transform}
+.dl:hover{border-color:rgba(150,170,255,.55);box-shadow:0 18px 60px rgba(20,30,110,.5),0 0 44px rgba(100,120,255,.28)}
+.dl::before{content:"";position:absolute;inset:0;z-index:-1;
+  background:linear-gradient(120deg,transparent 30%,rgba(255,255,255,.09) 50%,transparent 70%);
+  transform:translateX(-120%);transition:transform .8s ease}
+.dl:hover::before{transform:translateX(120%)}
+.dl svg{width:34px;height:34px;fill:var(--ink);flex:none;filter:drop-shadow(0 0 10px rgba(120,140,255,.5))}
+.dl .t{text-align:left}
+.dl .t small{display:block;font-family:var(--mono);font-size:.64rem;color:#7b84ab;letter-spacing:.1em;text-transform:uppercase}
+.dl .t span{font-size:1.22rem;font-weight:700;letter-spacing:-.02em}
+.dl .t em{display:block;font-style:normal;font-size:.72rem;color:#69719c;margin-top:3px;font-family:var(--mono)}
+.dl .badge{position:absolute;top:-1px;right:16px;font-family:var(--mono);font-size:.58rem;letter-spacing:.12em;
+  text-transform:uppercase;color:#04050a;background:linear-gradient(90deg,var(--blue),var(--violet));
+  padding:4px 10px;border-radius:0 0 8px 8px;font-weight:500;display:none}
+.dl.reco .badge{display:block}
+.dl.reco{border-color:rgba(150,170,255,.5);box-shadow:0 0 40px rgba(100,120,255,.22)}
+.dlnote{margin-top:16px;font-family:var(--mono);font-size:.7rem;color:#565e88;width:100%;text-align:center;
+  opacity:0;animation:fadeUp 1s 1.6s forwards}
+.dlnote code{color:#93a5e8}
+
+/* ---------- proof ---------- */
+.proof{position:relative;padding:96px 20px 40px;max-width:1060px;margin:0 auto}
+.stats{display:flex;justify-content:center;gap:clamp(24px,6vw,84px);flex-wrap:wrap;
+  padding:34px 20px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.stat{text-align:center}
+.stat b{display:block;font-size:clamp(2rem,4.6vw,3.2rem);font-weight:700;letter-spacing:-.03em;
+  background:linear-gradient(100deg,var(--blue),var(--pink));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.stat span{font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:#69719c}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px;margin-top:52px}
+.card{position:relative;border:1px solid var(--line);border-radius:20px;padding:28px 26px;background:var(--glass);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);overflow:hidden;transition:transform .35s,border-color .35s,box-shadow .35s}
+.card:hover{transform:translateY(-6px);border-color:rgba(150,170,255,.4);box-shadow:0 20px 60px rgba(10,16,60,.55)}
+.card::after{content:"";position:absolute;inset:0;background:radial-gradient(420px circle at var(--mx,50%) var(--my,0%),rgba(110,130,255,.13),transparent 60%);
+  opacity:0;transition:opacity .35s;pointer-events:none}
+.card:hover::after{opacity:1}
+.card .ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;margin-bottom:18px;
+  background:linear-gradient(140deg,rgba(45,90,255,.3),rgba(139,92,246,.3));border:1px solid rgba(140,160,255,.25);
+  box-shadow:0 0 24px rgba(90,110,255,.2)}
+.card .ic svg{width:22px;height:22px;stroke:#aebcff;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.card h3{font-size:1.16rem;font-weight:700;letter-spacing:-.02em;margin-bottom:9px}
+.card p{font-size:.9rem;color:var(--dim);line-height:1.6}
+.reveal{opacity:0;transform:translateY(34px);transition:opacity .8s cubic-bezier(.2,.7,.2,1),transform .8s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+
+/* ---------- footer ---------- */
+footer{position:relative;z-index:2;text-align:center;padding:56px 20px 44px;color:#565e88;font-family:var(--mono);font-size:.72rem;letter-spacing:.06em}
+footer a{color:#93a5e8;border-bottom:1px solid rgba(147,165,232,.3);transition:.3s}
+footer a:hover{color:#fff;border-color:#fff}
+
+@media (max-width:640px){
+  .hint .deskonly{display:none}
+  .holdbtn{display:block}
+  .downloads{flex-direction:column;align-items:stretch}
+  .dl{min-width:0;justify-content:flex-start}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;animation-delay:0s !important;transition-duration:.01ms !important}
+  .eyebrow,.sub,.demo,.downloads,.dlnote{opacity:1}
+  h1 .ch{opacity:1;transform:none;filter:none}
+  .reveal{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+
+<div class="aurora" aria-hidden="true"><span class="a1"></span><span class="a2"></span><span class="a3"></span></div>
+<canvas id="stars" aria-hidden="true"></canvas>
+<div class="grid" aria-hidden="true"></div>
+<div id="glow" aria-hidden="true"></div>
+
+<nav>
+  <a class="brand" href="#">
+    <svg viewBox="0 0 64 64" aria-hidden="true">
+      <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#4D9FFF"/><stop offset="1" stop-color="#8B5CF6"/>
+      </linearGradient></defs>
+      <circle cx="32" cy="32" r="30" fill="url(#lg)"/>
+      <rect x="25" y="13" width="14" height="26" rx="7" fill="#fff"/>
+      <path d="M18 34a14 14 0 0 0 28 0" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round"/>
+      <path d="M32 48v6M24 54h16" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+    </svg>
+    Speakr
+  </a>
+  <a class="gh" href="https://github.com/grphxdsign-ops/Speakr" target="_blank" rel="noopener">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    Star on GitHub
+  </a>
+</nav>
+
+<main>
+  <section class="hero">
+    <span class="eyebrow"><span class="dot"></span>100% local · your voice never leaves this machine</span>
+
+    <h1 aria-label="Speak it. It's typed.">
+      <span class="ln" data-text="Speak it."></span>
+      <span class="ln grad" data-text="It's typed."></span>
+    </h1>
+
+    <p class="sub">Hold a key. Say the thing. Cleaned-up text lands at your cursor in <b>any app</b> —
+    transcribed, polished, and typed entirely on <b>your</b> machine. No cloud. No subscription. No excuses.</p>
+
+    <div class="demo">
+      <div class="stage" id="stage">
+        <div class="bar"><i></i><i></i><i></i><em>SPEAKR · LIVE</em></div>
+        <canvas id="wave"></canvas>
+        <div class="line" id="line">
+          <span class="mic"></span>
+          <span class="txt" id="txt"><span class="ph">Your dictation shows up here…</span></span>
+        </div>
+      </div>
+      <div class="hint"><span class="deskonly">hold</span> <kbd id="kbd" class="deskonly">SPACE</kbd> <span class="deskonly">to feel it</span></div>
+      <button class="holdbtn" id="holdbtn" type="button">◉&nbsp; HOLD TO SPEAK</button>
+    </div>
+
+    <div class="downloads">
+      <a class="dl" id="dl-mac" href="https://github.com/grphxdsign-ops/Speakr/archive/refs/heads/main.zip" download>
+        <span class="badge">For your machine</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.05 12.54c-.03-2.89 2.36-4.28 2.47-4.35-1.35-1.97-3.44-2.24-4.18-2.27-1.78-.18-3.47 1.05-4.37 1.05-.9 0-2.29-1.02-3.77-1-1.94.03-3.72 1.13-4.72 2.86-2.01 3.49-.51 8.66 1.45 11.49.96 1.39 2.1 2.94 3.6 2.88 1.45-.06 1.99-.93 3.74-.93s2.24.93 3.77.9c1.56-.03 2.54-1.41 3.49-2.8 1.1-1.61 1.55-3.17 1.58-3.25-.04-.02-3.03-1.16-3.06-4.58zM14.16 4.06c.8-.97 1.34-2.32 1.19-3.66-1.15.05-2.55.77-3.38 1.74-.74.86-1.39 2.23-1.22 3.55 1.29.1 2.6-.65 3.41-1.63z"/></svg>
+        <span class="t"><small>Download for</small><span>macOS</span><em>Apple Silicon &amp; Intel</em></span>
+      </a>
+      <a class="dl" id="dl-win" href="https://github.com/grphxdsign-ops/Speakr/archive/refs/heads/main.zip" download>
+        <span class="badge">For your machine</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M0 3.44 9.82 2.1v9.5H0V3.44zM11 1.93 24 0v11.5H11V1.93zM0 12.6h9.82v9.5L0 20.75V12.6zM11 12.6h13V24l-13-1.84V12.6z"/></svg>
+        <span class="t"><small>Download for</small><span>Windows</span><em>Windows 10 / 11</em></span>
+      </a>
+    </div>
+    <p class="dlnote" id="dlnote">Unzip, then: <code>run.bat</code> on Windows &nbsp;·&nbsp; <code>bash package_mac.sh</code> on Mac. First run downloads the model — that's the only network call it ever makes.</p>
+  </section>
+
+  <section class="proof">
+    <div class="stats reveal">
+      <div class="stat"><b id="s1">0</b><span>bytes to the cloud</span></div>
+      <div class="stat"><b>$0</b><span>forever · open source</span></div>
+      <div class="stat"><b id="s2">0.2s</b><span>speech → text on GPU</span></div>
+    </div>
+
+    <div class="cards">
+      <div class="card reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4M8 21h8"/></svg></div>
+        <h3>Hold. Speak. Done.</h3>
+        <p>Right&nbsp;Ctrl on Windows, <b>fn</b> on Mac. Release the key and clean text appears at your cursor — fillers stripped, self-corrections applied, lists formatted.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        <h3>Zero cloud. Period.</h3>
+        <p>Whisper transcription and LLM polish run entirely on-device. The only network call, ever, is the one-time model download. Audit the code — it's all there.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.6L20 10l-6.1 1.4L12 17l-1.9-5.6L4 10l6.1-1.4L12 3z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z"/></svg></div>
+        <h3>It learns you.</h3>
+        <p>Your names, your jargon, your CamelCase — Speakr picks up recurring vocabulary and spells it right, getting sharper the more you talk. Locally, obviously.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Built for privacy · <a href="https://github.com/grphxdsign-ops/Speakr" target="_blank" rel="noopener">github.com/grphxdsign-ops/Speakr</a>
+</footer>
+
+<div class="grain" aria-hidden="true"></div>
+
+<script>
+(function(){
+"use strict";
+var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---------- headline letters ---------- */
+document.querySelectorAll("h1 .ln").forEach(function(ln, li){
+  var text = ln.getAttribute("data-text");
+  var grad = ln.classList.contains("grad");
+  for (var i = 0; i < text.length; i++){
+    var s = document.createElement("span");
+    s.className = "ch";
+    s.textContent = text[i];
+    if (grad){
+      // per-char slice of one continuous gradient (parent-level clip can't
+      // paint through the animated inline-block spans)
+      s.style.backgroundImage = "linear-gradient(100deg,#4D9FFF,#8B5CF6 55%,#C084FC)";
+      s.style.backgroundSize = (text.length * 100) + "% 100%";
+      s.style.backgroundPosition = (i / (text.length - 1) * 100) + "% 0";
+    }
+    if (!reduced){
+      s.style.animationDelay = (0.35 + li * 0.28 + i * 0.045) + "s";
+      s.classList.add("in");
+    }
+    ln.appendChild(s);
+  }
+});
+
+/* ---------- OS detect → badge ---------- */
+var isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || "") ||
+            /Macintosh/.test(navigator.userAgent || "");
+document.getElementById(isMac ? "dl-mac" : "dl-win").classList.add("reco");
+
+/* ---------- cursor glow ---------- */
+var glow = document.getElementById("glow");
+if (!reduced && matchMedia("(pointer:fine)").matches){
+  var gx = innerWidth/2, gy = innerHeight*0.3, tx = gx, ty = gy;
+  addEventListener("mousemove", function(e){ tx = e.clientX; ty = e.clientY; });
+  (function moveGlow(){
+    gx += (tx-gx)*0.08; gy += (ty-gy)*0.08;
+    glow.style.left = gx+"px"; glow.style.top = gy+"px";
+    requestAnimationFrame(moveGlow);
+  })();
+} else { glow.style.display = "none"; }
+
+/* ---------- magnetic buttons ---------- */
+if (!reduced && matchMedia("(pointer:fine)").matches){
+  document.querySelectorAll(".dl").forEach(function(btn){
+    btn.addEventListener("mousemove", function(e){
+      var r = btn.getBoundingClientRect();
+      var dx = e.clientX - (r.left + r.width/2), dy = e.clientY - (r.top + r.height/2);
+      btn.style.transform = "translate(" + dx*0.12 + "px," + dy*0.18 + "px)";
+    });
+    btn.addEventListener("mouseleave", function(){ btn.style.transform = ""; });
+  });
+}
+
+/* ---------- card spotlight ---------- */
+document.querySelectorAll(".card").forEach(function(c){
+  c.addEventListener("mousemove", function(e){
+    var r = c.getBoundingClientRect();
+    c.style.setProperty("--mx", (e.clientX - r.left) + "px");
+    c.style.setProperty("--my", (e.clientY - r.top) + "px");
+  });
+});
+
+/* ---------- scroll reveal ---------- */
+var io = new IntersectionObserver(function(entries){
+  entries.forEach(function(en){
+    if (en.isIntersecting){ en.target.classList.add("in"); io.unobserve(en.target); }
+  });
+}, { threshold: 0.18 });
+document.querySelectorAll(".reveal").forEach(function(el){ io.observe(el); });
+
+/* ---------- starfield ---------- */
+var sc = document.getElementById("stars"), sx = sc.getContext("2d"), stars = [];
+function sizeStars(){
+  sc.width = innerWidth * devicePixelRatio; sc.height = innerHeight * devicePixelRatio;
+  sc.style.width = innerWidth+"px"; sc.style.height = innerHeight+"px";
+  sx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+}
+sizeStars(); addEventListener("resize", sizeStars);
+for (var i = 0; i < 70; i++){
+  stars.push({ x: Math.random(), y: Math.random(), z: 0.3 + Math.random()*0.7,
+               r: 0.5 + Math.random()*1.3, p: Math.random()*Math.PI*2 });
+}
+var mx = 0.5, my = 0.5;
+addEventListener("mousemove", function(e){ mx = e.clientX/innerWidth; my = e.clientY/innerHeight; });
+function drawStars(t){
+  sx.clearRect(0,0,innerWidth,innerHeight);
+  for (var i = 0; i < stars.length; i++){
+    var s = stars[i];
+    var px = s.x*innerWidth + (mx-0.5)*40*s.z;
+    var py = (s.y*innerHeight + t*0.008*s.z) % (innerHeight+20) + (my-0.5)*24*s.z;
+    var a = 0.25 + 0.35*Math.abs(Math.sin(t*0.001 + s.p));
+    sx.beginPath();
+    sx.arc(px, py, s.r*s.z, 0, 7);
+    sx.fillStyle = "rgba(150,170,255," + (a*s.z) + ")";
+    sx.fill();
+  }
+  if (!reduced) requestAnimationFrame(drawStars);
+}
+drawStars(0);
+
+/* ---------- waveform ---------- */
+var wc = document.getElementById("wave"), wx = wc.getContext("2d");
+var stage = document.getElementById("stage");
+var IDLE = 0.26;
+var amp = 0, targetAmp = IDLE;   // idle simmer vs 1 = live
+function sizeWave(){
+  var r = wc.getBoundingClientRect();
+  wc.width = r.width * devicePixelRatio; wc.height = 110 * devicePixelRatio;
+  wx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+}
+sizeWave(); addEventListener("resize", sizeWave);
+var N = 84;
+function drawWave(t){
+  var w = wc.width/devicePixelRatio, h = 110, mid = h/2;
+  wx.clearRect(0,0,w,h);
+  amp += (targetAmp - amp) * 0.12;
+  var grad = wx.createLinearGradient(0,0,w,0);
+  grad.addColorStop(0,"#4D9FFF"); grad.addColorStop(0.55,"#8B5CF6"); grad.addColorStop(1,"#C084FC");
+  wx.fillStyle = grad;
+  wx.shadowColor = "rgba(110,120,255," + (0.25 + amp*0.5) + ")";
+  wx.shadowBlur = 10 + amp*22;
+  var bw = w/N;
+  for (var i = 0; i < N; i++){
+    var x = i*bw + bw*0.5;
+    var env = Math.pow(Math.sin(Math.PI * i/(N-1)), 0.7);           // taller mid
+    var n = Math.sin(t*0.004 + i*0.55) * 0.5
+          + Math.sin(t*0.007 + i*0.19 + 2) * 0.3
+          + Math.sin(t*0.011 + i*0.83 + 5) * 0.2;
+    var jitter = amp > 0.5 ? (Math.random()-0.5) * amp * 0.7 : 0;
+    var bh = Math.max(2.5, Math.abs(n + jitter) * env * amp * (h*0.92));
+    wx.beginPath();
+    if (wx.roundRect) wx.roundRect(x - bw*0.28, mid - bh/2, bw*0.56, bh, 3);
+    else wx.rect(x - bw*0.28, mid - bh/2, bw*0.56, bh);
+    wx.fill();
+  }
+  if (!reduced) requestAnimationFrame(drawWave);
+}
+drawWave(0);
+if (reduced){ amp = 0.35; drawWave(1000); }
+
+/* ---------- hold-to-speak demo ---------- */
+var txt = document.getElementById("txt"), lineEl = document.getElementById("line");
+var kbd = document.getElementById("kbd"), holdbtn = document.getElementById("holdbtn");
+var phrases = [
+  "Speakr typed this — and not a single byte left this machine.",
+  "This sentence was spoken, cleaned up, and typed. Locally.",
+  "Stop typing like it's 2005. Your voice is faster.",
+  "No cloud was consulted in the making of this sentence.",
+  "Dictated, de-um'd, and delivered — all on-device."
+];
+var pi = 0, holding = false, holdStart = 0, typeTimer = null;
+
+function startHold(){
+  if (holding) return;
+  holding = true; holdStart = Date.now();
+  clearTimeout(typeTimer);
+  targetAmp = 1;
+  stage.classList.add("live");
+  lineEl.classList.add("rec");
+  if (kbd) kbd.classList.add("down");
+  txt.innerHTML = '<span class="ph">listening…</span>';
+}
+function endHold(){
+  if (!holding) return;
+  holding = false;
+  targetAmp = IDLE;
+  stage.classList.remove("live");
+  lineEl.classList.remove("rec");
+  if (kbd) kbd.classList.remove("down");
+  if (Date.now() - holdStart < 350){
+    txt.innerHTML = '<span class="ph">hold it down while you “speak” 😉</span>';
+    return;
+  }
+  var phrase = phrases[pi++ % phrases.length];
+  txt.innerHTML = '<span class="ph">transcribing…</span>';
+  typeTimer = setTimeout(function(){
+    txt.textContent = "";
+    var caret = document.createElement("span"); caret.className = "caret";
+    var out = document.createElement("span");
+    txt.appendChild(out); txt.appendChild(caret);
+    var i = 0;
+    (function tick(){
+      if (i <= phrase.length){
+        out.textContent = phrase.slice(0, i++);
+        targetAmp = IDLE + Math.random()*0.12;
+        typeTimer = setTimeout(tick, 18 + Math.random()*26);
+      } else {
+        targetAmp = IDLE;
+        typeTimer = setTimeout(function(){ caret.remove(); }, 2500);
+      }
+    })();
+  }, reduced ? 50 : 450);
+}
+
+addEventListener("keydown", function(e){
+  if (e.code !== "Space" || e.repeat) return;
+  var t = e.target;
+  if (t && (t.tagName === "A" || t.tagName === "BUTTON" || t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+  e.preventDefault();
+  startHold();
+});
+addEventListener("keyup", function(e){ if (e.code === "Space") endHold(); });
+["pointerdown"].forEach(function(ev){ holdbtn.addEventListener(ev, function(e){ e.preventDefault(); startHold(); }); });
+["pointerup","pointercancel","pointerleave"].forEach(function(ev){ holdbtn.addEventListener(ev, endHold); });
+addEventListener("blur", endHold);
+})();
+</script>
+</body>
+</html>
