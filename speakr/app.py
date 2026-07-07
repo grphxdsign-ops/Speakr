@@ -28,6 +28,15 @@ def _open_path(path):
         os.startfile(path)
 
 
+def _is_app_excluded(exe: str, excluded_apps) -> bool:
+    """True if `exe` (foreground app, exe name on Windows / app name on Mac)
+    is in the configured hotkey_exclude_apps list. Pure function so the
+    gating logic is testable without spinning up a whole SpeakrApp."""
+    if not excluded_apps or not exe:
+        return False
+    return exe.lower() in {str(e).lower() for e in excluded_apps}
+
+
 class SpeakrApp:
     def __init__(self):
         self.log = setup_logging()
@@ -114,6 +123,18 @@ class SpeakrApp:
     def _begin_recording(self):
         if not self.enabled:
             return
+        excluded = self.config.get("hotkey_exclude_apps", default=[])
+        if excluded:
+            # Fast, synchronous check right at key-down: the physical key
+            # already passes through untouched (both hotkey backends are
+            # listen-only/non-suppressing), this just stops Speakr from ALSO
+            # opening the mic and later pasting a transcript into an app
+            # where the hotkey happens to mean something else (e.g. a game
+            # keybind on the same key as push-to-talk).
+            exe = get_active_app().get("exe", "")
+            if _is_app_excluded(exe, excluded):
+                self.log.info("Hotkey ignored — foreground app %r is in hotkey_exclude_apps", exe)
+                return
         try:
             self.recorder.start_recording()
         except Exception as exc:

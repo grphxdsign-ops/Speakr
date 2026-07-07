@@ -178,6 +178,18 @@ def test_config_defaults():
     assert cfg.get("hotkey")
     assert cfg.get("formatting", "ollama_url").startswith("http://127.0.0.1")
     assert cfg.get("app_tones", "code.exe") == "literal"
+    assert cfg.get("hotkey_exclude_apps") == []
+
+
+def test_hotkey_exclusion():
+    from speakr.app import _is_app_excluded
+
+    excluded = ["LeagueOfLegends.exe", "csgo.exe"]
+    assert _is_app_excluded("leagueoflegends.exe", excluded), "case-insensitive match failed"
+    assert _is_app_excluded("LeagueOfLegends.exe", excluded)
+    assert not _is_app_excluded("notepad.exe", excluded)
+    assert not _is_app_excluded("", excluded), "empty exe must never match"
+    assert not _is_app_excluded("leagueoflegends.exe", []), "empty list must exclude nothing"
 
 
 def test_silence_cut():
@@ -309,6 +321,7 @@ check("personal dictionary", test_dictionary)
 check("active-app detection", test_active_app)
 check("clipboard roundtrip", test_clipboard_roundtrip)
 check("config defaults", test_config_defaults)
+check("hotkey exclusion logic", test_hotkey_exclusion)
 if len(sys.argv) > 1:
     check("transcription end-to-end", test_transcription_e2e)
     check("streaming equivalence", test_streaming_equivalence)

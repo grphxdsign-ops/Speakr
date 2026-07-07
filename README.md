@@ -167,12 +167,35 @@ Created next to the app on first run. Highlights:
 | `screen_context` | on, 1200 chars | Focused-field text capture for spelling context (Windows). Note: the first query can switch a Chromium-based app (Chrome, Slack, Discord) into accessibility mode, a small ongoing cost in that app — disable here if you notice it. |
 | `learning.enabled` | `true` | Vocabulary learning; `min_occurrences` (3) and `max_hints` (40) tune it. |
 | `app_tones` | see file | Per-app tone: `casual` / `formal` / `neutral` / `literal`. `literal` (code editors, terminals) skips the LLM pass so nothing rewrites your commands. |
+| `hotkey_exclude_apps` | `[]` | Apps where the hotkey is ignored entirely — see "Using the hotkey for other things" below. |
 | `log_transcripts` | `false` | Keep dictated text out of `speakr.log` unless you opt in. |
 
 Privacy note: `learned_words.json` contains single words you've dictated
 repeatedly (never sentences). Delete the file anytime to reset learning.
 
 After editing, use tray → **Reload config**.
+
+## Using the hotkey for other things (games, other apps)
+
+Speakr's hotkey (fn on Mac, Right Ctrl on Windows) never blocks the
+physical key from anything else — both hotkey backends only *listen*, they
+never suppress or consume the keypress, so it reaches every other app and
+OS feature completely normally whether or not Speakr is also watching it.
+
+What it doesn't do on its own: stop *Speakr itself* from reacting when
+you're holding that key for an unrelated reason — a game keybind on the
+same key as push-to-talk, for instance, would also start a recording, and
+releasing it would paste whatever got transcribed into the game.
+`hotkey_exclude_apps` fixes that:
+
+```json
+"hotkey_exclude_apps": ["leagueoflegends.exe", "csgo.exe"]
+```
+
+While one of those is focused, Speakr ignores the hotkey completely — no
+recording, no paste — while the key still does whatever it normally does
+in that app. Windows: exe name (check Task Manager → Details). macOS: the
+app's display name.
 
 ## Personal dictionary (`dictionary.txt`)
 

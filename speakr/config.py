@@ -25,6 +25,14 @@ DEFAULTS = {
     # option, right ctrl, caps lock, ...
     "hotkey": "fn" if IS_MAC else "right ctrl",
     "toggle_mode": False,
+    # Apps where the hotkey is ignored entirely — no recording, no paste.
+    # The physical key still reaches that app completely normally either way
+    # (both hotkey backends are listen-only/non-suppressing by design), this
+    # just stops Speakr from ALSO reacting when you're holding the same key
+    # for something unrelated, e.g. a game keybind that happens to be the
+    # same key as push-to-talk. Windows: exe name, e.g. "leagueoflegends.exe".
+    # macOS: app display name, e.g. "league of legends".
+    "hotkey_exclude_apps": [],
     # faster-whisper model. "auto" = large-v3-turbo on GPU, small on CPU.
     # Or pin one: tiny, base, small, medium, large-v3-turbo, large-v3, ...
     "model": "auto",
