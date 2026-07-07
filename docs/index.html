@@ -41,12 +41,17 @@ body{
 ::selection{background:rgba(139,92,246,.45);color:#fff}
 a{color:inherit;text-decoration:none}
 
-/* ---------- backdrop layers ---------- */
-.aurora{position:fixed;inset:-20%;z-index:0;pointer-events:none;filter:blur(90px);opacity:.55}
+/* ---------- backdrop layers ----------
+   Perf note: these layers deliberately avoid filter:blur and backdrop-filter.
+   A 90px blur across three viewport-sized animated elements, plus glass
+   panels re-blurring their backdrop every time the canvases behind them
+   repaint, were the page's biggest frame-time costs. Radial gradients are
+   already soft, so they do the same job for free. */
+.aurora{position:fixed;inset:-20%;z-index:0;pointer-events:none;opacity:.55}
 .aurora span{position:absolute;border-radius:50%;mix-blend-mode:screen;will-change:transform}
-.aurora .a1{width:55vw;height:55vw;left:-10vw;top:-12vw;background:radial-gradient(circle,rgba(45,90,255,.55),transparent 65%);animation:drift1 26s ease-in-out infinite alternate}
-.aurora .a2{width:48vw;height:48vw;right:-12vw;top:6vw;background:radial-gradient(circle,rgba(139,92,246,.5),transparent 65%);animation:drift2 32s ease-in-out infinite alternate}
-.aurora .a3{width:42vw;height:42vw;left:22vw;bottom:-18vw;background:radial-gradient(circle,rgba(192,132,252,.32),transparent 65%);animation:drift3 38s ease-in-out infinite alternate}
+.aurora .a1{width:55vw;height:55vw;left:-10vw;top:-12vw;background:radial-gradient(circle,rgba(45,90,255,.4) 0%,rgba(45,90,255,.18) 35%,transparent 70%);animation:drift1 26s ease-in-out infinite alternate}
+.aurora .a2{width:48vw;height:48vw;right:-12vw;top:6vw;background:radial-gradient(circle,rgba(139,92,246,.36) 0%,rgba(139,92,246,.16) 35%,transparent 70%);animation:drift2 32s ease-in-out infinite alternate}
+.aurora .a3{width:42vw;height:42vw;left:22vw;bottom:-18vw;background:radial-gradient(circle,rgba(192,132,252,.24) 0%,rgba(192,132,252,.1) 35%,transparent 70%);animation:drift3 38s ease-in-out infinite alternate}
 @keyframes drift1{to{transform:translate(9vw,7vw) scale(1.15)}}
 @keyframes drift2{to{transform:translate(-8vw,10vw) scale(.9)}}
 @keyframes drift3{to{transform:translate(6vw,-9vw) scale(1.2)}}
@@ -59,14 +64,17 @@ a{color:inherit;text-decoration:none}
 }
 .grain{position:fixed;inset:0;z-index:40;pointer-events:none;opacity:.05;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E")}
-#glow{position:fixed;width:520px;height:520px;border-radius:50%;z-index:1;pointer-events:none;
+#glow{position:fixed;width:520px;height:520px;border-radius:50%;z-index:1;pointer-events:none;left:0;top:0;
   background:radial-gradient(circle,rgba(90,130,255,.14),rgba(139,92,246,.07) 45%,transparent 70%);
-  transform:translate(-50%,-50%);mix-blend-mode:screen;left:50%;top:30%;transition:opacity .5s}
+  /* moved with transform (compositor-only) rather than left/top, and no blend
+     mode — mix-blend-mode forced the whole stacking context to repaint under
+     a 520px moving element on every frame */
+  transform:translate3d(-260px,-260px,0);will-change:transform;transition:opacity .5s}
 
 /* ---------- nav ---------- */
 nav{position:fixed;top:0;left:0;right:0;z-index:30;display:flex;align-items:center;justify-content:space-between;
   padding:18px clamp(20px,4vw,48px);
-  background:linear-gradient(rgba(4,5,10,.72),transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  background:linear-gradient(rgba(4,5,10,.85),transparent)}
 .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.15rem;letter-spacing:-.02em}
 .brand svg{width:30px;height:30px;filter:drop-shadow(0 0 12px rgba(99,132,255,.6))}
 .gh{display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--dim);border:1px solid var(--line);
@@ -90,7 +98,8 @@ h1 .ln{display:block}
 h1 .ch{display:inline-block;opacity:0;transform:translateY(.55em) rotateX(45deg);filter:blur(10px);white-space:pre}
 h1 .ch.in{animation:chIn .7s cubic-bezier(.2,.75,.2,1) forwards}
 @keyframes chIn{to{opacity:1;transform:none;filter:blur(0)}}
-.grad{filter:drop-shadow(0 0 34px rgba(120,110,255,.35))}
+/* (no filter here on purpose — a 34px drop-shadow over a viewport-wide
+   headline re-blurred on every animation frame and cost real frame time) */
 .grad .ch{-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;
   /* h1's tight line-height (.96) makes this inline-block's own box shorter
      than the font size, so a background sized to "100% 100%" of it stops
@@ -106,8 +115,7 @@ h1 .ch.in{animation:chIn .7s cubic-bezier(.2,.75,.2,1) forwards}
 
 /* ---------- demo ---------- */
 .demo{margin-top:44px;width:min(760px,94vw);opacity:0;animation:fadeUp 1s 1.25s cubic-bezier(.2,.7,.2,1) forwards}
-.stage{position:relative;border:1px solid var(--line);border-radius:22px;background:var(--glass);
-  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+.stage{position:relative;border:1px solid var(--line);border-radius:22px;background:rgba(13,16,32,.92);
   box-shadow:0 24px 80px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.02) inset,0 0 60px rgba(80,100,255,.07);
   padding:22px 26px 18px;overflow:hidden;transition:box-shadow .4s,border-color .4s}
 .stage.live{border-color:rgba(120,150,255,.45);box-shadow:0 24px 90px rgba(20,30,90,.65),0 0 70px rgba(100,120,255,.22)}
@@ -172,8 +180,8 @@ kbd.down{transform:translateY(2px);border-bottom-width:1px;background:#2a3468;co
   background:linear-gradient(100deg,var(--blue),var(--pink));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .stat span{font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:#69719c}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px;margin-top:52px}
-.card{position:relative;border:1px solid var(--line);border-radius:20px;padding:28px 26px;background:var(--glass);
-  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);overflow:hidden;transition:transform .35s,border-color .35s,box-shadow .35s}
+.card{position:relative;border:1px solid var(--line);border-radius:20px;padding:28px 26px;background:rgba(13,16,32,.88);
+  overflow:hidden;transition:transform .35s,border-color .35s,box-shadow .35s}
 .card:hover{transform:translateY(-6px);border-color:rgba(150,170,255,.4);box-shadow:0 20px 60px rgba(10,16,60,.55)}
 .card::after{content:"";position:absolute;inset:0;background:radial-gradient(420px circle at var(--mx,50%) var(--my,0%),rgba(110,130,255,.13),transparent 60%);
   opacity:0;transition:opacity .35s;pointer-events:none}
@@ -253,7 +261,7 @@ footer a:hover{color:#fff;border-color:#fff}
           <span class="txt" id="txt"><span class="ph">Your dictation shows up here…</span></span>
         </div>
       </div>
-      <div class="hint"><span class="deskonly">hold</span> <kbd id="kbd" class="deskonly">SPACE</kbd> <span class="deskonly">to feel it</span></div>
+      <div class="hint"><span class="deskonly">hold</span> <kbd id="kbd" class="deskonly">V</kbd> <span class="deskonly">to feel it — v for voice</span></div>
       <button class="holdbtn" id="holdbtn" type="button">◉&nbsp; HOLD TO SPEAK</button>
       <p class="demoNote">Browser demo — hold, then actually speak. Uses this page's mic + your browser's speech recognition to show the loop live. The Speakr app itself never sends audio anywhere.</p>
     </div>
@@ -262,12 +270,12 @@ footer a:hover{color:#fff;border-color:#fff}
       <a class="dl" id="dl-mac" href="https://github.com/grphxdsign-ops/Speakr/archive/refs/heads/main.zip" download>
         <span class="badge">For your machine</span>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.05 12.54c-.03-2.89 2.36-4.28 2.47-4.35-1.35-1.97-3.44-2.24-4.18-2.27-1.78-.18-3.47 1.05-4.37 1.05-.9 0-2.29-1.02-3.77-1-1.94.03-3.72 1.13-4.72 2.86-2.01 3.49-.51 8.66 1.45 11.49.96 1.39 2.1 2.94 3.6 2.88 1.45-.06 1.99-.93 3.74-.93s2.24.93 3.77.9c1.56-.03 2.54-1.41 3.49-2.8 1.1-1.61 1.55-3.17 1.58-3.25-.04-.02-3.03-1.16-3.06-4.58zM14.16 4.06c.8-.97 1.34-2.32 1.19-3.66-1.15.05-2.55.77-3.38 1.74-.74.86-1.39 2.23-1.22 3.55 1.29.1 2.6-.65 3.41-1.63z"/></svg>
-        <span class="t"><small>Download for</small><span>macOS</span><em>Apple Silicon &amp; Intel</em></span>
+        <span class="t"><small>Download for</small><span>macOS</span><em id="mac-sub">Apple Silicon &amp; Intel</em></span>
       </a>
       <a class="dl" id="dl-win" href="https://github.com/grphxdsign-ops/Speakr/archive/refs/heads/main.zip" download>
         <span class="badge">For your machine</span>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M0 3.44 9.82 2.1v9.5H0V3.44zM11 1.93 24 0v11.5H11V1.93zM0 12.6h9.82v9.5L0 20.75V12.6zM11 12.6h13V24l-13-1.84V12.6z"/></svg>
-        <span class="t"><small>Download for</small><span>Windows</span><em>Windows 10 / 11</em></span>
+        <span class="t"><small>Download for</small><span>Windows</span><em id="win-sub">Windows 10 / 11</em></span>
       </a>
     </div>
     <p class="dlnote" id="dlnote">Unzip, then: <code>run.bat</code> on Windows &nbsp;·&nbsp; <code>bash package_mac.sh</code> on Mac. First run downloads the model — that's the only network call it ever makes.</p>
@@ -339,6 +347,37 @@ var isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || "") ||
             /Macintosh/.test(navigator.userAgent || "");
 document.getElementById(isMac ? "dl-mac" : "dl-win").classList.add("reco");
 
+/* ---------- smart downloads: upgrade to real installers when a release exists ----------
+   Buttons ship pointing at the repo ZIP (always works). If a GitHub release
+   with a .dmg / .exe asset exists, they upgrade in place to one-click
+   installers. No release yet, offline, or rate-limited -> silently keeps ZIP. */
+fetch("https://api.github.com/repos/grphxdsign-ops/Speakr/releases/latest")
+  .then(function(r){ return r.ok ? r.json() : null; })
+  .then(function(rel){
+    if (!rel || !rel.assets || !rel.assets.length) return;
+    function asset(ext){
+      for (var i = 0; i < rel.assets.length; i++)
+        if (rel.assets[i].name.toLowerCase().slice(-ext.length) === ext) return rel.assets[i];
+      return null;
+    }
+    var dmg = asset(".dmg"), exe = asset(".exe");
+    var ver = rel.tag_name || "";
+    if (dmg){
+      document.getElementById("dl-mac").href = dmg.browser_download_url;
+      document.getElementById("mac-sub").textContent = dmg.name + (ver ? " · " + ver : "");
+    }
+    if (exe){
+      document.getElementById("dl-win").href = exe.browser_download_url;
+      document.getElementById("win-sub").textContent = exe.name + (ver ? " · " + ver : "");
+    }
+    if (dmg || exe){
+      document.getElementById("dlnote").innerHTML =
+        'Mac: open the dmg, drag Speakr to Applications. Windows: run the exe. ' +
+        "First run downloads the model — that's the only network call it ever makes.";
+    }
+  })
+  .catch(function(){ /* keep ZIP fallback */ });
+
 /* ---------- perf: capped DPR + pause-when-hidden for every continuous loop ----------
    Uncapped devicePixelRatio (3x+ on many phones/retina monitors) multiplies canvas
    pixel counts nine-fold for zero visible gain; capping to 2 is the single biggest
@@ -363,7 +402,7 @@ if (!reduced && matchMedia("(pointer:fine)").matches){
   (function moveGlow(){
     if (document.hidden){ glowAlive = false; return; }
     gx += (tx-gx)*0.08; gy += (ty-gy)*0.08;
-    glow.style.left = gx+"px"; glow.style.top = gy+"px";
+    glow.style.transform = "translate3d(" + (gx-260) + "px," + (gy-260) + "px,0)";
     glowAlive = true;
     requestAnimationFrame(moveGlow);
   })();
@@ -440,7 +479,7 @@ function sizeStars(){
   sx.setTransform(DPR,0,0,DPR,0,0);
 }
 sizeStars(); addEventListener("resize", sizeStars);
-for (var i = 0; i < 70; i++){
+for (var i = 0; i < 48; i++){
   stars.push({ x: Math.random(), y: Math.random(), z: 0.3 + Math.random()*0.7,
                r: 0.5 + Math.random()*1.3, p: Math.random()*Math.PI*2 });
 }
@@ -479,7 +518,8 @@ function sizeWave(){
   wx.setTransform(DPR,0,0,DPR,0,0);
 }
 sizeWave(); addEventListener("resize", sizeWave);
-var N = 84;
+var N = 64;
+var waveGrad = null, waveGradW = 0; // cached: rebuilding a gradient every frame is waste
 // Set by the hold-to-speak demo below once the mic + analyser are live: real
 // frequency-domain audio data replaces the simulated sine bars while holding.
 var micLive = false, analyserNode = null, freqData = null;
@@ -496,11 +536,14 @@ function drawWave(t){
   } else {
     amp += (targetAmp - amp) * 0.12;
   }
-  var grad = wx.createLinearGradient(0,0,w,0);
-  grad.addColorStop(0,"#4D9FFF"); grad.addColorStop(0.55,"#8B5CF6"); grad.addColorStop(1,"#C084FC");
-  wx.fillStyle = grad;
-  wx.shadowColor = "rgba(110,120,255," + (0.25 + amp*0.5) + ")";
-  wx.shadowBlur = 10 + amp*22;
+  // No canvas shadowBlur here: blurring 60+ bars per frame was the single
+  // worst cost on the page. The glow now comes from .stage's box-shadow.
+  if (waveGradW !== w){
+    waveGrad = wx.createLinearGradient(0,0,w,0);
+    waveGrad.addColorStop(0,"#4D9FFF"); waveGrad.addColorStop(0.55,"#8B5CF6"); waveGrad.addColorStop(1,"#C084FC");
+    waveGradW = w;
+  }
+  wx.fillStyle = waveGrad;
   var bw = w/N;
   for (var i = 0; i < N; i++){
     var x = i*bw + bw*0.5;
@@ -709,14 +752,18 @@ function endHold(){
   playCannedPhrase();
 }
 
+// V, not Space: Space's default action scrolls the page, and its held-key
+// auto-repeat events kept firing that scroll (they returned early above the
+// preventDefault). A plain letter has no default action to fight.
 addEventListener("keydown", function(e){
-  if (e.code !== "Space" || e.repeat) return;
+  if (e.code !== "KeyV" || e.repeat) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return; // leave paste (Ctrl/Cmd+V) alone
   var t = e.target;
   if (t && (t.tagName === "A" || t.tagName === "BUTTON" || t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
   e.preventDefault();
   startHold();
 });
-addEventListener("keyup", function(e){ if (e.code === "Space") endHold(); });
+addEventListener("keyup", function(e){ if (e.code === "KeyV") endHold(); });
 ["pointerdown"].forEach(function(ev){ holdbtn.addEventListener(ev, function(e){ e.preventDefault(); startHold(); }); });
 ["pointerup","pointercancel","pointerleave"].forEach(function(ev){ holdbtn.addEventListener(ev, endHold); });
 addEventListener("blur", endHold);

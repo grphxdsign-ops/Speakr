@@ -1,0 +1,81 @@
+# Builds the one-click installers the download site points at:
+#   Speakr.dmg  — the existing self-bootstrapping Speakr.app (package_mac.sh)
+#                 wrapped in a drag-to-Applications disk image
+#   Speakr.exe  — a PyInstaller onefile bundle of the whole app
+#
+# Trigger: push a tag like v0.1.0 (or run manually from the Actions tab with
+# a tag name). Assets land on the GitHub release for that tag, and the site's
+# download buttons pick them up automatically via the releases/latest API.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  mac-dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Speakr.app
+        run: bash package_mac.sh
+
+      - name: Wrap into Speakr.dmg
+        run: |
+          mkdir dmgroot
+          cp -R dist/Speakr.app dmgroot/
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname Speakr -srcfolder dmgroot -ov -format UDZO Speakr.dmg
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: Speakr.dmg
+
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pillow
+
+      - name: Convert icon to .ico
+        run: python -c "from PIL import Image; Image.open('assets/icon.png').save('icon.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])"
+
+      - name: Build Speakr.exe
+        # --collect-all on the ML stack: ctranslate2 ships DLLs and
+        # faster_whisper ships the bundled Silero VAD onnx asset, neither of
+        # which static import analysis finds. pystray picks its Windows
+        # backend with a dynamic import, hence the explicit hidden-import.
+        run: >
+          pyinstaller --noconfirm --onefile --windowed
+          --name Speakr --icon icon.ico
+          --collect-all ctranslate2
+          --collect-all faster_whisper
+          --collect-all onnxruntime
+          --hidden-import pystray._win32
+          --hidden-import comtypes.stream
+          scripts/windows_entry.py
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/Speakr.exe
