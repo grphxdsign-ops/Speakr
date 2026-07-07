@@ -595,7 +595,13 @@ var pi = 0, holding = false, holdStart = 0, typeTimer = null;
 var micStream = null, micDenied = false, micPromise = null;
 var audioCtx = null;
 var SRCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-var recognition = null, sttBroken = false;
+var recognition = null;
+// sttUnsupported/sttDenied are permanent (no browser support; user explicitly
+// denied the permission prompt) — sttFailedThisHold is NOT: a transient
+// network blip or a timing glitch on hold #1 used to permanently disable
+// real transcription for the rest of the visit (fixed here). Each new hold
+// gets a clean attempt.
+var sttUnsupported = !SRCtor, sttDenied = false, sttFailedThisHold = false, sttRestarts = 0;
 var finalChunk = "", interimChunk = "";
 
 function cleanupTranscript(text){
@@ -644,12 +650,12 @@ function renderLiveTranscript(){
 }
 
 function startRecognition(){
-  if (!SRCtor || sttBroken) return;
+  if (sttUnsupported || sttDenied) return;
   try {
     recognition = new SRCtor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.lang = navigator.language || "en-US";
     recognition.onresult = function(e){
       var interim = "", final = "";
       for (var i = e.resultIndex; i < e.results.length; i++){
@@ -661,11 +667,23 @@ function startRecognition(){
       renderLiveTranscript();
     };
     recognition.onerror = function(e){
-      if (e.error !== "no-speech" && e.error !== "aborted") sttBroken = true;
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") sttDenied = true;
+      else if (e.error !== "no-speech" && e.error !== "aborted") sttFailedThisHold = true;
     };
-    recognition.onend = function(){ recognition = null; };
+    recognition.onend = function(){
+      recognition = null;
+      // Chrome's "continuous" mode isn't reliably continuous in practice —
+      // it can stop itself after a pause in speech. Transparently pick back
+      // up while the hold is still active, instead of silently going deaf
+      // partway through a longer dictation. Capped so a persistently
+      // erroring engine can't spin here forever.
+      if (holding && micLive && !sttUnsupported && !sttDenied && !sttFailedThisHold && sttRestarts < 4){
+        sttRestarts++;
+        startRecognition();
+      }
+    };
     recognition.start();
-  } catch(e){ sttBroken = true; recognition = null; }
+  } catch(e){ sttFailedThisHold = true; recognition = null; }
 }
 
 function finishRealTranscript(){
@@ -710,6 +728,7 @@ function startHold(){
   clearTimeout(typeTimer);
   micLive = false;
   finalChunk = ""; interimChunk = "";
+  sttFailedThisHold = false; sttRestarts = 0;
   targetAmp = 1; // optimistic synthetic level in case mic permission is still pending/denied
   stage.classList.add("live");
   lineEl.classList.add("rec");
@@ -733,7 +752,7 @@ function endHold(){
   var held = Date.now() - holdStart;
   if (recognition){ try { recognition.stop(); } catch(e){} }
 
-  var sttWorking = micLive && SRCtor && !sttBroken;
+  var sttWorking = micLive && !sttUnsupported && !sttDenied && !sttFailedThisHold;
   if (sttWorking){
     targetAmp = IDLE;
     if (held < 350 && !finalChunk && !interimChunk){
