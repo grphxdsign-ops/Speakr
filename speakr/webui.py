@@ -166,9 +166,17 @@ header{width:100%;display:flex;align-items:center;justify-content:space-between;
   border:2px solid transparent;display:grid;place-items:center;transition:box-shadow .45s,transform .15s;
   box-shadow:0 0 0 rgba(0,0,0,0)}
 .power:active{transform:scale(.96)}
-.power svg{width:64px;height:64px;stroke:#3a4266;fill:none;stroke-width:2.4;stroke-linecap:round;transition:stroke .4s,filter .4s}
+/* Inverse fill: an absolutely-positioned gradient layer crossfades in via
+   opacity on ".on" — transitioning "background" itself doesn't animate
+   (gradients aren't interpolatable), so a separate layer is the reliable way
+   to get a smooth fill-in rather than a hard cut between the two looks. */
+.power::before{content:"";position:absolute;inset:0;border-radius:50%;
+  background:linear-gradient(135deg,var(--blue),var(--violet),var(--pink));
+  opacity:0;transition:opacity .45s}
+.power.on::before{opacity:1}
+.power svg{position:relative;width:64px;height:64px;stroke:#3a4266;fill:none;stroke-width:2.4;stroke-linecap:round;transition:stroke .4s,filter .4s}
 .power.on{box-shadow:0 0 70px rgba(100,120,255,.5),0 0 24px rgba(139,92,246,.45)}
-.power.on svg{stroke:url(#pg);filter:drop-shadow(0 0 12px rgba(120,140,255,.8))}
+.power.on svg{stroke:#04050a;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
 .power::after{content:"";position:absolute;inset:-14px;border-radius:50%;border:1px solid rgba(120,140,255,.35);
   opacity:0;pointer-events:none}
 .power.on::after{animation:ring 2.4s ease-out infinite}
@@ -203,12 +211,6 @@ footer a{color:#93a5e8;text-decoration:none}
 </head>
 <body>
 <div class="aurora" aria-hidden="true"><span class="a1"></span><span class="a2"></span></div>
-<svg width="0" height="0" aria-hidden="true"><defs>
-<!-- userSpaceOnUse: an objectBoundingBox gradient collapses on the power
-     icon's straight vertical stem (zero-width bbox) and the stroke vanishes -->
-<linearGradient id="pg" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
-<stop offset="0" stop-color="#4D9FFF"/><stop offset=".6" stop-color="#8B5CF6"/><stop offset="1" stop-color="#C084FC"/>
-</linearGradient></defs></svg>
 
 <div class="wrap">
   <header>
