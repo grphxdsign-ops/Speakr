@@ -91,7 +91,14 @@ h1 .ch{display:inline-block;opacity:0;transform:translateY(.55em) rotateX(45deg)
 h1 .ch.in{animation:chIn .7s cubic-bezier(.2,.75,.2,1) forwards}
 @keyframes chIn{to{opacity:1;transform:none;filter:blur(0)}}
 .grad{filter:drop-shadow(0 0 34px rgba(120,110,255,.35))}
-.grad .ch{-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.grad .ch{-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;
+  /* h1's tight line-height (.96) makes this inline-block's own box shorter
+     than the font size, so a background sized to "100% 100%" of it stops
+     above descenders (the "y"/"p" tails paint transparent = look cut off).
+     A taller box gives the background room to cover the full glyph; the
+     line still reads tight because h1's line-height (the strut) — not this
+     inner box — governs the gap between the two heading lines. */
+  line-height:1.2}
 .sub{margin-top:26px;font-size:clamp(1rem,2vw,1.3rem);color:var(--dim);max-width:620px;line-height:1.55;
   opacity:0;animation:fadeUp .9s 1s cubic-bezier(.2,.7,.2,1) forwards}
 .sub b{color:var(--ink);font-weight:500}
@@ -121,6 +128,7 @@ h1 .ch.in{animation:chIn .7s cubic-bezier(.2,.75,.2,1) forwards}
 @keyframes blink{50%{opacity:0}}
 .hint{margin-top:14px;display:flex;justify-content:center;align-items:center;gap:10px;font-family:var(--mono);
   font-size:.72rem;color:#69719c;letter-spacing:.08em}
+.demoNote{margin-top:10px;font-family:var(--mono);font-size:.64rem;color:#454c74;text-align:center;line-height:1.6}
 kbd{font-family:var(--mono);font-size:.7rem;color:#c7d2ff;background:linear-gradient(#1b2140,#12162c);
   border:1px solid rgba(140,160,255,.3);border-bottom-width:3px;border-radius:7px;padding:4px 14px;
   box-shadow:0 0 18px rgba(90,110,255,.15)}
@@ -247,6 +255,7 @@ footer a:hover{color:#fff;border-color:#fff}
       </div>
       <div class="hint"><span class="deskonly">hold</span> <kbd id="kbd" class="deskonly">SPACE</kbd> <span class="deskonly">to feel it</span></div>
       <button class="holdbtn" id="holdbtn" type="button">◉&nbsp; HOLD TO SPEAK</button>
+      <p class="demoNote">Browser demo — hold, then actually speak. Uses this page's mic + your browser's speech recognition to show the loop live. The Speakr app itself never sends audio anywhere.</p>
     </div>
 
     <div class="downloads">
@@ -266,9 +275,9 @@ footer a:hover{color:#fff;border-color:#fff}
 
   <section class="proof">
     <div class="stats reveal">
-      <div class="stat"><b id="s1">0</b><span>bytes to the cloud</span></div>
-      <div class="stat"><b>$0</b><span>forever · open source</span></div>
-      <div class="stat"><b id="s2">0.2s</b><span>speech → text on GPU</span></div>
+      <div class="stat"><b class="num" data-final="0">0</b><span>bytes to the cloud</span></div>
+      <div class="stat"><b class="num" data-final="$0">$0</b><span>forever · open source</span></div>
+      <div class="stat"><b class="num" data-final="0.2s">0.2s</b><span>speech → text on GPU</span></div>
     </div>
 
     <div class="cards">
@@ -330,14 +339,32 @@ var isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || "") ||
             /Macintosh/.test(navigator.userAgent || "");
 document.getElementById(isMac ? "dl-mac" : "dl-win").classList.add("reco");
 
+/* ---------- perf: capped DPR + pause-when-hidden for every continuous loop ----------
+   Uncapped devicePixelRatio (3x+ on many phones/retina monitors) multiplies canvas
+   pixel counts nine-fold for zero visible gain; capping to 2 is the single biggest
+   lever against jank here. Each rAF loop below also stops scheduling itself while
+   the tab is hidden (backgrounded/minimized) and one listener restarts whichever
+   loops were running once the tab is visible again — otherwise these three loops
+   burn CPU/battery forever in a background tab. */
+var DPR = Math.min(window.devicePixelRatio || 1, 2);
+var starsAlive = false, waveAlive = false, glowAlive = false;
+document.addEventListener("visibilitychange", function(){
+  if (document.hidden) return;
+  if (!starsAlive && !reduced) requestAnimationFrame(drawStars);
+  if (!waveAlive && !reduced) requestAnimationFrame(drawWave);
+  if (!glowAlive && !reduced && matchMedia("(pointer:fine)").matches) requestAnimationFrame(moveGlow);
+});
+
 /* ---------- cursor glow ---------- */
 var glow = document.getElementById("glow");
 if (!reduced && matchMedia("(pointer:fine)").matches){
   var gx = innerWidth/2, gy = innerHeight*0.3, tx = gx, ty = gy;
   addEventListener("mousemove", function(e){ tx = e.clientX; ty = e.clientY; });
   (function moveGlow(){
+    if (document.hidden){ glowAlive = false; return; }
     gx += (tx-gx)*0.08; gy += (ty-gy)*0.08;
     glow.style.left = gx+"px"; glow.style.top = gy+"px";
+    glowAlive = true;
     requestAnimationFrame(moveGlow);
   })();
 } else { glow.style.display = "none"; }
@@ -363,10 +390,44 @@ document.querySelectorAll(".card").forEach(function(c){
   });
 });
 
+/* ---------- scramble-reveal number counters ---------- */
+function scrambleTo(el, target, duration){
+  duration = duration || 900;
+  var chars = target.split("");
+  var digits = "0123456789";
+  var t0 = null;
+  function frame(t){
+    if (t0 === null) t0 = t;
+    var p = Math.min(1, (t - t0) / duration);
+    var eased = 1 - Math.pow(1 - p, 3); // ease-out: early digits settle first
+    var out = "";
+    for (var i = 0; i < chars.length; i++){
+      var c = chars[i];
+      if (c < "0" || c > "9"){ out += c; continue; } // punctuation/units: shown as-is, never scrambled
+      var charP = eased * chars.length - i; // cascading left-to-right settle
+      out += charP >= 1 ? c : digits[(Math.random() * 10) | 0];
+    }
+    el.textContent = out;
+    if (p < 1) requestAnimationFrame(frame);
+    else el.textContent = target; // guarantee the exact final value, no rounding drift
+  }
+  requestAnimationFrame(frame);
+}
+
 /* ---------- scroll reveal ---------- */
 var io = new IntersectionObserver(function(entries){
   entries.forEach(function(en){
-    if (en.isIntersecting){ en.target.classList.add("in"); io.unobserve(en.target); }
+    if (en.isIntersecting){
+      en.target.classList.add("in");
+      if (en.target.classList.contains("stats")){
+        en.target.querySelectorAll(".num").forEach(function(el, i){
+          var final = el.getAttribute("data-final") || el.textContent;
+          if (reduced) { el.textContent = final; return; }
+          setTimeout(function(){ scrambleTo(el, final); }, i * 130);
+        });
+      }
+      io.unobserve(en.target);
+    }
   });
 }, { threshold: 0.18 });
 document.querySelectorAll(".reveal").forEach(function(el){ io.observe(el); });
@@ -374,9 +435,9 @@ document.querySelectorAll(".reveal").forEach(function(el){ io.observe(el); });
 /* ---------- starfield ---------- */
 var sc = document.getElementById("stars"), sx = sc.getContext("2d"), stars = [];
 function sizeStars(){
-  sc.width = innerWidth * devicePixelRatio; sc.height = innerHeight * devicePixelRatio;
+  sc.width = innerWidth * DPR; sc.height = innerHeight * DPR;
   sc.style.width = innerWidth+"px"; sc.style.height = innerHeight+"px";
-  sx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  sx.setTransform(DPR,0,0,DPR,0,0);
 }
 sizeStars(); addEventListener("resize", sizeStars);
 for (var i = 0; i < 70; i++){
@@ -385,19 +446,25 @@ for (var i = 0; i < 70; i++){
 }
 var mx = 0.5, my = 0.5;
 addEventListener("mousemove", function(e){ mx = e.clientX/innerWidth; my = e.clientY/innerHeight; });
+var lastStarDraw = -Infinity; // -Infinity so the very first call always paints immediately
 function drawStars(t){
-  sx.clearRect(0,0,innerWidth,innerHeight);
-  for (var i = 0; i < stars.length; i++){
-    var s = stars[i];
-    var px = s.x*innerWidth + (mx-0.5)*40*s.z;
-    var py = (s.y*innerHeight + t*0.008*s.z) % (innerHeight+20) + (my-0.5)*24*s.z;
-    var a = 0.25 + 0.35*Math.abs(Math.sin(t*0.001 + s.p));
-    sx.beginPath();
-    sx.arc(px, py, s.r*s.z, 0, 7);
-    sx.fillStyle = "rgba(150,170,255," + (a*s.z) + ")";
-    sx.fill();
+  if (document.hidden){ starsAlive = false; return; }
+  if (t - lastStarDraw >= 32){ // ~30fps cap: twinkling doesn't need 60fps, and this canvas
+    lastStarDraw = t;          // sits behind every glass panel on the page (backdrop-filter
+    sx.clearRect(0,0,innerWidth,innerHeight); // recomputes its blur each time this repaints)
+    for (var i = 0; i < stars.length; i++){
+      var s = stars[i];
+      var px = s.x*innerWidth + (mx-0.5)*40*s.z;
+      var py = (s.y*innerHeight + t*0.008*s.z) % (innerHeight+20) + (my-0.5)*24*s.z;
+      var a = 0.25 + 0.35*Math.abs(Math.sin(t*0.001 + s.p));
+      sx.beginPath();
+      sx.arc(px, py, s.r*s.z, 0, 7);
+      sx.fillStyle = "rgba(150,170,255," + (a*s.z) + ")";
+      sx.fill();
+    }
   }
-  if (!reduced) requestAnimationFrame(drawStars);
+  if (!reduced){ starsAlive = true; requestAnimationFrame(drawStars); }
+  else starsAlive = false;
 }
 drawStars(0);
 
@@ -408,15 +475,27 @@ var IDLE = 0.26;
 var amp = 0, targetAmp = IDLE;   // idle simmer vs 1 = live
 function sizeWave(){
   var r = wc.getBoundingClientRect();
-  wc.width = r.width * devicePixelRatio; wc.height = 110 * devicePixelRatio;
-  wx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  wc.width = r.width * DPR; wc.height = 110 * DPR;
+  wx.setTransform(DPR,0,0,DPR,0,0);
 }
 sizeWave(); addEventListener("resize", sizeWave);
 var N = 84;
+// Set by the hold-to-speak demo below once the mic + analyser are live: real
+// frequency-domain audio data replaces the simulated sine bars while holding.
+var micLive = false, analyserNode = null, freqData = null;
 function drawWave(t){
-  var w = wc.width/devicePixelRatio, h = 110, mid = h/2;
+  if (document.hidden){ waveAlive = false; return; }
+  var w = wc.width/DPR, h = 110, mid = h/2;
   wx.clearRect(0,0,w,h);
-  amp += (targetAmp - amp) * 0.12;
+  var live = micLive && analyserNode;
+  if (live){
+    analyserNode.getByteFrequencyData(freqData);
+    var sum = 0;
+    for (var k = 0; k < freqData.length; k++) sum += freqData[k];
+    amp += (sum/freqData.length/255 - amp) * 0.35;
+  } else {
+    amp += (targetAmp - amp) * 0.12;
+  }
   var grad = wx.createLinearGradient(0,0,w,0);
   grad.addColorStop(0,"#4D9FFF"); grad.addColorStop(0.55,"#8B5CF6"); grad.addColorStop(1,"#C084FC");
   wx.fillStyle = grad;
@@ -426,22 +505,39 @@ function drawWave(t){
   for (var i = 0; i < N; i++){
     var x = i*bw + bw*0.5;
     var env = Math.pow(Math.sin(Math.PI * i/(N-1)), 0.7);           // taller mid
-    var n = Math.sin(t*0.004 + i*0.55) * 0.5
-          + Math.sin(t*0.007 + i*0.19 + 2) * 0.3
-          + Math.sin(t*0.011 + i*0.83 + 5) * 0.2;
-    var jitter = amp > 0.5 ? (Math.random()-0.5) * amp * 0.7 : 0;
-    var bh = Math.max(2.5, Math.abs(n + jitter) * env * amp * (h*0.92));
+    var bh;
+    if (live){
+      var idx = Math.min(freqData.length-1, Math.floor(Math.pow(i/(N-1), 1.4) * (freqData.length-1)));
+      bh = Math.max(2.5, (freqData[idx]/255) * env * (h*0.92));
+    } else {
+      var n = Math.sin(t*0.004 + i*0.55) * 0.5
+            + Math.sin(t*0.007 + i*0.19 + 2) * 0.3
+            + Math.sin(t*0.011 + i*0.83 + 5) * 0.2;
+      var jitter = amp > 0.5 ? (Math.random()-0.5) * amp * 0.7 : 0;
+      bh = Math.max(2.5, Math.abs(n + jitter) * env * amp * (h*0.92));
+    }
     wx.beginPath();
     if (wx.roundRect) wx.roundRect(x - bw*0.28, mid - bh/2, bw*0.56, bh, 3);
     else wx.rect(x - bw*0.28, mid - bh/2, bw*0.56, bh);
     wx.fill();
   }
-  if (!reduced) requestAnimationFrame(drawWave);
+  if (!reduced){ waveAlive = true; requestAnimationFrame(drawWave); }
+  else waveAlive = false;
 }
 drawWave(0);
 if (reduced){ amp = 0.35; drawWave(1000); }
 
-/* ---------- hold-to-speak demo ---------- */
+/* ---------- hold-to-speak demo ----------
+   Tiered, so it always works and never lies about what it's doing:
+   1. Mic + browser speech recognition available -> real waveform driven by
+      your actual voice, real transcript, cleaned up the way Speakr's
+      rule-based formatter would (filler words stripped, capitalized,
+      punctuated) — see cleanupTranscript().
+   2. Mic granted but no speech recognition (no browser support, or it
+      errors) -> still a real, voice-reactive waveform, with one of the
+      canned lines typed out in its place (no fake transcript pretending to
+      be a live one).
+   3. Mic denied/unavailable -> fully simulated, exactly as before. */
 var txt = document.getElementById("txt"), lineEl = document.getElementById("line");
 var kbd = document.getElementById("kbd"), holdbtn = document.getElementById("holdbtn");
 var phrases = [
@@ -453,27 +549,97 @@ var phrases = [
 ];
 var pi = 0, holding = false, holdStart = 0, typeTimer = null;
 
-function startHold(){
-  if (holding) return;
-  holding = true; holdStart = Date.now();
-  clearTimeout(typeTimer);
-  targetAmp = 1;
-  stage.classList.add("live");
-  lineEl.classList.add("rec");
-  if (kbd) kbd.classList.add("down");
-  txt.innerHTML = '<span class="ph">listening…</span>';
+var micStream = null, micDenied = false, micPromise = null;
+var audioCtx = null;
+var SRCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+var recognition = null, sttBroken = false;
+var finalChunk = "", interimChunk = "";
+
+function cleanupTranscript(text){
+  text = (text || "").trim();
+  if (!text) return text;
+  // Mirrors Speakr's rule-based cleanup (the non-LLM path): strip standalone
+  // filler words, collapse the whitespace that leaves behind, sentence-case it.
+  text = text.replace(/\b(um+|uh+|erm+|hmm+)\b/gi, " ").replace(/\s{2,}/g, " ").trim();
+  if (!text) return text;
+  text = text.charAt(0).toUpperCase() + text.slice(1);
+  if (!/[.!?]$/.test(text)) text += ".";
+  return text;
 }
-function endHold(){
-  if (!holding) return;
-  holding = false;
-  targetAmp = IDLE;
-  stage.classList.remove("live");
-  lineEl.classList.remove("rec");
-  if (kbd) kbd.classList.remove("down");
-  if (Date.now() - holdStart < 350){
-    txt.innerHTML = '<span class="ph">hold it down while you “speak” 😉</span>';
-    return;
-  }
+
+function ensureMic(){
+  if (micStream) return Promise.resolve(micStream);
+  if (micDenied) return Promise.reject(new Error("mic denied"));
+  if (micPromise) return micPromise;
+  micPromise = navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream){
+    micStream = stream;
+    micPromise = null;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var src = audioCtx.createMediaStreamSource(stream);
+      analyserNode = audioCtx.createAnalyser();
+      analyserNode.fftSize = 256;
+      analyserNode.smoothingTimeConstant = 0.75;
+      freqData = new Uint8Array(analyserNode.frequencyBinCount);
+      src.connect(analyserNode);
+    } catch(e){ analyserNode = null; }
+    return stream;
+  }, function(err){
+    micDenied = true; micPromise = null;
+    throw err;
+  });
+  return micPromise;
+}
+
+function renderLiveTranscript(){
+  var shown = (finalChunk + interimChunk).trim();
+  if (!shown){ txt.innerHTML = '<span class="ph">listening…</span>'; return; }
+  txt.textContent = shown; // textContent, not innerHTML — this is live speech input
+  var caret = document.createElement("span");
+  caret.className = "caret";
+  txt.appendChild(caret);
+}
+
+function startRecognition(){
+  if (!SRCtor || sttBroken) return;
+  try {
+    recognition = new SRCtor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    recognition.onresult = function(e){
+      var interim = "", final = "";
+      for (var i = e.resultIndex; i < e.results.length; i++){
+        var chunk = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += chunk; else interim += chunk;
+      }
+      if (final) finalChunk += final;
+      interimChunk = interim;
+      renderLiveTranscript();
+    };
+    recognition.onerror = function(e){
+      if (e.error !== "no-speech" && e.error !== "aborted") sttBroken = true;
+    };
+    recognition.onend = function(){ recognition = null; };
+    recognition.start();
+  } catch(e){ sttBroken = true; recognition = null; }
+}
+
+function finishRealTranscript(){
+  txt.innerHTML = '<span class="ph">cleaning up…</span>';
+  clearTimeout(typeTimer);
+  typeTimer = setTimeout(function(){
+    var cleaned = cleanupTranscript(finalChunk || interimChunk);
+    txt.textContent = cleaned || "Didn't catch that — try again, a little closer to the mic.";
+    if (cleaned){
+      var caret = document.createElement("span"); caret.className = "caret";
+      txt.appendChild(caret);
+      typeTimer = setTimeout(function(){ caret.remove(); }, 2500);
+    }
+  }, reduced ? 50 : 350);
+}
+
+function playCannedPhrase(){
   var phrase = phrases[pi++ % phrases.length];
   txt.innerHTML = '<span class="ph">transcribing…</span>';
   typeTimer = setTimeout(function(){
@@ -485,14 +651,62 @@ function endHold(){
     (function tick(){
       if (i <= phrase.length){
         out.textContent = phrase.slice(0, i++);
-        targetAmp = IDLE + Math.random()*0.12;
+        if (!micLive) targetAmp = IDLE + Math.random()*0.12;
         typeTimer = setTimeout(tick, 18 + Math.random()*26);
       } else {
-        targetAmp = IDLE;
+        if (!micLive) targetAmp = IDLE;
         typeTimer = setTimeout(function(){ caret.remove(); }, 2500);
       }
     })();
   }, reduced ? 50 : 450);
+}
+
+function startHold(){
+  if (holding) return;
+  holding = true; holdStart = Date.now();
+  clearTimeout(typeTimer);
+  micLive = false;
+  finalChunk = ""; interimChunk = "";
+  targetAmp = 1; // optimistic synthetic level in case mic permission is still pending/denied
+  stage.classList.add("live");
+  lineEl.classList.add("rec");
+  if (kbd) kbd.classList.add("down");
+  txt.innerHTML = '<span class="ph">listening…</span>';
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return; // Tier 3 only
+  ensureMic().then(function(){
+    if (!holding) return; // released before the permission prompt resolved
+    micLive = !!analyserNode;
+    startRecognition();
+  }).catch(function(){ /* denied — stays on the Tier 3 synthetic path already running */ });
+}
+
+function endHold(){
+  if (!holding) return;
+  holding = false;
+  stage.classList.remove("live");
+  lineEl.classList.remove("rec");
+  if (kbd) kbd.classList.remove("down");
+  var held = Date.now() - holdStart;
+  if (recognition){ try { recognition.stop(); } catch(e){} }
+
+  var sttWorking = micLive && SRCtor && !sttBroken;
+  if (sttWorking){
+    targetAmp = IDLE;
+    if (held < 350 && !finalChunk && !interimChunk){
+      txt.innerHTML = '<span class="ph">hold it down while you speak 😉</span>';
+      return;
+    }
+    finishRealTranscript(); // Tier 1: real transcript
+    return;
+  }
+
+  targetAmp = IDLE; // Tier 2 (real waveform, canned line) and Tier 3 (fully simulated) share this
+  if (held < 350){
+    txt.innerHTML = '<span class="ph">hold it down while you “speak” 😉</span>';
+    return;
+  }
+  playCannedPhrase();
 }
 
 addEventListener("keydown", function(e){
@@ -506,6 +720,11 @@ addEventListener("keyup", function(e){ if (e.code === "Space") endHold(); });
 ["pointerdown"].forEach(function(ev){ holdbtn.addEventListener(ev, function(e){ e.preventDefault(); startHold(); }); });
 ["pointerup","pointercancel","pointerleave"].forEach(function(ev){ holdbtn.addEventListener(ev, endHold); });
 addEventListener("blur", endHold);
+addEventListener("pagehide", function(){
+  if (recognition){ try { recognition.stop(); } catch(e){} }
+  if (micStream) micStream.getTracks().forEach(function(tr){ tr.stop(); });
+  if (audioCtx) { try { audioCtx.close(); } catch(e){} }
+});
 })();
 </script>
 </body>
