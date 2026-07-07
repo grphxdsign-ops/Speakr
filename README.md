@@ -141,6 +141,18 @@ runs on the CPU there (no CUDA) — `base`/`small` are comfortably fast on
 Apple Silicon. Ollama for the LLM polish: [ollama.com/download](https://ollama.com/download),
 then `ollama pull llama3.2` — Speakr auto-starts and auto-detects it.
 
+## Control panel
+
+Tray → **Open Speakr** (or double-click the tray icon on Windows) opens a
+small control panel in your browser — same look as
+[speakr.cloud](https://speakr.cloud) — with an on/off switch and a
+Settings area where clicking the key button rebinds the push-to-talk key:
+press the key you want (any key on Windows; a modifier-style key like fn,
+right ⌘, right ⌥, or caps lock on macOS) and it's saved to `config.json`
+and applied immediately. The panel is served from `127.0.0.1` only, and
+state-changing requests require a per-run token — nothing is exposed to
+the network.
+
 ## Configuration (`config.json`)
 
 Created next to the app on first run. Highlights:

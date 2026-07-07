@@ -127,6 +127,62 @@ class HotkeyListener:
             Quartz.CFRunLoopStop(self._loop)
 
 
+# Capture preference order: both "fn" and "globe" map to 63; report "fn".
+_CAPTURE_NAMES = [
+    "fn", "right cmd", "right option", "right ctrl", "right shift",
+    "caps lock", "left option", "left ctrl", "left shift", "left cmd",
+]
+
+
+def capture_next_key(timeout=10.0):
+    """Wait for the next modifier-style key press (the only hotkeys the Mac
+    backend supports) and return its config name, or None on timeout. Runs
+    its own short-lived listen-only event tap, so the active HotkeyListener
+    should be stopped first to keep the sampled press from also dictating."""
+    result = {}
+    done = threading.Event()
+    holder = {}
+
+    def callback(proxy, type_, event, refcon):
+        if type_ in (Quartz.kCGEventTapDisabledByTimeout, Quartz.kCGEventTapDisabledByUserInput):
+            return event
+        keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
+        flags = Quartz.CGEventGetFlags(event)
+        for name in _CAPTURE_NAMES:
+            code = MODIFIER_KEYCODES[name]
+            if keycode == code and flags & MODIFIER_FLAGS[code]:
+                result["name"] = name
+                done.set()
+                break
+        return event
+
+    def run():
+        tap = Quartz.CGEventTapCreate(
+            Quartz.kCGSessionEventTap,
+            Quartz.kCGHeadInsertEventTap,
+            Quartz.kCGEventTapOptionListenOnly,
+            Quartz.CGEventMaskBit(Quartz.kCGEventFlagsChanged),
+            callback,
+            None,
+        )
+        if tap is None:
+            log.error("capture_next_key: could not create event tap (Input Monitoring permission?)")
+            done.set()
+            return
+        source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
+        holder["loop"] = Quartz.CFRunLoopGetCurrent()
+        Quartz.CFRunLoopAddSource(holder["loop"], source, Quartz.kCFRunLoopCommonModes)
+        Quartz.CGEventTapEnable(tap, True)
+        Quartz.CFRunLoopRun()
+
+    thread = threading.Thread(target=run, name="hotkey-capture", daemon=True)
+    thread.start()
+    done.wait(timeout)
+    if holder.get("loop") is not None:
+        Quartz.CFRunLoopStop(holder["loop"])
+    return result.get("name")
+
+
 def _send_cmd_key(keycode):
     source = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateHIDSystemState)
     for down in (True, False):

@@ -38,6 +38,7 @@ ICONS = {state: _make_icon(color) for state, color in STATE_COLORS.items()}
 class Tray:
     def __init__(self, app):
         self.app = app
+        self.state = "loading"
         self.icon = pystray.Icon(
             "Speakr",
             icon=ICONS["loading"],
@@ -59,6 +60,12 @@ class Tray:
         app = self.app
         model_items = [self._model_item(name) for name in MODELS]
         return pystray.Menu(
+            pystray.MenuItem(
+                "Open Speakr",
+                lambda _icon, _item: app.open_panel(),
+                default=True,  # double-clicking the tray icon opens the panel
+            ),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 "Enabled",
                 lambda _icon, _item: app.toggle_enabled(),
@@ -95,6 +102,7 @@ class Tray:
         )
 
     def set_state(self, state: str, detail: str = ""):
+        self.state = state
         self.icon.icon = ICONS.get(state, ICONS["idle"])
         title = f"Speakr — {state}"
         if detail:

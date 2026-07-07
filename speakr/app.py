@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 
 from speakr import config as cfg_mod
 from speakr.audio import AudioRecorder
@@ -14,11 +15,12 @@ from speakr.context import get_active_app, get_screen_context, get_selected_text
 from speakr.dictionary import Dictionary
 from speakr.formatter import Formatter
 from speakr.injector import inject, read_selection_via_clipboard
-from speakr.inputs import HotkeyListener
+from speakr.inputs import HotkeyListener, capture_next_key
 from speakr.learning import VocabLearner, extract_notable_tokens
 from speakr.streaming import DictationSession
 from speakr.transcriber import Transcriber
 from speakr.tray import Tray
+from speakr.webui import WebUI
 
 
 def _open_path(path):
@@ -52,6 +54,7 @@ class SpeakrApp:
         self.transcriber = Transcriber(self.config, self.dictionary, self.learner)
         self.formatter = Formatter(self.config)
         self.tray = Tray(self)
+        self.webui = WebUI(self)
         self.enabled = True
         self._recording = False
         self._record_started_at = 0.0
@@ -73,6 +76,7 @@ class SpeakrApp:
             self.tray.set_state("error", "mic unavailable — check Windows mic permissions")
         self._register_hotkey()
         threading.Thread(target=self._worker, name="pipeline", daemon=True).start()
+        self.webui.start()
         self.tray.run()  # blocks until quit
 
     def _announce_ready(self):
@@ -83,6 +87,7 @@ class SpeakrApp:
 
     def quit(self):
         self.log.info("Speakr shutting down")
+        self.webui.stop()
         if self._listener is not None:
             try:
                 self._listener.stop()
@@ -103,6 +108,29 @@ class SpeakrApp:
             on_toggle=self._toggle_recording,
         )
         self._listener.start()
+
+    def capture_hotkey(self, timeout=8.0):
+        """Rebind the push-to-talk key to the next key the user presses
+        (from the control panel's Settings). The live listener is paused so
+        the sampled press can't also start a dictation; it is re-registered
+        either way — on the new key if one was captured, otherwise unchanged.
+        Returns the captured key name, or None on timeout/Esc."""
+        if self._listener is not None:
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
+            self._listener = None
+        try:
+            name = capture_next_key(timeout)
+            if name in (None, "esc", "escape"):
+                return None
+            self.config.set("hotkey", value=name)
+            self.log.info("Hotkey changed to %r", name)
+            return name
+        finally:
+            self._register_hotkey()
+            self.tray.set_state("idle" if self.enabled else "disabled")
 
     def _hotkey_down(self):
         if not self._recording:  # key auto-repeat sends extra downs
@@ -258,6 +286,9 @@ class SpeakrApp:
                     self.tray.set_state("recording" if self._recording else "idle")
 
     # ----- tray actions ----------------------------------------------------
+
+    def open_panel(self):
+        webbrowser.open(self.webui.url())
 
     def toggle_enabled(self):
         self.enabled = not self.enabled

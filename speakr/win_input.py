@@ -2,6 +2,7 @@
 injection keystrokes via Ctrl+V / simulated typing."""
 
 import logging
+import threading
 
 import keyboard
 
@@ -33,6 +34,27 @@ class HotkeyListener:
 
     def stop(self):
         keyboard.unhook_all()
+
+
+def capture_next_key(timeout=10.0):
+    """Block until the next key-down anywhere and return its `keyboard`-style
+    name — the same names hook_key accepts — or None on timeout. "esc" comes
+    back as-is so callers can treat it as cancel. The active HotkeyListener
+    must be stopped first: its hook would react to the key being sampled."""
+    captured = {}
+    done = threading.Event()
+
+    def on_event(event):
+        if event.event_type == "down" and event.name:
+            captured["name"] = event.name.lower()
+            done.set()
+
+    hook = keyboard.hook(on_event)
+    try:
+        done.wait(timeout)
+    finally:
+        keyboard.unhook(hook)
+    return captured.get("name")
 
 
 def send_paste():
