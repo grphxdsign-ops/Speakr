@@ -50,9 +50,33 @@ mkdir -p "$SUP"
 export SPEAKR_HOME="$SUP"
 export PYTHONPATH="$RES"
 VENV="$SUP/venv"
+
+# Apple Silicon Macs' /usr/bin/python3 (from Xcode Command Line Tools) is a
+# universal binary — which slice actually executes depends on how the
+# PARENT process was launched (e.g. Terminal set to "Open using Rosetta"),
+# not the hardware. `sysctl hw.optional.arm64` reports the true hardware
+# capability regardless of any Rosetta translation already in effect on
+# this process, so pin the venv to it explicitly rather than leaving it to
+# ambient shell state — otherwise a venv built in one architecture crashes
+# on import when later launched in the other (mismatched .so files).
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+    PY=(arch -arm64 python3)
+else
+    PY=(python3)
+fi
+
+# Self-heal a venv that was built for the wrong architecture (including
+# ones created before this fix existed) instead of crashing on import.
+if [ -x "$VENV/bin/python" ]; then
+    have_arch="$("$VENV/bin/python" -c 'import platform;print(platform.machine())' 2>/dev/null)"
+    want_arch="$("${PY[@]}" -c 'import platform;print(platform.machine())' 2>/dev/null)"
+    if [ -n "$want_arch" ] && [ "$have_arch" != "$want_arch" ]; then
+        rm -rf "$VENV"
+    fi
+fi
+
 if [ ! -x "$VENV/bin/python" ]; then
-    PY="$(command -v python3 || echo /usr/bin/python3)"
-    "$PY" -m venv "$VENV"
+    "${PY[@]}" -m venv "$VENV"
     "$VENV/bin/python" -m pip install --upgrade pip >> "$SUP/setup.log" 2>&1
     "$VENV/bin/python" -m pip install -r "$RES/requirements.txt" >> "$SUP/setup.log" 2>&1
 fi
