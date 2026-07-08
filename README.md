@@ -69,6 +69,20 @@ Everything runs on this machine. The only network access, ever:
   detected and reopened automatically; if a recording comes back mostly
   empty, the tray tells you to dictate again instead of silently failing.
 
+## Install (easiest)
+
+Grab it from [speakr.cloud](https://speakr.cloud) (or the GitHub Releases
+page): **Speakr-Setup.exe** on Windows (run it — per-user install, no admin,
+shortcuts created, launches when done) or **Speakr.dmg** on Mac (open, drag
+Speakr into Applications — Apple Silicon; Intel Macs use the source route
+below). Python is bundled — nothing to install first. First launch downloads
+the transcription model; that's the only network call it ever makes. Grant
+the permissions macOS prompts for (Microphone, Input Monitoring,
+Accessibility) and you're dictating.
+
+The sections below are the from-source routes — for Intel Macs, development,
+or if you just prefer it.
+
 ## Quick start — Windows
 
 1. Double-click **`run.bat`** (first run creates the environment and downloads

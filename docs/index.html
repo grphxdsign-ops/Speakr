@@ -355,25 +355,31 @@ fetch("https://api.github.com/repos/grphxdsign-ops/Speakr/releases/latest")
   .then(function(r){ return r.ok ? r.json() : null; })
   .then(function(rel){
     if (!rel || !rel.assets || !rel.assets.length) return;
-    function asset(ext){
-      for (var i = 0; i < rel.assets.length; i++)
-        if (rel.assets[i].name.toLowerCase().slice(-ext.length) === ext) return rel.assets[i];
-      return null;
+    function asset(match, ext){
+      var fallback = null;
+      for (var i = 0; i < rel.assets.length; i++){
+        var name = rel.assets[i].name.toLowerCase();
+        if (name.slice(-ext.length) !== ext) continue;
+        if (match && name.indexOf(match) !== -1) return rel.assets[i];
+        if (!fallback) fallback = rel.assets[i];
+      }
+      return fallback;
     }
-    var dmg = asset(".dmg"), exe = asset(".exe");
+    var dmg = asset("speakr.dmg", ".dmg"), exe = asset("setup", ".exe");
     var ver = rel.tag_name || "";
     if (dmg){
       document.getElementById("dl-mac").href = dmg.browser_download_url;
-      document.getElementById("mac-sub").textContent = dmg.name + (ver ? " · " + ver : "");
+      document.getElementById("mac-sub").textContent = "Apple Silicon" + (ver ? " · " + ver : "");
     }
     if (exe){
       document.getElementById("dl-win").href = exe.browser_download_url;
-      document.getElementById("win-sub").textContent = exe.name + (ver ? " · " + ver : "");
+      document.getElementById("win-sub").textContent = "Installer" + (ver ? " · " + ver : "");
     }
     if (dmg || exe){
       document.getElementById("dlnote").innerHTML =
-        'Mac: open the dmg, drag Speakr to Applications. Windows: run the exe. ' +
-        "First run downloads the model — that's the only network call it ever makes.";
+        'Mac: open the dmg, drag Speakr into Applications — done. ' +
+        'Windows: run the installer — shortcuts and launch handled for you. ' +
+        "First launch downloads the model — that's the only network call it ever makes.";
     }
   })
   .catch(function(){ /* keep ZIP fallback */ });
