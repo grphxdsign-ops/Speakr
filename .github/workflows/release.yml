@@ -48,6 +48,13 @@ jobs:
           iconutil -c icns speakr.iconset -o speakr.icns
 
       - name: Build Speakr.app (self-contained, Python bundled)
+        # --paths .: frozen_entry.py lives in scripts/, and PyInstaller's
+        # import analysis searches the ENTRY SCRIPT'S OWN directory, not the
+        # working directory it was invoked from — without this, it can't see
+        # the speakr/ package one level up at the repo root, "successfully"
+        # builds anyway, and only fails at actual runtime with
+        # ModuleNotFoundError: No module named 'speakr' (reproduced locally
+        # before adding this flag).
         # --collect-all on the ML stack: ctranslate2 ships native libs and
         # faster_whisper ships the bundled Silero VAD onnx asset, neither of
         # which static import analysis finds. pystray picks its macOS backend
@@ -56,11 +63,30 @@ jobs:
           pyinstaller --noconfirm --windowed
           --name Speakr --icon speakr.icns
           --osx-bundle-identifier com.speakr.dictation
+          --paths .
           --collect-all ctranslate2
           --collect-all faster_whisper
           --collect-all onnxruntime
           --hidden-import pystray._darwin
           scripts/frozen_entry.py
+
+      - name: Smoke-test the build
+        # A PyInstaller build can report success while being completely
+        # broken at runtime (exactly what shipped in v0.1.0 — missing
+        # --paths . above meant the speakr package silently wasn't bundled
+        # at all). Actually launch it and confirm it's still alive a few
+        # seconds later instead of trusting the build exit code alone.
+        run: |
+          dist/Speakr.app/Contents/MacOS/Speakr > smoke.log 2>&1 &
+          pid=$!
+          sleep 4
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "::error::Speakr exited within 4s of launch — the build is broken. Output:"
+            cat smoke.log
+            exit 1
+          fi
+          kill "$pid"
+          echo "Smoke test passed — process was still alive after 4s."
 
       - name: Menu-bar metadata + permission strings
         # LSUIElement: menu-bar app, no Dock icon (matches how Speakr runs).
@@ -104,15 +130,38 @@ jobs:
         # onedir, not onefile: onefile re-extracts hundreds of MB into a temp
         # dir on EVERY launch. The Inno installer below gives the one-file
         # download UX without that per-launch cost.
+        # --paths .: see the matching comment in the mac-dmg job — same
+        # entry-script-in-a-subdirectory gap, reproduced locally on both
+        # platforms' build shape before adding this flag.
         run: >
           pyinstaller --noconfirm --windowed
           --name Speakr --icon icon.ico
+          --paths .
           --collect-all ctranslate2
           --collect-all faster_whisper
           --collect-all onnxruntime
           --hidden-import pystray._win32
           --hidden-import comtypes.stream
           scripts/frozen_entry.py
+
+      - name: Smoke-test the build
+        # Same regression guard as the mac-dmg job: a PyInstaller build can
+        # report success while being completely broken at runtime (exactly
+        # what v0.1.0 shipped — missing --paths . above meant the speakr
+        # package silently wasn't bundled at all). Actually launch it and
+        # confirm it's still alive a few seconds later.
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\Speakr\Speakr.exe" `
+               -RedirectStandardOutput smoke_out.log -RedirectStandardError smoke_err.log -PassThru
+          Start-Sleep -Seconds 4
+          if ($p.HasExited) {
+            Write-Host "::error::Speakr.exe exited within 4s of launch — the build is broken. Output:"
+            Get-Content smoke_out.log, smoke_err.log -ErrorAction SilentlyContinue
+            exit 1
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "Smoke test passed — process was still alive after 4s."
 
       - name: Build Speakr-Setup.exe (Inno Setup)
         shell: pwsh
