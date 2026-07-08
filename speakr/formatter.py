@@ -1,6 +1,8 @@
 """Cleanup of raw transcripts: rule-based pass always, optional local LLM pass
 via Ollama (never any remote service)."""
 
+from __future__ import annotations
+
 import logging
 import re
 import subprocess

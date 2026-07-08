@@ -10,6 +10,8 @@ never read the token, and the custom header forces a CORS preflight that
 this server never approves.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import secrets

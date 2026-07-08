@@ -1,6 +1,8 @@
 """Local ASR via faster-whisper. Model weights download once from Hugging Face;
 audio never leaves the machine."""
 
+from __future__ import annotations
+
 import logging
 import os
 import sys

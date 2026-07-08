@@ -8,6 +8,8 @@ as conditioning context, and recordings shorter than one chunk take the exact
 same single-pass path as before.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 import time

@@ -1,6 +1,8 @@
 """Windows input backend: global hotkey via the `keyboard` library,
 injection keystrokes via Ctrl+V / simulated typing."""
 
+from __future__ import annotations
+
 import logging
 import threading
 

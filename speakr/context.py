@@ -1,6 +1,8 @@
 """Foreground-app detection and focused-control text capture.
 Read locally, used in memory for one dictation, never persisted or logged."""
 
+from __future__ import annotations
+
 import logging
 import sys
 import threading

@@ -3,6 +3,8 @@ recurs, feeds it to the ASR model as a transcription hint — so Speakr gets
 better at *your* words over time. Everything stays in learned_words.json on
 this machine."""
 
+from __future__ import annotations
+
 import json
 import logging
 import re

@@ -1,5 +1,7 @@
 """Configuration loading/saving. Everything lives in config.json next to the app."""
 
+from __future__ import annotations
+
 import copy
 import json
 import logging
