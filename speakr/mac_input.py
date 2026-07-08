@@ -12,6 +12,8 @@ modifier event carrying keycode 63 and the SecondaryFn flag — hence the
 event tap instead of an ordinary key hook.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 import time

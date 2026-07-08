@@ -1,5 +1,7 @@
 """Platform dispatch for hotkey listening and text injection."""
 
+from __future__ import annotations
+
 import sys
 
 IS_MAC = sys.platform == "darwin"

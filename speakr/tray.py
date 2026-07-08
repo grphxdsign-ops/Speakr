@@ -1,6 +1,8 @@
 """System tray icon and menu (pystray). The icon color is the app state:
 gray = loading, slate = idle, red = recording, amber = processing."""
 
+from __future__ import annotations
+
 import logging
 
 import pystray

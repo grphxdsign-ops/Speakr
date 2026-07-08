@@ -1,6 +1,8 @@
 """System-wide text insertion into the focused control, plus clipboard-based
 selection reading for Edit Mode."""
 
+from __future__ import annotations
+
 import logging
 import time
 
