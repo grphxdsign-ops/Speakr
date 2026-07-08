@@ -437,14 +437,18 @@ document.querySelectorAll(".card").forEach(function(c){
 
 /* ---------- scramble-reveal number counters ---------- */
 function scrambleTo(el, target, duration){
-  duration = duration || 900;
+  duration = duration || 2200;
   var chars = target.split("");
   var digits = "0123456789";
   var t0 = null;
   function frame(t){
     if (t0 === null) t0 = t;
     var p = Math.min(1, (t - t0) / duration);
-    var eased = 1 - Math.pow(1 - p, 3); // ease-out: early digits settle first
+    // ease-IN (not out): stays chaotic/random for most of the duration, then
+    // cascades to the real value in a quick burst right at the end — reads
+    // as a proper slot-machine scramble instead of resolving almost
+    // immediately and then just sitting there correct for the rest of it.
+    var eased = Math.pow(p, 3);
     var out = "";
     for (var i = 0; i < chars.length; i++){
       var c = chars[i];
@@ -468,7 +472,7 @@ var io = new IntersectionObserver(function(entries){
         en.target.querySelectorAll(".num").forEach(function(el, i){
           var final = el.getAttribute("data-final") || el.textContent;
           if (reduced) { el.textContent = final; return; }
-          setTimeout(function(){ scrambleTo(el, final); }, i * 130);
+          setTimeout(function(){ scrambleTo(el, final); }, i * 220);
         });
       }
       io.unobserve(en.target);
