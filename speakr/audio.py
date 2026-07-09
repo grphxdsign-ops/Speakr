@@ -30,10 +30,15 @@ class AudioRecorder:
         self._recorded_total = 0
         self._recording = False
         self._last_frame_at = 0.0  # monotonic time of the last mic callback
+        # Live input level (RMS of the newest block), read lock-free by the
+        # control panel to animate while recording. Plain float store/load is
+        # atomic in CPython, so no lock on this hot path.
+        self.level = 0.0
         self._lock = threading.Lock()
 
     def _callback(self, indata, frames, time_info, status):
         self._last_frame_at = time.monotonic()
+        self.level = float(np.sqrt(np.mean(np.square(indata, dtype=np.float32))))
         if status:
             log.warning("Audio stream status: %s", status)
         with self._lock:
@@ -65,6 +70,7 @@ class AudioRecorder:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+        self.level = 0.0
 
     def start(self):
         """Called once at app startup when keep_stream_open is on."""

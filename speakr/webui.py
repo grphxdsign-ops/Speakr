@@ -72,17 +72,37 @@ class WebUI:
 
     # ----- state for the page ----------------------------------------------
 
-    def state(self):
+    def state(self, authed=False):
         app = self.app
         tray_state = getattr(app.tray, "state", "idle")
         state = tray_state if app.enabled else "disabled"
         hotkey = app.config.get("hotkey")
-        return {
+        out = {
             "enabled": app.enabled,
             "hotkey": hotkey,
             "state": state,
             "status": STATE_LABELS.get(state, state).format(key=hotkey),
             "mac": sys.platform == "darwin",
+            "level": getattr(app.recorder, "level", 0.0),
+            "words": app.session_words,
+            "seq": app.last_seq,
+        }
+        if authed:
+            # Dictated text only ever goes to the panel itself: the token is
+            # embedded in the served page, and the custom header forces a CORS
+            # preflight (never approved) for anything cross-origin.
+            out["last_text"] = app.last_text
+            out["last_duration"] = app.last_duration
+        return out
+
+    def pulse(self):
+        """Tiny fast-poll payload driving the live orb while recording."""
+        app = self.app
+        tray_state = getattr(app.tray, "state", "idle")
+        return {
+            "level": getattr(app.recorder, "level", 0.0),
+            "state": tray_state if app.enabled else "disabled",
+            "seq": app.last_seq,
         }
 
     def capture(self):
@@ -116,7 +136,9 @@ def _make_handler(ui: WebUI):
             if self.path.split("?")[0] == "/":
                 self._send(200, PAGE.replace("__TOKEN__", ui.token), ctype="text/html")
             elif self.path == "/api/state":
-                self._send(200, json.dumps(ui.state()))
+                self._send(200, json.dumps(ui.state(authed=self._authed())))
+            elif self.path == "/api/pulse":
+                self._send(200, json.dumps(ui.pulse()))
             else:
                 self._send(404, "{}")
 
