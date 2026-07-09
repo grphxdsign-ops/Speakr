@@ -17,6 +17,9 @@ CONFIG_PATH = ROOT / "config.json"
 DICTIONARY_PATH = ROOT / "dictionary.txt"
 LEARNED_PATH = ROOT / "learned_words.json"
 LOG_PATH = ROOT / "speakr.log"
+# Where the running instance publishes its control-panel URL (the port can
+# differ per run), so a second launch can open the panel instead of dying.
+PANEL_URL_PATH = ROOT / "panel.url"
 
 IS_MAC = sys.platform == "darwin"
 

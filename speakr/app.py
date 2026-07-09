@@ -79,6 +79,10 @@ class SpeakrApp:
         self._register_hotkey()
         threading.Thread(target=self._worker, name="pipeline", daemon=True).start()
         self.webui.start()
+        # A menu-bar app with no Dock icon shows nothing when double-clicked;
+        # opening the control panel is the visible proof that launching
+        # worked (and it shows model-download progress on first run).
+        self.open_panel()
         self.tray.run()  # blocks until quit
 
     def _announce_ready(self):
@@ -363,7 +367,15 @@ def _acquire_single_instance() -> bool:
 
 def main():
     if not _acquire_single_instance():
-        setup_logging().warning("Speakr is already running — exiting duplicate instance")
+        # Relaunching the installed app while it's running is how people say
+        # "show me Speakr" — open the live instance's panel, don't just die.
+        setup_logging().warning("Speakr is already running — opening its control panel")
+        try:
+            url = cfg_mod.PANEL_URL_PATH.read_text(encoding="utf-8").strip()
+        except OSError:
+            url = ""
+        if url:
+            webbrowser.open(url)
         return
     SpeakrApp().start()
 
