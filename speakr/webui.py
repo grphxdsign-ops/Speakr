@@ -19,6 +19,8 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from speakr import config as cfg_mod
+
 log = logging.getLogger("speakr.webui")
 
 PREFERRED_PORT = 43117
@@ -49,12 +51,22 @@ class WebUI:
             self._server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.port = self._server.server_address[1]
         threading.Thread(target=self._server.serve_forever, name="webui", daemon=True).start()
+        try:
+            # Published for duplicate launches (double-clicking the app while
+            # it's already running opens this panel instead of doing nothing).
+            cfg_mod.PANEL_URL_PATH.write_text(self.url(), encoding="utf-8")
+        except OSError as exc:
+            log.warning("Could not write %s: %s", cfg_mod.PANEL_URL_PATH, exc)
         log.info("Control panel at %s", self.url())
 
     def url(self):
         return f"http://127.0.0.1:{self.port}/"
 
     def stop(self):
+        try:
+            cfg_mod.PANEL_URL_PATH.unlink()
+        except OSError:
+            pass
         if self._server is not None:
             threading.Thread(target=self._server.shutdown, daemon=True).start()
 

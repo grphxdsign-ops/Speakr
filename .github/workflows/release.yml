@@ -9,6 +9,18 @@
 # Trigger: push a tag like v0.1.0 (or run manually from the Actions tab with
 # a tag name). Assets land on the GitHub release for that tag, and the site's
 # download buttons pick them up automatically via the releases/latest API.
+#
+# Mac signing: with no secrets configured the app ships ad-hoc signed —
+# launchable everywhere, but Gatekeeper shows the one-time "unidentified
+# developer" approval on first open (that prompt is Apple policy for
+# anything not notarized; no build step can remove it). To make the DMG
+# truly zero-prompt, add these repo secrets and the workflow upgrades
+# itself to Developer ID signing + notarization automatically:
+#   MACOS_CERTIFICATE_P12        base64 of a Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD   password for that .p12
+#   APPLE_ID                     Apple ID email of the developer account
+#   APPLE_TEAM_ID                10-char team ID
+#   APPLE_APP_SPECIFIC_PASSWORD  app-specific password for notarytool
 name: Release
 
 on:
@@ -70,12 +82,62 @@ jobs:
           --hidden-import pystray._darwin
           scripts/frozen_entry.py
 
+      - name: Menu-bar metadata + permission strings
+        # LSUIElement: menu-bar app, no Dock icon (matches how Speakr runs).
+        # The usage strings are what macOS shows on the permission prompts.
+        # MUST run before the signing step below: editing Info.plist changes
+        # a file the code signature seals, so any signature present at edit
+        # time is invalidated — exactly what shipped in v0.1.1, where this
+        # edit ran AFTER PyInstaller's build-time ad-hoc signing and Apple
+        # Silicon Macs refused to launch the app at all ("Speakr is damaged
+        # and can't be opened").
+        run: |
+          PLIST=dist/Speakr.app/Contents/Info.plist
+          plutil -replace LSUIElement -bool true "$PLIST" 2>/dev/null || plutil -insert LSUIElement -bool true "$PLIST"
+          plutil -insert NSMicrophoneUsageDescription -string "Speakr transcribes your dictation locally on this Mac. Audio never leaves the machine." "$PLIST" 2>/dev/null || true
+
+      - name: Sign Speakr.app
+        # Re-sign the whole bundle now that Info.plist is final. Apple
+        # Silicon kills any app whose signature is invalid, so this step is
+        # what makes the downloaded app launchable at all. With a Developer
+        # ID cert in the repo secrets this signs for real (hardened runtime,
+        # ready to notarize); otherwise it falls back to a valid ad-hoc
+        # signature, which launches fine after Gatekeeper's one-time
+        # unidentified-developer approval.
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          xattr -cr dist/Speakr.app
+          if [ -n "$MACOS_CERTIFICATE_P12" ]; then
+            echo "$MACOS_CERTIFICATE_P12" | base64 -d > cert.p12
+            security create-keychain -p ci build.keychain
+            security default-keychain -s build.keychain
+            security unlock-keychain -p ci build.keychain
+            security import cert.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain > /dev/null
+            rm cert.p12
+            IDENTITY=$(security find-identity -v -p codesigning build.keychain | awk -F'"' 'NR==1{print $2}')
+            echo "Signing with Developer ID: $IDENTITY"
+            codesign --force --deep --options runtime --timestamp \
+              --entitlements scripts/entitlements.plist \
+              --sign "$IDENTITY" dist/Speakr.app
+            echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          else
+            echo "No signing certificate in secrets — ad-hoc signing (see the comment at the top of this file to make the DMG zero-prompt)."
+            codesign --force --deep --sign - dist/Speakr.app
+          fi
+          codesign --verify --deep --strict --verbose=2 dist/Speakr.app
+
       - name: Smoke-test the build
         # A PyInstaller build can report success while being completely
         # broken at runtime (exactly what shipped in v0.1.0 — missing
         # --paths . above meant the speakr package silently wasn't bundled
         # at all). Actually launch it and confirm it's still alive a few
         # seconds later instead of trusting the build exit code alone.
+        # Runs AFTER the plist edit + re-sign so it exercises the exact
+        # bundle that ships — v0.1.1's smoke test passed on a bundle that a
+        # later step then broke.
         run: |
           dist/Speakr.app/Contents/MacOS/Speakr > smoke.log 2>&1 &
           pid=$!
@@ -88,20 +150,30 @@ jobs:
           kill "$pid"
           echo "Smoke test passed — process was still alive after 4s."
 
-      - name: Menu-bar metadata + permission strings
-        # LSUIElement: menu-bar app, no Dock icon (matches how Speakr runs).
-        # The usage strings are what macOS shows on the permission prompts.
-        run: |
-          PLIST=dist/Speakr.app/Contents/Info.plist
-          plutil -replace LSUIElement -bool true "$PLIST" 2>/dev/null || plutil -insert LSUIElement -bool true "$PLIST"
-          plutil -insert NSMicrophoneUsageDescription -string "Speakr transcribes your dictation locally on this Mac. Audio never leaves the machine." "$PLIST" 2>/dev/null || true
-
       - name: Wrap into Speakr.dmg
         run: |
           mkdir dmgroot
           cp -R dist/Speakr.app dmgroot/
           ln -s /Applications dmgroot/Applications
           hdiutil create -volname Speakr -srcfolder dmgroot -ov -format UDZO Speakr.dmg
+
+      - name: Notarize and staple the DMG
+        # Only when a Developer ID cert was used above. Notarizing the DMG
+        # covers the app inside it; stapling means Gatekeeper can verify
+        # offline — first launch is completely prompt-free (bar the
+        # standard mic/accessibility permission asks).
+        if: env.SIGN_IDENTITY != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          codesign --force --timestamp --sign "$SIGN_IDENTITY" Speakr.dmg
+          xcrun notarytool submit Speakr.dmg --wait \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
+          xcrun stapler staple Speakr.dmg
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
