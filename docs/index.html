@@ -136,7 +136,6 @@ h1 .ch.in{animation:chIn .7s cubic-bezier(.2,.75,.2,1) forwards}
 @keyframes blink{50%{opacity:0}}
 .hint{margin-top:14px;display:flex;justify-content:center;align-items:center;gap:10px;font-family:var(--mono);
   font-size:.72rem;color:#69719c;letter-spacing:.08em}
-.demoNote{margin-top:10px;font-family:var(--mono);font-size:.64rem;color:#454c74;text-align:center;line-height:1.6}
 kbd{font-family:var(--mono);font-size:.7rem;color:#c7d2ff;background:linear-gradient(#1b2140,#12162c);
   border:1px solid rgba(140,160,255,.3);border-bottom-width:3px;border-radius:7px;padding:4px 14px;
   box-shadow:0 0 18px rgba(90,110,255,.15)}
@@ -186,9 +185,6 @@ kbd.down{transform:translateY(2px);border-bottom-width:1px;background:#2a3468;co
 .dl.reco .get svg{stroke:#fff}
 .dl.reco:hover .get{background:#fff}
 .dl.reco:hover .get svg{stroke:#3b2bcc}
-.dlnote{margin-top:16px;font-family:var(--mono);font-size:.7rem;color:#565e88;width:100%;text-align:center;
-  opacity:0;animation:fadeUp 1s 1.6s forwards}
-.dlnote code{color:#93a5e8}
 
 /* ---------- proof ---------- */
 .proof{position:relative;padding:96px 20px 40px;max-width:1060px;margin:0 auto}
@@ -227,7 +223,7 @@ footer a:hover{color:#fff;border-color:#fff}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms !important;animation-delay:0s !important;transition-duration:.01ms !important}
-  .eyebrow,.sub,.demo,.downloads,.dlnote{opacity:1}
+  .eyebrow,.sub,.demo,.downloads,.dlhead{opacity:1}
   h1 .ch{opacity:1;transform:none;filter:none}
   .reveal{opacity:1;transform:none}
 }
@@ -282,7 +278,6 @@ footer a:hover{color:#fff;border-color:#fff}
       </div>
       <div class="hint"><span class="deskonly">hold</span> <kbd id="kbd" class="deskonly">V</kbd> <span class="deskonly">to feel it — v for voice</span></div>
       <button class="holdbtn" id="holdbtn" type="button">◉&nbsp; HOLD TO SPEAK</button>
-      <p class="demoNote">Browser demo — hold, then actually speak. Uses this page's mic + your browser's speech recognition to show the loop live. The Speakr app itself never sends audio anywhere.</p>
     </div>
 
     <p class="dlhead">Free download · No sign-up · Open source</p>
@@ -300,7 +295,6 @@ footer a:hover{color:#fff;border-color:#fff}
         <span class="get" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11M6.5 10.5 12 16l5.5-5.5M5 20h14"/></svg></span>
       </a>
     </div>
-    <p class="dlnote" id="dlnote">Unzip, then: <code>run.bat</code> on Windows &nbsp;·&nbsp; <code>bash package_mac.sh</code> on Mac. First run downloads the model — that's the only network call it ever makes.</p>
   </section>
 
   <section class="proof">
@@ -400,12 +394,6 @@ fetch("https://api.github.com/repos/grphxdsign-ops/Speakr/releases/latest")
       document.getElementById("dl-win").href = exe.browser_download_url;
       document.getElementById("win-sub").textContent =
         exe.name + (exe.size ? " · " + mb(exe.size) : "") + (ver ? " · " + ver : "");
-    }
-    if (dmg || exe){
-      document.getElementById("dlnote").innerHTML =
-        'Mac: open the dmg, drag Speakr into Applications — done. ' +
-        'Windows: run the installer — shortcuts and launch handled for you. ' +
-        "First launch downloads the model — that's the only network call it ever makes.";
     }
   })
   .catch(function(){ /* keep ZIP fallback */ });
