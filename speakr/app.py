@@ -60,6 +60,13 @@ class SpeakrApp:
         self.enabled = True
         self._recording = False
         self._record_started_at = 0.0
+        # Session telemetry for the control panel — RAM only, gone on quit.
+        # last_seq bumps once per finished dictation so the panel can animate
+        # new text exactly once instead of diffing strings.
+        self.last_text = ""
+        self.last_duration = 0.0
+        self.last_seq = 0
+        self.session_words = 0
         self._queue: queue.Queue = queue.Queue()
         self._listener = None
         self._session = None
@@ -263,6 +270,7 @@ class SpeakrApp:
                         method=self.config.get("injection"),
                         restore_clipboard=self.config.get("restore_clipboard"),
                     )
+                    self._note_dictation(edited, session.duration())
                     self.log.info(
                         "Edit mode: %d chars -> %d chars in %s in %.2fs (asr %.2f, edit %.2f)",
                         len(selected), len(edited), app_context.get("exe") or "unknown app",
@@ -278,6 +286,7 @@ class SpeakrApp:
                         restore_clipboard=self.config.get("restore_clipboard"),
                     )
                     t_inj = time.monotonic()
+                    self._note_dictation(text, session.duration())
                     self.formatter.note_result(text)
                     self.learner.observe(text)
                     self.log.info(
@@ -290,6 +299,13 @@ class SpeakrApp:
             finally:
                 if not self._recording:
                     self.tray.set_state("recording" if self._recording else "idle")
+
+    def _note_dictation(self, text: str, duration: float):
+        """Record the finished dictation for the control panel (RAM only)."""
+        self.last_text = text
+        self.last_duration = duration
+        self.session_words += len(text.split())
+        self.last_seq += 1
 
     # ----- tray actions ----------------------------------------------------
 
