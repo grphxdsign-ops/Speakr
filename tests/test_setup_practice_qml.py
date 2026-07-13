@@ -309,6 +309,40 @@ class SetupPracticeQmlTests(unittest.TestCase):
         finally:
             self._dispose(engine, theme, page, window)
 
+    def test_leaving_shortcut_step_cancels_capture_before_ui_moves(self):
+        engine, bridge, theme, page, window, warnings = self._fixture(
+            "OnboardingPage.qml"
+        )
+        try:
+            page.setProperty("currentStep", 3)
+            page.setProperty(
+                "appState", {"hotkey": "right ctrl", "pending_hotkey": "ctrl+space"}
+            )
+            bridge.set_capturing_hotkey(True)
+            self._settle(page)
+
+            capture_notice = page.findChild(
+                QObject, "onboardingHotkeyCaptureNotice"
+            )
+            back = page.findChild(QObject, "onboardingBackButton")
+            heading = page.findChild(QObject, "onboardingStepHeading")
+            self.assertIsNotNone(capture_notice)
+            self.assertIsNotNone(back)
+            self.assertTrue(bridge.capturingHotkey)
+            self.assertTrue(capture_notice.property("visible"))
+
+            self.assertTrue(QMetaObject.invokeMethod(back, "click"))
+            self._settle(page)
+
+            self.assertIn(("cancelHotkeyCapture", None), bridge.calls)
+            self.assertFalse(bridge.capturingHotkey)
+            self.assertEqual(page.property("currentStep"), 2)
+            self.assertEqual(heading.property("title"), "Speech model")
+            self.assertFalse(capture_notice.property("visible"))
+            self.assertEqual(warnings, [])
+        finally:
+            self._dispose(engine, theme, page, window)
+
     def test_narrow_200_percent_high_contrast_reflows_without_horizontal_scroll(self):
         fixtures = []
         try:
@@ -369,6 +403,7 @@ class SetupPracticeQmlTests(unittest.TestCase):
         self.assertIn("duration: root.tokens.motionOnboarding", onboarding)
         self.assertIn("Keys.onEscapePressed", onboarding)
         self.assertIn("bridge.cancelHotkeyCapture()", onboarding)
+        self.assertIn("onClicked: root.goTo(index)", onboarding)
 
 
 if __name__ == "__main__":

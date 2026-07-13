@@ -46,6 +46,8 @@ Item {
 
     function goTo(step) {
         var bounded = Math.max(0, Math.min(stepNames.length - 1, step))
+        if (currentStep === 3 && bounded !== 3 && bridge.capturingHotkey)
+            bridge.cancelHotkeyCapture()
         if (currentStep === 4 && bounded !== 4) {
             bridge.stopPractice()
             bridge.clearPractice()
@@ -755,6 +757,7 @@ Item {
                 rowSpacing: root.tokens.space8
 
                 QuietButton {
+                    objectName: "onboardingBackButton"
                     visible: root.currentStep > 0
                     tokens: root.tokens
                     text: qsTr("Back")
