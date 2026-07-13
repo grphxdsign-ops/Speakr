@@ -136,9 +136,8 @@ QtObject {
                                     : withAlpha(shadowBase,
                                                 effectTier === "reduced" ? 0.12 : 0.20)
 
-    readonly property string fontFamily: Qt.platform.os === "windows"
-                                         ? "Segoe UI"
-                                         : (Qt.platform.os === "osx" ? "SF Pro Text" : "")
+    // Native startup normalizes this to a concrete local system UI family.
+    readonly property string fontFamily: Application.font.family
     readonly property int pageHeading: fontSize(28)
     readonly property int sectionHeading: fontSize(22)
     readonly property int statusHeading: fontSize(18)

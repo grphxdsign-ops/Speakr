@@ -25,12 +25,11 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QKeySequence
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem
-from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 
 from speakr import native_window, qt_ui
 from speakr.qt_ui import Bridge
+from tests.qml_lifecycle import qml_test_application
 from tests.test_qml_load import _App
 
 
@@ -158,9 +157,7 @@ class _CaptureApp(_App):
 class ShellHomeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if QQuickStyle.name() != "Basic":
-            QQuickStyle.setStyle("Basic")
-        cls.qapp = QApplication.instance() or QApplication([])
+        cls.qapp = qml_test_application()
         cls.root = Path(__file__).resolve().parents[1]
         cls.qml = cls.root / "speakr" / "ui" / "qml"
 

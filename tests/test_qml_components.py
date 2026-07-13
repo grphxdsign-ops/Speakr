@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import inspect
 import os
+import subprocess
+import sys
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -11,16 +15,15 @@ from PySide6.QtCore import QMetaObject, QObject, QUrl
 from PySide6.QtGui import QAccessible, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickWindow
-from PySide6.QtQuickControls2 import QQuickStyle
-from PySide6.QtWidgets import QApplication
+
+from speakr import qt_ui
+from tests.qml_lifecycle import qml_test_application
 
 
 class QmlComponentContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if QQuickStyle.name() != "Basic":
-            QQuickStyle.setStyle("Basic")
-        cls.qapp = QApplication.instance() or QApplication([])
+        cls.qapp = qml_test_application()
         cls.qml = (
             Path(__file__).resolve().parents[1] / "speakr" / "ui" / "qml"
         )
@@ -36,6 +39,93 @@ class QmlComponentContractTests(unittest.TestCase):
         )
         theme.setParent(engine)
         return theme
+
+    def _run_font_probe(self, qpa):
+        script = textwrap.dedent(
+            f"""
+            from PySide6.QtCore import QObject, QUrl
+            from PySide6.QtGui import QFontInfo
+            from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+            from PySide6.QtQuickControls2 import QQuickStyle
+            from PySide6.QtWidgets import QApplication
+            from speakr.qt_ui import _normalize_system_ui_font
+
+            QQuickStyle.setStyle("Basic")
+            application = QApplication([])
+            assert application.platformName() == {qpa!r}
+            assert _normalize_system_ui_font(application)
+            engine = QQmlApplicationEngine()
+            component = QQmlComponent(
+                engine,
+                QUrl.fromLocalFile({str(self.qml / 'Theme.qml')!r}),
+            )
+            theme = component.create()
+            assert theme is not None
+            button_component = QQmlComponent(
+                engine,
+                QUrl.fromLocalFile({str(self.qml / 'QuietButton.qml')!r}),
+            )
+            button = button_component.createWithInitialProperties(
+                {{"tokens": theme, "text": "Speakr"}}
+            )
+            assert button is not None
+            label = button.findChild(QObject, "buttonLabel")
+            assert label is not None
+            application.processEvents()
+            values = [
+                str(theme.property("fontFamily")).strip(),
+                QFontInfo(label.property("font")).family().strip(),
+                application.font().family().strip(),
+            ]
+            print("FONT_PROBE=" + "\\t".join(values))
+
+            button.deleteLater()
+            button_component.deleteLater()
+            theme.deleteLater()
+            component.deleteLater()
+            engine.deleteLater()
+            application.processEvents()
+            """
+        )
+        environment = os.environ.copy()
+        environment["QT_QPA_PLATFORM"] = qpa
+        environment["QT_QUICK_BACKEND"] = "software"
+        environment["QSG_RHI_BACKEND"] = "software"
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=self.qml.parents[2],
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        combined = result.stdout + "\n" + result.stderr
+        self.assertEqual(result.returncode, 0, combined)
+        self.assertEqual(
+            result.stderr.strip(),
+            "",
+            "The production font probe emitted a QML/Qt runtime diagnostic:\n"
+            + combined,
+        )
+
+        marker = "FONT_PROBE="
+        encoded = next(
+            (
+                line.removeprefix(marker)
+                for line in result.stdout.splitlines()
+                if line.startswith(marker)
+            ),
+            "",
+        )
+        values = encoded.split("\t")
+        self.assertEqual(len(values), 3, combined)
+        self.assertEqual(len(set(values)), 1, values)
+        self.assertNotIn(
+            values[0].casefold(),
+            {"", "sans serif", "serif", "monospace"},
+        )
+        return values[0]
 
     @staticmethod
     def _hex(value):
@@ -106,6 +196,38 @@ class QmlComponentContractTests(unittest.TestCase):
             theme.deleteLater()
             engine.deleteLater()
             self.qapp.processEvents()
+
+    def test_theme_uses_normalized_system_font_without_platform_literals(self):
+        source = (self.qml / "Theme.qml").read_text(encoding="utf-8")
+        normalizer = inspect.getsource(qt_ui._normalize_system_ui_font)
+        self.assertIn(
+            "readonly property string fontFamily: Application.font.family",
+            source,
+        )
+        self.assertNotIn("FontInfo", source)
+        self.assertNotIn("Qt.platform", source)
+        self.assertNotIn("sys.platform", normalizer)
+        for private_or_literal_family in (
+            "SF Pro",
+            "Segoe UI",
+            ".AppleSystemUIFont",
+        ):
+            self.assertNotIn(private_or_literal_family, source)
+            self.assertNotIn(private_or_literal_family, normalizer)
+
+        startup = inspect.getsource(qt_ui.run_native_ui)
+        self.assertLess(
+            startup.index("_normalize_system_ui_font"),
+            startup.index("QQmlApplicationEngine"),
+        )
+
+    @unittest.skipUnless(sys.platform == "win32", "native Windows font proof")
+    def test_windows_native_qpa_resolves_system_font_to_segoe_ui(self):
+        self.assertEqual(self._run_font_probe("windows"), "Segoe UI")
+
+    @unittest.skipUnless(sys.platform == "darwin", "hosted macOS font proof")
+    def test_macos_hosted_probe_uses_system_font_without_alias_warning(self):
+        self.assertTrue(self._run_font_probe("offscreen"))
 
     def test_effect_resolution_and_material_opacity_are_deterministic(self):
         engine = QQmlApplicationEngine()

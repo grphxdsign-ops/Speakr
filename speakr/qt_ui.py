@@ -50,6 +50,8 @@ def _load_qt():
             QAccessible,
             QAccessibleAnnouncementEvent,
             QCursor,
+            QFont,
+            QFontDatabase,
             QGuiApplication,
             QIcon,
         )
@@ -65,6 +67,8 @@ def _load_qt():
         QAccessibleAnnouncementEvent=QAccessibleAnnouncementEvent,
         QApplication=QApplication,
         QCursor=QCursor,
+        QFont=QFont,
+        QFontDatabase=QFontDatabase,
         QGuiApplication=QGuiApplication,
         QIcon=QIcon,
         QMenu=QMenu,
@@ -83,6 +87,46 @@ def _load_qt():
         Slot=Slot,
     )
     return _QT
+
+
+_GENERIC_FONT_FAMILIES = frozenset({"", "sans serif", "serif", "monospace"})
+
+
+def _is_concrete_font_family(value):
+    return str(value or "").strip().casefold() not in _GENERIC_FONT_FAMILIES
+
+
+def _normalize_system_ui_font(application, qt=None):
+    """Give QML a concrete local system UI family when Qt can provide one.
+
+    Some macOS offscreen configurations expose ``GeneralFont`` as the generic
+    ``Sans Serif`` alias even though ``QFont.defaultFamily()`` identifies the
+    real system UI face.  Assigning the generic alias in QML produces a noisy
+    and unnecessary font-database lookup.  Prefer GeneralFont when concrete,
+    otherwise use Qt's concrete default family without platform branches or
+    private family literals.
+
+    Font discovery is cosmetic and must never prevent the native window from
+    appearing.  A platform that supplies neither concrete value simply keeps
+    QApplication's original font.
+    """
+
+    qt = qt or _load_qt()
+    try:
+        candidate = qt.QFontDatabase.systemFont(
+            qt.QFontDatabase.SystemFont.GeneralFont
+        )
+        if not _is_concrete_font_family(candidate.family()):
+            default_family = qt.QFont().defaultFamily()
+            if not _is_concrete_font_family(default_family):
+                return False
+            candidate = qt.QFont(candidate)
+            candidate.setFamily(default_family)
+        application.setFont(candidate)
+        return _is_concrete_font_family(application.font().family())
+    except Exception:
+        log.debug("Qt could not normalize the system UI font", exc_info=True)
+        return False
 
 
 def qt_available() -> bool:
@@ -1451,6 +1495,7 @@ def run_native_ui(app):
             raise QtUnavailable("could not create QApplication") from exc
     elif not isinstance(qapp, qt.QApplication):
         raise QtUnavailable("an incompatible QCoreApplication already exists")
+    _normalize_system_ui_font(qapp, qt)
     qapp.setApplicationName("Speakr")
     qapp.setApplicationDisplayName("Speakr")
     qapp.setQuitOnLastWindowClosed(False)
