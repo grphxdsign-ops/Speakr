@@ -30,6 +30,7 @@ from speakr.formatter import (
     apply_voice_commands,
     rule_based_clean,
 )
+from speakr.hotkey import resolve_hotkey_mode
 from speakr.injector import inject, read_selection_via_clipboard
 from speakr.inputs import HotkeyListener, capture_next_key
 from speakr.interface_state import InterfaceState
@@ -1155,7 +1156,7 @@ class SpeakrApp:
         if not self.transcriber.wait_ready(timeout=0):
             with self._practice_lock:
                 self._practice["message"] = (
-                    "The local speech model is not ready. Use Retry, then start Practice."
+                    "The local speech model is not ready. Wait for it to finish, then try again."
                 )
             self._notify_practice()
             return False
@@ -1300,6 +1301,13 @@ class SpeakrApp:
         data["pending_hotkey"] = self._pending_hotkey or ""
         data["capturing_hotkey"] = self._capturing_hotkey
         data["platform"] = "mac" if sys.platform == "darwin" else "windows"
+        data.update(
+            resolve_hotkey_mode(
+                data.get("hotkey", ""),
+                data.get("toggle_mode", False),
+                platform=data["platform"],
+            )
+        )
         data["microphone_stream_open"] = self.recorder.stream_open
         data["active_input_device"] = (
             "" if self.recorder.input_device is None else self.recorder.input_device

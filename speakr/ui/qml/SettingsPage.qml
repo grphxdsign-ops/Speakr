@@ -79,7 +79,7 @@ Item {
 
     readonly property var rows: root.baseRows.concat(root.perAppRows())
     readonly property var baseRows: [
-        { category: qsTr("Dictation"), label: qsTr("Shortcut"), description: qsTr("Hold or press this shortcut to dictate. Capture has no timeout; Escape cancels."), keywords: "hotkey key", path: "hotkey", type: "hotkey", fallback: "right ctrl" },
+        { category: qsTr("Dictation"), label: qsTr("Shortcut"), description: qsTr("Press one key to choose the dictation shortcut. Capture has no timeout; Cancel or Escape stops it."), keywords: "hotkey key", path: "hotkey", type: "hotkey", fallback: "right ctrl" },
         { category: qsTr("Dictation"), label: qsTr("Shortcut behavior"), description: qsTr("Hold records until release. Toggle uses one press to start and another to stop."), keywords: "hold toggle", path: "toggle_mode", type: "combo", options: [qsTr("Hold to speak"), qsTr("Press to start and stop")], values: [false, true], fallback: false },
         { category: qsTr("Dictation"), label: qsTr("Spoken layout commands"), description: qsTr("Recognize phrases such as new line, new paragraph, and bullet point."), keywords: "voice commands layout", path: "voice_commands", type: "switch", fallback: true },
         { category: qsTr("Dictation"), label: qsTr("Edit Mode"), description: qsTr("When text is selected, treat dictation as an instruction and leave the original unchanged if editing fails."), keywords: "selection transform", path: "edit_mode.enabled", type: "switch", fallback: true },
@@ -600,7 +600,10 @@ Item {
                                 required property var modelData
                                 readonly property string resolvedDescription: modelData.path === "__effective_appearance"
                                                                              ? root.effectiveAppearanceSummary()
-                                                                             : modelData.description
+                                                                             : (modelData.path === "toggle_mode"
+                                                                                && Boolean(root.setting("toggle_mode_forced", false))
+                                                                                ? qsTr("Windows key combinations always use Press to start and stop. Change to a single-key shortcut to choose Hold to speak.")
+                                                                                : modelData.description)
                                 objectName: "settingRow_" + modelData.path
                                 width: settingsRowsList.width
                                 visible: root.matches(modelData)
@@ -613,9 +616,14 @@ Item {
                                 controlType: modelData.type
                                 options: modelData.options || []
                                 values: modelData.values || []
-                                currentValue: modelData.type === "hotkey"
+                                currentValue: modelData.path === "toggle_mode"
+                                              ? root.setting("effective_toggle_mode",
+                                                             root.setting("toggle_mode", modelData.fallback))
+                                              : (modelData.type === "hotkey"
                                               ? (root.appState.hotkey || root.setting(modelData.path, modelData.fallback))
-                                              : root.setting(modelData.path, modelData.fallback)
+                                              : root.setting(modelData.path, modelData.fallback))
+                                controlEnabled: !(modelData.path === "toggle_mode"
+                                                  && Boolean(root.setting("toggle_mode_forced", false)))
                                 showCategory: root.selectedCategory === qsTr("All")
                                               || searchField.text.trim().length > 0
                                               || (root.selectedCategory === qsTr("Advanced")

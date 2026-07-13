@@ -22,6 +22,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from speakr.hotkey import resolve_hotkey_mode
 from speakr.interface_state import InterfaceState
 from speakr.native_window import NativeWindowController
 
@@ -578,6 +579,14 @@ def _legacy_settings_snapshot(app: Any) -> dict[str, Any]:
     }
     ui_defaults.update(ui)
     raw["ui"] = ui_defaults
+    raw["platform"] = "mac" if sys.platform == "darwin" else "windows"
+    raw.update(
+        resolve_hotkey_mode(
+            raw.get("hotkey", ""),
+            raw.get("toggle_mode", False),
+            platform=raw["platform"],
+        )
+    )
     raw.setdefault(
         "dictation",
         {
@@ -762,6 +771,7 @@ def _bridge_type(qt):
             self._hud_window = None
             self._tray = None
             self._closed = False
+            self._announced_listening_job = None
             self._announced_processing_job = None
             self._announced_final_job = None
 
@@ -929,13 +939,19 @@ def _bridge_type(qt):
                 log.debug("Accessibility announcement was unavailable", exc_info=True)
 
         def _announce_state(self, previous, snapshot):
-            capture_started = (
-                snapshot.get("capture") == "listening"
-                and previous.get("capture") != "listening"
-            )
-            if capture_started:
-                self._announce("Listening", assertive=True)
+            if not self._announcements_enabled():
                 return
+            capture_job = snapshot.get("capture_job_id")
+            if snapshot.get("capture") == "listening":
+                listening_key = capture_job or "legacy-active-capture"
+                if self._announced_listening_job != listening_key:
+                    self._announced_listening_job = listening_key
+                    self._announce("Listening", assertive=True)
+                # Do not let an older processing job speak into the active mic.
+                return
+            if not capture_job:
+                self._announced_listening_job = None
+
             pipeline = snapshot.get("pipeline")
             job_id = snapshot.get("pipeline_job_id")
             if pipeline in {
@@ -945,12 +961,48 @@ def _bridge_type(qt):
                     self._announced_processing_job = job_id
                     self._announce("Processing locally")
                 return
-            final = pipeline in {"success", "error"} or snapshot.get("status_code") in {
-                "no_speech", "edit_failure", "mic_recovery"
+            status_code = str(snapshot.get("status_code") or "")
+            issue = snapshot.get("last_issue") or {}
+            issue_code = str(issue.get("code") or "")
+            microphone_issue = issue_code in {
+                "microphone_unavailable",
+                "microphone_reconnected",
             }
-            if final and self._announced_final_job != job_id:
-                self._announced_final_job = job_id
-                self._announce(snapshot.get("primary_text") or "Finished")
+            final = (
+                pipeline in {"success", "error"}
+                or status_code in {"no_speech", "edit_failure", "mic_recovery"}
+                or microphone_issue
+            )
+            final_job = job_id or capture_job
+            # A retirement snapshot can retain the outcome copy after its
+            # attempt ID has been cleared.  It is not a new result and must
+            # not create a second announcement with an empty identity.
+            if not final or not final_job:
+                return
+            if self._announced_final_job == final_job:
+                return
+            self._announced_final_job = final_job
+            if pipeline == "success":
+                message = (
+                    "Selection updated"
+                    if snapshot.get("pipeline_mode", snapshot.get("mode")) == "edit"
+                    else "Inserted"
+                )
+            elif status_code == "no_speech":
+                message = "Speakr didn't catch speech. Nothing was inserted."
+            elif status_code == "edit_failure":
+                message = "The original selection was not changed."
+            elif status_code == "mic_recovery":
+                message = "Microphone reconnected. Please try again."
+            elif issue_code == "microphone_unavailable":
+                message = issue.get("message") or "Microphone access is needed."
+            elif pipeline == "error" and snapshot.get(
+                "pipeline_mode", snapshot.get("mode")
+            ) == "edit":
+                message = "The original selection was not changed."
+            else:
+                message = issue.get("message") or "Nothing was inserted."
+            self._announce(message)
 
         def _verify_hud_focus(self):
             hud = self._hud_window

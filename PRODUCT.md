@@ -85,8 +85,16 @@ manual High contrast theme uses audited black, white, cyan, yellow, and
 semantic role pairs rather than an arbitrary normal system palette. Reduce
 Transparency, RDP, software rendering, or native material failure selects a
 quieter local fallback without hiding the window.
-Practice is optional and never grades speech. Hotkey capture has no timeout
-and always offers Cancel and Escape.
+Practice is optional and never grades speech. Hotkey capture asks for one key,
+has no timeout, and always offers Cancel and Escape. If an existing Windows
+key combination forces press-to-start/press-to-stop behavior, every visible
+instruction states that effective behavior without rewriting the user's saved
+mode.
+
+Background screen-reader announcements are opt-in because they could enter
+the microphone. The visual HUD contributes no accessibility live region; one
+job-keyed bridge channel announces only Listening, Processing locally, and the
+final result.
 
 ## Privacy and product boundaries
 

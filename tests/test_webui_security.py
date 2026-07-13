@@ -194,6 +194,106 @@ class WebUISecurityTests(unittest.TestCase):
         self.assertIn('label:"Recheck setup"', page)
         self.assertIn('$("recheckIssue").onclick=function(){action("retry_setup");}', page)
 
+    def test_recovery_switches_have_native_names_and_truthful_on_off_copy(self):
+        status, _headers, body = self.request(
+            "GET", f"/?token={self.ui.token}"
+        )
+
+        self.assertEqual(status, 200)
+        page = body.decode("utf-8")
+        switches = (
+            ("keepMic", "keepMicLabel", "prerollText", "keepMicState"),
+            (
+                "screenContext",
+                "screenContextLabel",
+                "screenContextHelp",
+                "screenContextState",
+            ),
+            ("editMode", "editModeLabel", "editModeHelp", "editModeState"),
+            (
+                "recentContext",
+                "recentContextLabel",
+                "recentContextHelp",
+                "recentContextState",
+            ),
+            (
+                "logTranscripts",
+                "logTranscriptsLabel",
+                "logWarning",
+                "logTranscriptsState",
+            ),
+        )
+        for input_id, label_id, description_id, state_id in switches:
+            with self.subTest(input_id=input_id):
+                self.assertIn(f'for="{input_id}"', page)
+                self.assertIn(f'id="{input_id}"', page)
+                self.assertIn(f'aria-labelledby="{label_id}"', page)
+                self.assertIn(f'aria-describedby="{description_id}"', page)
+                self.assertIn(
+                    f'<span id="{state_id}" aria-hidden="true">Off</span>',
+                    page,
+                )
+                self.assertIn(
+                    f'renderSwitch("{input_id}","{state_id}",', page
+                )
+        self.assertEqual(page.count('aria-hidden="true">Off</span>'), 5)
+        self.assertNotIn(">Enabled</span>", page)
+        self.assertIn('textContent=checked?"On":"Off"', page)
+
+    def test_recovery_hotkey_copy_uses_effective_mode_and_capture_truth(self):
+        class ComboConfig(_Config):
+            def get(self, *keys, default=None):
+                if keys == ("hotkey",):
+                    return "ctrl+shift"
+                if keys == ("toggle_mode",):
+                    return False
+                return super().get(*keys, default=default)
+
+        self.ui.app.config = ComboConfig()
+        with mock.patch.object(webui.sys, "platform", "win32"):
+            settings = self.ui.settings()
+            status, _headers, body = self.request(
+                "GET",
+                "/api/settings",
+                headers={"X-Speakr-Token": self.ui.token},
+            )
+
+        self.assertEqual(status, 200)
+        response = json.loads(body)
+        self.assertEqual(response["platform"], "windows")
+        self.assertTrue(response["effective_toggle_mode"])
+        self.assertTrue(response["toggle_mode_forced"])
+        self.assertEqual(response, settings)
+
+        status, _headers, body = self.request(
+            "GET", f"/?token={self.ui.token}"
+        )
+        self.assertEqual(status, 200)
+        page = body.decode("utf-8")
+        self.assertIn(
+            'function toggleInstruction(listening){if(settings.effective_toggle_mode)',
+            page,
+        )
+        self.assertIn(
+            'return listening?"Press "+hotkeyName()+" again to stop.":',
+            page,
+        )
+        self.assertIn(
+            'return listening?"Release "+hotkeyName()+" when you are finished.":',
+            page,
+        )
+        self.assertIn(
+            '$("secondary").textContent=capture==="listening"?toggleInstruction(true):',
+            page,
+        )
+        self.assertIn(
+            'if(settings.toggle_mode_forced)captureDisclosure+=', page
+        )
+        self.assertIn(
+            "This Windows key combination always uses press-to-start and press-to-stop.",
+            page,
+        )
+
     def test_every_api_read_and_mutation_requires_header_token(self):
         status, _headers, _body = self.request("GET", "/api/state")
         self.assertEqual(status, 403)

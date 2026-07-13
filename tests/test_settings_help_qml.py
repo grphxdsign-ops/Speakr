@@ -484,6 +484,58 @@ class SettingsHelpQmlTests(unittest.TestCase):
         self.assertNotIn("Binding loop detected", warning_text)
         self.assertNotIn("capturingHotkey", warning_text)
 
+    def test_windows_combo_shows_forced_press_mode_without_rewriting_hold(self):
+        app, bridge, native, engine, main, warnings = self._load_main(100)
+        self.assertIsNotNone(native)
+        try:
+            forced_settings = app.settings_snapshot()
+            forced_settings.update(
+                {
+                    "platform": "windows",
+                    "hotkey": "ctrl+space",
+                    "toggle_mode": False,
+                    "effective_toggle_mode": True,
+                    "toggle_mode_forced": True,
+                }
+            )
+            bridge._accept_settings(forced_settings)
+            main.setProperty("currentPage", "settings")
+            self._process_queued_qml()
+            self._render_qml(main, 3)
+
+            rows_host = main.findChild(QObject, "settingsRowsRepeater")
+            self.assertIsNotNone(rows_host)
+            row = self._find_visual_child(rows_host, "settingRow_toggle_mode")
+            self.assertIsNotNone(row)
+            self.assertTrue(bool(row.property("currentValue")))
+            self.assertFalse(row.property("controlEnabled"))
+            self.assertIn(
+                "always use Press to start and stop",
+                row.property("description"),
+            )
+
+            behavior_control = next(
+                (
+                    child
+                    for child in row.findChildren(QObject)
+                    if child.property("accessibleName") == "Shortcut behavior"
+                    and child.property("currentIndex") is not None
+                    and bool(child.property("visible"))
+                ),
+                None,
+            )
+            self.assertIsNotNone(behavior_control)
+            self.assertFalse(behavior_control.property("enabled"))
+            self.assertEqual(behavior_control.property("currentIndex"), 1)
+            self.assertEqual(
+                behavior_control.property("displayText"),
+                "Press to start and stop",
+            )
+            self.assertFalse(forced_settings["toggle_mode"])
+            self.assertEqual(app.setting_attempts, [])
+        finally:
+            self._dispose_main(bridge, engine, main, warnings)
+
     def test_visual_effects_search_and_effective_material_are_truthful(self):
         app, bridge, native, engine, main, warnings = self._load_main(100)
         self.assertIsNotNone(app)

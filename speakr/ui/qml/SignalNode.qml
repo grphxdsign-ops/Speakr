@@ -8,6 +8,7 @@ ColumnLayout {
     property string label: ""
     property bool reached: false
     property bool active: false
+    property bool accessibilityEnabled: true
     property string accessibleDescription: ""
 
     spacing: tokens.space4
@@ -15,6 +16,7 @@ ColumnLayout {
     Accessible.name: label + (active ? qsTr(", current stage")
                                     : (reached ? qsTr(", complete") : ""))
     Accessible.description: accessibleDescription
+    Accessible.ignored: !accessibilityEnabled
 
     Rectangle {
         objectName: "signalNodeSurface"

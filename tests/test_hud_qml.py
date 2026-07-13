@@ -20,7 +20,7 @@ from PySide6.QtCore import (
     Qt,
     QUrl,
 )
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QAccessible, QColor
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
@@ -213,6 +213,58 @@ class HudQmlTests(unittest.TestCase):
         finally:
             self._close(bridge, engine)
 
+    def test_hud_qml_is_not_a_second_accessibility_channel(self):
+        app, bridge, engine, hud = self._load_hud(
+            reduced_motion="reduce", background_announcements=True
+        )
+        try:
+            app.interface_state.update(
+                capture="listening",
+                capture_job_id=71,
+                pipeline="formatting",
+                pipeline_job_id=70,
+            )
+            self._pump(10)
+
+            panel = hud.findChild(QObject, "hudPanel")
+            signal_path = hud.findChild(QObject, "hudSignalPath")
+            self.assertIsNotNone(panel)
+            self.assertIsNotNone(signal_path)
+            self.assertFalse(signal_path.property("accessibilityEnabled"))
+            suppressed_signal_items = [
+                item
+                for item in signal_path.findChildren(QObject)
+                if item.property("accessibilityEnabled") is not None
+            ]
+            self.assertEqual(len(suppressed_signal_items), 3)
+            self.assertTrue(
+                all(
+                    not item.property("accessibilityEnabled")
+                    for item in suppressed_signal_items
+                )
+            )
+
+            accessible_window = QAccessible.queryAccessibleInterface(hud)
+            self.assertIsNotNone(accessible_window)
+            self.assertEqual(accessible_window.role(), QAccessible.Role.Window)
+            self.assertEqual(accessible_window.childCount(), 0)
+            self.assertNotIn(
+                "Accessible.role: Accessible.AlertMessage", self.hud_source
+            )
+            self.assertIn("Accessible.ignored: true", self.hud_source)
+
+            app.interface_state.update(
+                capture="idle",
+                capture_job_id=0,
+                pipeline="success",
+                pipeline_job_id=70,
+                status_code="success",
+            )
+            self._pump(10)
+            self.assertEqual(accessible_window.childCount(), 0)
+        finally:
+            self._close(bridge, engine)
+
     def test_truthful_runtime_flow_errors_and_reduced_motion_are_immediate(self):
         app, bridge, engine, hud = self._load_hud(reduced_motion="reduce")
         try:
@@ -279,7 +331,9 @@ class HudQmlTests(unittest.TestCase):
             )
             self._pump()
             self.assertEqual(hud.property("displayedKind"), "danger")
-            self.assertIn("Nothing was inserted", primary.property("text"))
+            self.assertEqual(
+                primary.property("text"), "Original selection unchanged"
+            )
             self.assertLessEqual(len(str(secondary.property("text"))), 80)
 
             app.interface_state.update(
@@ -482,6 +536,76 @@ class HudQmlTests(unittest.TestCase):
                             required_height,
                             f"{object_name} glyphs are clipped at {scale}%",
                         )
+
+                    outcomes = (
+                        {
+                            "pipeline": "error",
+                            "pipeline_job_id": 202,
+                            "capture_job_id": 0,
+                            "status_code": "pipeline_error",
+                            "primary": "Nothing was inserted",
+                        },
+                        {
+                            "pipeline": "idle",
+                            "pipeline_job_id": 203,
+                            "capture_job_id": 0,
+                            "status_code": "no_speech",
+                            "primary": "Speakr didn't catch speech. Nothing was inserted.",
+                        },
+                        {
+                            "pipeline": "idle",
+                            "pipeline_job_id": 204,
+                            "capture_job_id": 0,
+                            "status_code": "edit_failure",
+                            "primary": "The original selection was not changed.",
+                        },
+                        {
+                            "pipeline": "idle",
+                            "pipeline_job_id": 0,
+                            "capture_job_id": 205,
+                            "status_code": "mic_recovery",
+                            "primary": "Microphone reconnected. Please try again.",
+                        },
+                    )
+                    signal_path = hud.findChild(QObject, "hudSignalPath")
+                    self.assertIsNotNone(signal_path)
+                    for outcome in outcomes:
+                        with self.subTest(scale=scale, outcome=outcome["status_code"]):
+                            app.interface_state.update(
+                                capture="idle",
+                                pipeline=outcome["pipeline"],
+                                pipeline_job_id=outcome["pipeline_job_id"],
+                                capture_job_id=outcome["capture_job_id"],
+                                status_code=outcome["status_code"],
+                            )
+                            self._pump()
+                            self.assertEqual(
+                                hud.property("displayedPrimary"),
+                                outcome["primary"],
+                            )
+                            self.assertFalse(signal_path.property("visible"))
+                            for object_name in (
+                                "hudPrimaryText",
+                                "hudSecondaryText",
+                            ):
+                                label = hud.findChild(QObject, object_name)
+                                self.assertFalse(
+                                    bool(label.property("truncated")),
+                                    (scale, outcome["status_code"], object_name),
+                                )
+                                top_left = label.mapToScene(QPointF(0, 0))
+                                bottom_right = label.mapToScene(
+                                    QPointF(label.width(), label.height())
+                                )
+                                self.assertGreaterEqual(top_left.x(), -0.5)
+                                self.assertGreaterEqual(top_left.y(), -0.5)
+                                self.assertLessEqual(
+                                    bottom_right.x(), hud.width() + 0.5
+                                )
+                                self.assertLessEqual(
+                                    bottom_right.y(), hud.height() + 0.5,
+                                    (scale, outcome["status_code"], object_name),
+                                )
                 finally:
                     self._close(bridge, engine)
 

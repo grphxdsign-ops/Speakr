@@ -19,6 +19,7 @@ Rectangle {
     property string actionText: qsTr("Open")
     property string actionKind: "config"
     property bool allowEmpty: false
+    property bool controlEnabled: true
     property string saveState: "" // "saved", "saving", "error", or empty
     property string validationMessage: ""
 
@@ -133,6 +134,7 @@ Rectangle {
             QuietComboBox {
                 id: immediateCombo
                 visible: root.controlType === "combo"
+                enabled: root.controlEnabled
                 tokens: root.tokens
                 model: root.options
                 currentIndex: root.valueIndex(root.currentValue)
@@ -204,10 +206,10 @@ Rectangle {
                 spacing: root.tokens.space8
 
                 PlainText {
-                    text: root.capturingHotkey
+                        text: root.capturingHotkey
                           ? (root.pendingHotkey.length > 0
                              ? qsTr("Captured: %1").arg(root.pendingHotkey)
-                             : qsTr("Press your new shortcut"))
+                             : qsTr("Press one key"))
                           : String(root.currentValue)
                     color: root.tokens.text
                     font.family: root.tokens.fontFamily
@@ -226,7 +228,7 @@ Rectangle {
                         kind: root.capturingHotkey ? "danger" : "secondary"
                         accessibleDescription: root.capturingHotkey
                                                ? qsTr("Cancel shortcut capture. Escape also cancels.")
-                                               : qsTr("Wait for a new shortcut with no time limit")
+                                               : qsTr("Wait for one key with no time limit. Cancel or Escape stops capture.")
                         onClicked: root.capturingHotkey
                                    ? bridge.cancelHotkeyCapture() : bridge.beginHotkeyCapture()
                     }

@@ -264,14 +264,27 @@ full, reduced, and off effects.
 ### Main shell and Home
 
 - The title bar contains Speakr identity, a non-interactive local privacy cue,
-  and platform-appropriate window controls.
+  and platform-appropriate window controls. The cue never disappears: it
+  reads `Everything stays on this device` when space permits and `Local only`
+  visually at narrow width or large text, while retaining the full accessible
+  name.
 - Navigation remains labeled: Home, Practice, Vocabulary, Settings, Help.
 - Home's dominant surface pairs truthful readiness with the Dictation switch.
 - The primary instruction is the current hotkey and Hold or Toggle behavior.
 - Start Practice and Change shortcut remain visible without opening Settings.
 - Microphone, model, cleanup, privacy, and latest-outcome status use compact
-  readable rows rather than a uniform card grid.
+  readable rows in one surface rather than a uniform card grid. All five rows,
+  including Latest outcome, are inside the initial 960 by 700 viewport.
 - Persistent recovery remains available after a transient HUD retires.
+
+The stored shortcut mode and the effective shortcut mode are distinct
+presentation facts. On Windows, an existing `+` combination uses Toggle
+because the listener cannot hold combinations reliably. The settings snapshot
+therefore derives `effective_toggle_mode` and `toggle_mode_forced` without
+adding either field to `InterfaceState` or rewriting the stored
+`toggle_mode`. Native and browser instructions always use the effective mode.
+A forced behavior selector is disabled and explains how to return to a
+single-key Hold shortcut.
 
 ### Onboarding
 
@@ -285,16 +298,30 @@ Privacy --> Permissions --> Speech model --> Shortcut --> optional Practice --> 
 - Required first-run copy uses plain language; protocol, hardware, Ollama, and
   diagnostic detail remains in Help or Advanced.
 - Hotkey capture has no timeout, exposes Cancel, and accepts Escape.
+- Hotkey capture asks for one key. It never promises a key combination that
+  the capture implementation does not record.
+- Setup-step accessibility names Completed, Current, and Upcoming states.
+  Future steps remain disabled until reached and never claim the user can
+  return to them.
 - Practice never gates completion.
 - Directional movement is 180 ms only when Reduced Motion is not active.
 
 ### Practice
 
 - Show a coarse five-segment microphone meter and `Low`, `Good`, or `High`.
+- Show that meter only during active Practice capture. Idle, processing,
+  result, and recovery states expose no progress-bar reading.
 - Never display clarity, confidence, correctness, or a speech score.
 - Use the exact label: "Not stored by Speakr; clears when you leave Practice."
 - Temporary text sits in a highly opaque content well.
 - Retry, Clear, Add word, and Add replacement are labeled actions.
+- Before the first attempt, Practice shows Start and never Retry or Waiting
+  for sound. During capture it shows Stop and a live coarse band. During local
+  processing it disables recording actions. A result or recoverable message
+  enables Retry and Clear without presenting the message as success.
+- Onboarding Practice exposes one dominant action: Start initially, Stop while
+  recording, none while processing, and Finish after an outcome. Skip is a
+  secondary initial alternative and does not duplicate Finish.
 - Practice never injects, logs, learns, enters formatter recent context, or
   touches the clipboard, and it clears on every existing exit path.
 
@@ -346,6 +373,9 @@ Privacy --> Permissions --> Speech model --> Shortcut --> optional Practice --> 
   monitor's work area.
 - Active monitor is captured at hotkey-down and does not change mid-dictation.
 - Two text lines are always reserved so concurrent jobs never resize the HUD.
+- Both lines wrap and are never elided. Warning and error outcomes omit the
+  nonessential processing rail so complete recovery copy remains inside the
+  fixed capsule at Large size and 200% text.
 - Active capture outranks active pipeline; an older completion never hides a
   newer capture.
 - The surface is at least 96% opaque and never uses desktop-backed blur.
@@ -353,6 +383,11 @@ Privacy --> Permissions --> Speech model --> Shortcut --> optional Practice --> 
   order, and transcript-free.
 - Focus-retention failure disables the HUD for the session and preserves tray
   feedback.
+- QML state content is absent from the accessibility tree. When the opt-in
+  background-announcement setting is enabled, one Python bridge channel emits
+  `Listening`, at most one `Processing locally` per job, and the final result.
+  An older processing job is silent while a newer capture is active, and a
+  retired job or attempt cannot replay an announcement.
 
 ### Browser recovery
 
@@ -364,6 +399,9 @@ Privacy --> Permissions --> Speech model --> Shortcut --> optional Practice --> 
   Practice exclusion.
 - Microphone repair, speech-model retry, and setup recheck remain visible and
   use the same narrow token-authenticated action allowlist.
+- Shortcut capture states plainly that the native listener waits system-wide,
+  while the browser page never receives the key. Privacy switches have unique
+  setting names and visible `On` or `Off` state text.
 
 ## Motion and state flow
 
