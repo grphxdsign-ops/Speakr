@@ -20,7 +20,7 @@ review evidence and are never reused for a later lane.
 | 10 | Browser recovery | `codex/luminous-10-browser-recovery` / `Speakr-wt-recovery` | `b872be5` | 19 | `449e021` | Embedded-only visual parity plus auth/CSP/Host/Origin/no-store gates. | MERGED |
 | 11 | Verification harness | `codex/luminous-11-verification` / `Speakr-wt-verification` | `6eafb3d` | 29 | `72c9fcb` | 220-test gate, source-bound schema-3 report/manifest, hosted Windows/macOS checks. | MERGED |
 | 12 | Integration/personas | `codex/luminous-12-integration` / controller tree | `72c9fcb` | 38 | `96c13d3` | Eleven veto fixes, three audit rounds, 240-test local gate, schema-3 evidence, and required Windows/macOS checks. | MERGED |
-| 13 | Release proof | `codex/luminous-13-release` / `Speakr-wt-release` | `96c13d3` | TBD | TBD | Installed Windows artifact, mounted macOS artifact, privacy scan, signing/notarization evidence. | ACTIVE |
+| 13 | Release proof | `codex/luminous-13-release` / `Speakr-wt-release` | `96c13d3` | 39 | TBD | 274-test local gate, clean 10/10 aggregate verification, installed/copied runtime receipts, privacy scan, signed evidence manifests, and fail-closed publication. | DRAFT — HOSTED PROOF |
 
 ## Routed corrective PRs
 
