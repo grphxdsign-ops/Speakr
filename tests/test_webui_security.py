@@ -75,6 +75,22 @@ class _App:
 
 
 class WebUISecurityTests(unittest.TestCase):
+    @staticmethod
+    def _luminance(hex_color):
+        channels = [int(hex_color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+        linear = [
+            value / 12.92
+            if value <= 0.04045
+            else ((value + 0.055) / 1.055) ** 2.4
+            for value in channels
+        ]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    @classmethod
+    def _contrast(cls, first, second):
+        left, right = cls._luminance(first), cls._luminance(second)
+        return (max(left, right) + 0.05) / (min(left, right) + 0.05)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.panel_path = Path(self.temp.name) / "panel.url"
@@ -159,6 +175,11 @@ class WebUISecurityTests(unittest.TestCase):
         self.assertNotIn("url(", page)
         self.assertNotIn("<link", page)
         self.assertNotIn("<img", page)
+        self.assertNotIn("backdrop-filter", page)
+        self.assertIn("button{min-height:44px;border:1px solid var(--line)", page)
+        self.assertIn(".navbtn[aria-current=page]{background:var(--well);border-color:var(--line)", page)
+        self.assertGreaterEqual(self._contrast("#747A92", "#FFFFFF"), 3.0)
+        self.assertGreaterEqual(self._contrast("#737A99", "#282C45"), 3.0)
 
     def test_every_api_read_and_mutation_requires_header_token(self):
         status, _headers, _body = self.request("GET", "/api/state")
