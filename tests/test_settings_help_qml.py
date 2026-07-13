@@ -13,6 +13,8 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 from PySide6.QtCore import (
     Q_ARG,
     Q_RETURN_ARG,
+    QCoreApplication,
+    QEvent,
     QMetaObject,
     QObject,
     QPointF,
@@ -279,6 +281,21 @@ class SettingsHelpQmlTests(unittest.TestCase):
             main.grabWindow()
             self.qapp.processEvents()
 
+    def _dispose_main(self, bridge, engine, main, warnings):
+        """Destroy QML roots while their context properties are still valid."""
+
+        main.hide()
+        main.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.qapp.processEvents()
+        self.assertEqual(engine.rootObjects(), [])
+
+        bridge.close()
+        engine.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.qapp.processEvents()
+        self.assertEqual(warnings, [])
+
     @staticmethod
     def _has_ancestor(item, object_name):
         current = item
@@ -399,9 +416,7 @@ class SettingsHelpQmlTests(unittest.TestCase):
                     )
                     self.assertEqual(warnings, [])
                 finally:
-                    bridge.close()
-                    engine.deleteLater()
-                    self.qapp.processEvents()
+                    self._dispose_main(bridge, engine, main, warnings)
 
     def test_focus_targets_remain_visible_at_supported_text_scales(self):
         self._exercise_focus_visibility()
@@ -443,6 +458,35 @@ class SettingsHelpQmlTests(unittest.TestCase):
             "\n".join((completed.stdout, completed.stderr)),
         )
 
+    def test_settings_load_render_and_teardown_emit_no_qml_warnings(self):
+        app, bridge, native, engine, main, warnings = self._load_main(200)
+        self.assertIsNotNone(app)
+        self.assertIsNotNone(native)
+        try:
+            main.setProperty("currentPage", "settings")
+            settings = main.findChild(QObject, "settingsPage")
+            search = main.findChild(QObject, "settingsSearchField")
+            rows_host = main.findChild(QObject, "settingsRowsRepeater")
+            self.assertIsNotNone(settings)
+            self.assertIsNotNone(search)
+            self.assertIsNotNone(rows_host)
+
+            for category, query in (
+                ("All", ""),
+                ("Accessibility", "visual effects"),
+                ("Advanced", "Ollama"),
+                ("Privacy", "no matching setting"),
+            ):
+                settings.setProperty("selectedCategory", category)
+                search.setProperty("text", query)
+                self._render_qml(main, 2)
+        finally:
+            self._dispose_main(bridge, engine, main, warnings)
+
+        warning_text = "\n".join(warnings)
+        self.assertNotIn("Binding loop detected", warning_text)
+        self.assertNotIn("capturingHotkey", warning_text)
+
     def test_visual_effects_search_and_effective_material_are_truthful(self):
         app, bridge, native, engine, main, warnings = self._load_main(100)
         self.assertIsNotNone(app)
@@ -474,9 +518,7 @@ class SettingsHelpQmlTests(unittest.TestCase):
             self.assertTrue(empty.property("visible"))
             self.assertEqual(warnings, [])
         finally:
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            self._dispose_main(bridge, engine, main, warnings)
 
     def test_advanced_contains_and_searches_every_expert_setting_once(self):
         app, bridge, native, engine, main, warnings = self._load_main(100)
@@ -598,9 +640,7 @@ class SettingsHelpQmlTests(unittest.TestCase):
                     self.assertEqual(settings.property("visibleResultCount"), 1)
             self.assertEqual(warnings, [])
         finally:
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            self._dispose_main(bridge, engine, main, warnings)
 
     def test_rejected_setting_uses_busy_explanation_and_generic_save_error(self):
         app, bridge, native, engine, main, warnings = self._load_main(100)
@@ -665,9 +705,7 @@ class SettingsHelpQmlTests(unittest.TestCase):
             )
             self.assertEqual(warnings, [])
         finally:
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            self._dispose_main(bridge, engine, main, warnings)
 
     def test_rejected_reset_preserves_confirmation_and_shows_busy_reason(self):
         app, bridge, native, engine, main, warnings = self._load_main(100)
@@ -723,9 +761,7 @@ class SettingsHelpQmlTests(unittest.TestCase):
             self.assertEqual(help_page.property("resetError"), "")
             self.assertEqual(warnings, [])
         finally:
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            self._dispose_main(bridge, engine, main, warnings)
 
     def test_settings_and_help_reflow_at_640_by_520_and_scaled_text(self):
         for scale in (100, 150, 200):
@@ -767,9 +803,7 @@ class SettingsHelpQmlTests(unittest.TestCase):
                     self.assertLessEqual(search.width(), main.width())
                     self.assertEqual(warnings, [])
                 finally:
-                    bridge.close()
-                    engine.deleteLater()
-                    self.qapp.processEvents()
+                    self._dispose_main(bridge, engine, main, warnings)
 
     def test_help_reset_actions_are_guarded(self):
         source = (self.qml / "HelpPage.qml").read_text(encoding="utf-8")
