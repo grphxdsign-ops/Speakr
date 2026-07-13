@@ -340,15 +340,15 @@ reading time remains unchanged. There is no idle animation.
 
 ## Reference-board inventory
 
-The following boards are required before runtime styling is accepted. This
-specification does not create them.
+The following local design-only boards anchor runtime styling. The written
+contract remains authoritative when generated microcopy differs.
 
 | Planned file | Frames and annotations |
 |---|---|
 | `luminous-orbit-home-light-dark.png` | Light and dark Home, 960 by 700, custom Windows/macOS chrome, exact readiness/privacy copy |
-| `luminous-orbit-responsive-accessibility.png` | 640 by 520 at 200%, Large HUD, High Contrast, reduced effects, focus ring |
+| `luminous-orbit-compact-high-contrast.png` | 640 by 520 at 200%, High Contrast, reduced effects, focus ring |
 | `luminous-orbit-onboarding-practice.png` | Privacy -> Permissions -> Model -> Shortcut -> Practice; arrows, Skip, retry, meter, exact privacy label |
-| `luminous-orbit-settings-vocabulary-help.png` | Search results, empty search, privacy, Advanced, Vocabulary sections, Help recovery |
+| `luminous-orbit-settings-vocabulary.png` | Search, privacy, Advanced, Vocabulary sections, and empty states |
 | `luminous-orbit-hud-motion.png` | Listening -> Transcribing -> Cleaning -> Inserting -> Inserted; durations, concurrent job, mic and edit errors |
 
 Board rules:

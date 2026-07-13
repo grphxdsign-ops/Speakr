@@ -208,17 +208,16 @@ user to speak more clearly and never assign a speech or confidence score.
 
 ## Reference boards
 
-The Luminous Orbit board set is specified but not generated in this contract
-change. Planned local references are:
+The Luminous Orbit board set is stored locally as design-only references:
 
 - `docs/design/luminous-orbit-home-light-dark.png` -- light and dark Home at
   960 by 700 with custom chrome.
-- `docs/design/luminous-orbit-responsive-accessibility.png` -- 640 by 520,
+- `docs/design/luminous-orbit-compact-high-contrast.png` -- 640 by 520,
   200% text, High Contrast, and reduced-effects states.
 - `docs/design/luminous-orbit-onboarding-practice.png` -- connected setup and
   Practice frames with explicit arrows.
-- `docs/design/luminous-orbit-settings-vocabulary-help.png` -- settings,
-  vocabulary, Help, empty, validation, and recovery states.
+- `docs/design/luminous-orbit-settings-vocabulary.png` -- settings,
+  vocabulary, empty, validation, and recovery states.
 - `docs/design/luminous-orbit-hud-motion.png` -- timed runtime, concurrency,
   success, and error storyboard.
 
