@@ -116,7 +116,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("runs-on: macos-15", self.workflow)
         self.assertIn("runs-on: windows-2025", self.workflow)
         self.assertIn("innosetup --version=6.7.1", self.workflow)
-        self.assertIn('Expected Inno Setup 6.7.1', self.workflow)
+        self.assertIn('innosetup|6.7.1', self.workflow)
         self.assertIn("requirements-release.txt", self.workflow)
         self.assertIn("scripts/build_release.py", self.workflow)
         self.assertIn("scripts/scan_artifact_privacy.py", self.workflow)

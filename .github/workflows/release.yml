@@ -575,9 +575,10 @@ jobs:
           if (!(Test-Path -LiteralPath $iscc)) {
             throw "Inno Setup compiler is unavailable"
           }
-          $innoVersion = (Get-Item -LiteralPath $iscc).VersionInfo.ProductVersion
-          if ($innoVersion -notlike "6.7.1*") {
-            throw "Expected Inno Setup 6.7.1, found $innoVersion"
+          $innoPackage = (choco list --exact --limit-output innosetup |
+            Where-Object { $_ -like "innosetup|*" } | Select-Object -First 1)
+          if ($innoPackage -ne "innosetup|6.7.1") {
+            throw "Expected the pinned Inno Setup 6.7.1 package"
           }
           & $iscc "/DAppVersion=$env:APP_VERSION" scripts\installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
