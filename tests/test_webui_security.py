@@ -178,7 +178,7 @@ class WebUISecurityTests(unittest.TestCase):
         self.assertNotIn("backdrop-filter", page)
         self.assertIn("button{min-height:44px;border:1px solid var(--line)", page)
         self.assertIn(".navbtn[aria-current=page]{background:var(--well);border-color:var(--line)", page)
-        self.assertGreaterEqual(self._contrast("#747A92", "#FFFFFF"), 3.0)
+        self.assertGreaterEqual(self._contrast("#747A92", "#F8FAFF"), 3.0)
         self.assertGreaterEqual(self._contrast("#737A99", "#282C45"), 3.0)
 
     def test_every_api_read_and_mutation_requires_header_token(self):

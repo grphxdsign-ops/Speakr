@@ -286,7 +286,7 @@ PAGE = r"""<!doctype html>
 <meta name="color-scheme" content="light dark">
 <title>Speakr recovery panel</title>
 <style>
-:root{color-scheme:light dark;--canvas:#EDF1FA;--surface:#F8FAFF;--surface-glass:#F8FAFF;--surface-soft:#F8FAFF;--well:#FFFFFF;--ink:#17182A;--muted:#55596D;--line:#747A92;--line-soft:rgba(116,122,146,.4);--accent:#6657D8;--accent-hover:#5749C4;--accent-text:#F8FAFF;--good:#24694D;--good-soft:rgba(36,105,77,.1);--warn:#765000;--bad:#9A3044;--bad-soft:rgba(154,48,68,.08);--focus:#6657D8;--shadow:0 24px 70px rgba(42,45,79,.16),0 3px 14px rgba(42,45,79,.08);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:16px}
+:root{color-scheme:light dark;--canvas:#EDF1FA;--surface:#F8FAFF;--surface-glass:#F8FAFF;--surface-soft:#F8FAFF;--well:#F8FAFF;--ink:#17182A;--muted:#55596D;--line:#747A92;--line-soft:rgba(116,122,146,.4);--accent:#6657D8;--accent-hover:#5749C4;--accent-text:#F8FAFF;--good:#24694D;--good-soft:rgba(36,105,77,.1);--warn:#765000;--bad:#9A3044;--bad-soft:rgba(154,48,68,.08);--focus:#6657D8;--shadow:0 24px 70px rgba(42,45,79,.16),0 3px 14px rgba(42,45,79,.08);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:16px}
 @media(prefers-color-scheme:dark){:root{--canvas:#090B18;--surface:#20243A;--surface-glass:#20243A;--surface-soft:#20243A;--well:#282C45;--ink:#F2F3FC;--muted:#B4B7C9;--line:#737A99;--line-soft:rgba(115,122,153,.42);--accent:#A89AFB;--accent-hover:#B9AEFC;--accent-text:#17182A;--good:#7DD7B0;--good-soft:rgba(125,215,176,.11);--warn:#F0C56A;--bad:#FF9CAA;--bad-soft:rgba(255,156,170,.09);--focus:#C3BBFF;--shadow:0 30px 80px rgba(1,2,10,.42),0 3px 16px rgba(1,2,10,.3)}}
 *{box-sizing:border-box}
 html{min-width:320px;background:var(--canvas)}
