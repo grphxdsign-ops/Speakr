@@ -24,10 +24,20 @@ TextField {
     Accessible.name: accessibleName
     Accessible.description: accessibleDescription
 
-    background: Rectangle {
-        radius: control.tokens.radius
-        color: control.tokens.surface
-        border.width: control.activeFocus ? 2 : 1
-        border.color: control.activeFocus ? control.tokens.focus : control.tokens.border
+    background: Item {
+        Rectangle {
+            anchors.fill: parent
+            radius: control.tokens.radiusControl
+            color: control.tokens.contentSurface
+            border.width: control.tokens.borderWidth
+            border.color: control.tokens.border
+        }
+
+        FocusRing {
+            anchors.fill: parent
+            tokens: control.tokens
+            shown: control.activeFocus
+            cornerRadius: control.tokens.radiusControl
+        }
     }
 }

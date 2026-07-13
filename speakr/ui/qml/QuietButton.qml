@@ -27,9 +27,13 @@ Button {
         text: control.text
         color: !control.enabled
                ? control.tokens.disabledText
-               : (control.kind === "primary" ? control.tokens.accentText
-                                               : (control.kind === "danger" ? control.tokens.danger
-                                                                             : control.tokens.text))
+               : (control.tokens.highContrast
+                  && (control.down || control.hovered)
+                  ? control.tokens.accentText
+                  : (control.kind === "primary" ? control.tokens.accentText
+                                                 : (control.kind === "danger"
+                                                    ? control.tokens.danger
+                                                    : control.tokens.text)))
         font.family: control.tokens.fontFamily
         font.pixelSize: control.tokens.label
         font.weight: control.kind === "primary" ? Font.DemiBold : Font.Medium
@@ -38,28 +42,41 @@ Button {
         elide: Text.ElideRight
     }
 
-    background: Rectangle {
-        radius: control.tokens.radius
-        color: {
-            if (!control.enabled)
-                return control.tokens.surfaceRaised
-            if (control.kind === "primary")
-                return control.down ? Qt.darker(control.tokens.accent, 1.12) : control.tokens.accent
-            if (control.kind === "danger")
-                return control.down ? control.tokens.pressed : control.tokens.dangerSurface
-            if (control.down)
-                return control.tokens.pressed
-            if (control.hovered || control.visualFocus)
-                return control.tokens.hover
-            return control.kind === "quiet" ? "transparent" : control.tokens.surface
-        }
-        border.width: control.visualFocus ? 2 : 1
-        border.color: control.visualFocus
-                      ? control.tokens.focus
-                      : (control.kind === "danger" ? control.tokens.danger : control.tokens.border)
+    background: Item {
+        Rectangle {
+            anchors.fill: parent
+            radius: control.tokens.radiusControl
+            color: {
+                if (!control.enabled)
+                    return control.tokens.surfaceRaised
+                if (control.kind === "primary")
+                    return control.down ? Qt.darker(control.tokens.accent, 1.10)
+                                        : control.tokens.accent
+                if (control.kind === "danger")
+                    return control.down ? control.tokens.pressed
+                                        : control.tokens.dangerSurface
+                if (control.down)
+                    return control.tokens.pressed
+                if (control.hovered)
+                    return control.tokens.hover
+                return control.kind === "quiet" ? "transparent"
+                                                : control.tokens.contentSurface
+            }
+            border.width: control.kind === "quiet" && !control.hovered
+                          ? 0 : control.tokens.borderWidth
+            border.color: control.kind === "danger" ? control.tokens.danger
+                                                     : control.tokens.border
 
-        Behavior on color {
-            ColorAnimation { duration: control.tokens.motionFast }
+            Behavior on color {
+                ColorAnimation { duration: control.tokens.motionHover }
+            }
+        }
+
+        FocusRing {
+            anchors.fill: parent
+            tokens: control.tokens
+            shown: control.visualFocus
+            cornerRadius: control.tokens.radiusControl
         }
     }
 }

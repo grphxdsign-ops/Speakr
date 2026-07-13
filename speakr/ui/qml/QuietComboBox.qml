@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 
@@ -23,7 +25,9 @@ ComboBox {
         leftPadding: 0
         rightPadding: control.tokens.space8
         text: control.displayText
-        color: control.enabled ? control.tokens.text : control.tokens.disabledText
+        color: !control.enabled ? control.tokens.disabledText
+               : (control.tokens.highContrast && (control.down || control.hovered)
+                  ? control.tokens.accentText : control.tokens.text)
         font.family: control.tokens.fontFamily
         font.pixelSize: control.tokens.body
         verticalAlignment: Text.AlignVCenter
@@ -33,22 +37,42 @@ ComboBox {
     indicator: PlainText {
         x: control.width - width - control.tokens.space12
         y: (control.height - height) / 2
-        text: "⌄"
-        color: control.enabled ? control.tokens.mutedText : control.tokens.disabledText
+        text: "\u2304"
+        color: !control.enabled ? control.tokens.disabledText
+               : (control.tokens.highContrast && (control.down || control.hovered)
+                  ? control.tokens.accentText : control.tokens.mutedText)
         font.family: control.tokens.fontFamily
         font.pixelSize: control.tokens.body
+        Accessible.ignored: true
     }
 
-    background: Rectangle {
-        radius: control.tokens.radius
-        color: control.down ? control.tokens.pressed
-                            : (control.hovered ? control.tokens.hover : control.tokens.surface)
-        border.width: control.visualFocus ? 2 : 1
-        border.color: control.visualFocus ? control.tokens.focus : control.tokens.border
+    background: Item {
+        Rectangle {
+            anchors.fill: parent
+            radius: control.tokens.radiusControl
+            color: control.down ? control.tokens.pressed
+                                : (control.hovered ? control.tokens.hover
+                                                   : control.tokens.contentSurface)
+            border.width: control.tokens.borderWidth
+            border.color: control.tokens.border
+
+            Behavior on color {
+                ColorAnimation { duration: control.tokens.motionHover }
+            }
+        }
+
+        FocusRing {
+            anchors.fill: parent
+            tokens: control.tokens
+            shown: control.visualFocus
+            cornerRadius: control.tokens.radiusControl
+        }
     }
 
     delegate: ItemDelegate {
         id: option
+        required property int index
+        required property var modelData
         width: control.popup.width
         height: Math.max(control.tokens.controlHeight, implicitHeight)
         highlighted: control.highlightedIndex === index
@@ -57,8 +81,10 @@ ComboBox {
         Accessible.name: modelData
 
         contentItem: PlainText {
-            text: modelData
-            color: option.enabled ? control.tokens.text : control.tokens.disabledText
+            text: option.modelData
+            color: !option.enabled ? control.tokens.disabledText
+                   : (control.tokens.highContrast && option.highlighted
+                      ? control.tokens.accentText : control.tokens.text)
             font.family: control.tokens.fontFamily
             font.pixelSize: control.tokens.body
             verticalAlignment: Text.AlignVCenter
@@ -67,6 +93,8 @@ ComboBox {
 
         background: Rectangle {
             color: option.highlighted ? control.tokens.hover : control.tokens.surface
+            border.width: option.visualFocus ? control.tokens.focusWidth : 0
+            border.color: control.tokens.focus
         }
     }
 
@@ -86,9 +114,9 @@ ComboBox {
         }
 
         background: Rectangle {
-            radius: control.tokens.radius
+            radius: control.tokens.radiusControl
             color: control.tokens.surface
-            border.width: 1
+            border.width: control.tokens.borderWidth
             border.color: control.tokens.border
         }
     }

@@ -33,12 +33,14 @@ Item {
             Layout.preferredWidth: root.tokens.metric(root.compact ? 24 : 40)
             Layout.alignment: Qt.AlignVCenter
             implicitWidth: root.tokens.metric(32)
-            implicitHeight: root.tokens.metric(2)
+            implicitHeight: root.tokens.metric(3)
             Layout.preferredHeight: implicitHeight
+            radius: height / 2
             color: root.tokens.border
 
             Rectangle {
                 anchors.fill: parent
+                radius: height / 2
                 color: root.tokens.accent
                 transform: Scale {
                     origin.x: 0
@@ -46,7 +48,7 @@ Item {
                     xScale: root.activeStage > 1 ? 1 : 0
                     Behavior on xScale {
                         NumberAnimation {
-                            duration: root.tokens.motionStandard
+                            duration: root.tokens.motionStage
                             easing.type: Easing.OutQuint
                         }
                     }
@@ -70,12 +72,14 @@ Item {
             Layout.preferredWidth: root.tokens.metric(root.compact ? 24 : 40)
             Layout.alignment: Qt.AlignVCenter
             implicitWidth: root.tokens.metric(32)
-            implicitHeight: root.tokens.metric(2)
+            implicitHeight: root.tokens.metric(3)
             Layout.preferredHeight: implicitHeight
+            radius: height / 2
             color: root.tokens.border
 
             Rectangle {
                 anchors.fill: parent
+                radius: height / 2
                 color: root.tokens.accent
                 transform: Scale {
                     origin.x: 0
@@ -83,7 +87,7 @@ Item {
                     xScale: root.activeStage > 2 ? 1 : 0
                     Behavior on xScale {
                         NumberAnimation {
-                            duration: root.tokens.motionStandard
+                            duration: root.tokens.motionStage
                             easing.type: Easing.OutQuint
                         }
                     }

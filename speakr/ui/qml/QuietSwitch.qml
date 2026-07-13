@@ -28,9 +28,15 @@ Switch {
         y: (control.height - height) / 2
         radius: height / 2
         color: control.checked ? control.tokens.accent : control.tokens.surfaceRaised
-        border.width: control.visualFocus ? 2 : 1
-        border.color: control.visualFocus ? control.tokens.focus
-                                          : (control.checked ? control.tokens.accent : control.tokens.border)
+        border.width: control.tokens.borderWidth
+        border.color: control.checked ? control.tokens.accent : control.tokens.border
+
+        FocusRing {
+            anchors.fill: parent
+            tokens: control.tokens
+            shown: control.visualFocus
+            cornerRadius: track.radius
+        }
 
         Rectangle {
             id: knob
@@ -45,7 +51,7 @@ Switch {
 
             Behavior on x {
                 NumberAnimation {
-                    duration: control.tokens.reduceMotion ? 0 : 140
+                    duration: control.tokens.motionToggle
                     easing.type: Easing.OutQuint
                 }
             }

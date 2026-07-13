@@ -12,31 +12,36 @@ ColumnLayout {
 
     spacing: tokens.space4
     Accessible.role: Accessible.StaticText
-    Accessible.name: label + (active ? qsTr(", current stage") : (reached ? qsTr(", complete") : ""))
+    Accessible.name: label + (active ? qsTr(", current stage")
+                                    : (reached ? qsTr(", complete") : ""))
     Accessible.description: accessibleDescription
 
     Rectangle {
         Layout.alignment: Qt.AlignHCenter
-        implicitWidth: root.tokens.metric(18)
+        implicitWidth: root.tokens.metric(24)
         implicitHeight: implicitWidth
         Layout.preferredWidth: implicitWidth
         Layout.preferredHeight: implicitHeight
         radius: implicitWidth / 2
-        color: root.reached || root.active ? root.tokens.accent : root.tokens.surface
-        border.width: root.active ? 3 : 2
-        border.color: root.reached || root.active ? root.tokens.accent : root.tokens.border
+        color: root.active
+               ? root.tokens.withAlpha(root.tokens.accent, 0.24)
+               : (root.reached ? root.tokens.accent : root.tokens.contentSurface)
+        border.width: root.active ? 2 : root.tokens.borderWidth
+        border.color: root.reached || root.active ? root.tokens.accent
+                                                 : root.tokens.border
 
-        Rectangle {
+        PlainText {
             anchors.centerIn: parent
-            width: parent.width / 3
-            height: width
-            radius: width / 2
-            visible: root.active
-            color: root.tokens.accentText
+            text: root.reached ? "\u2713" : (root.active ? "\u2022" : "")
+            color: root.reached ? root.tokens.accentText : root.tokens.accent
+            font.family: root.tokens.fontFamily
+            font.pixelSize: root.tokens.body
+            font.weight: Font.Bold
+            Accessible.ignored: true
         }
 
         Behavior on color {
-            ColorAnimation { duration: root.tokens.motionStandard }
+            ColorAnimation { duration: root.tokens.motionStage }
         }
     }
 
@@ -44,11 +49,12 @@ ColumnLayout {
         Layout.alignment: Qt.AlignHCenter
         Layout.fillWidth: true
         text: root.label
-        color: root.active ? root.tokens.text : root.tokens.mutedText
+        color: root.active || root.reached ? root.tokens.text : root.tokens.mutedText
         font.family: root.tokens.fontFamily
         font.pixelSize: root.tokens.secondary
         font.weight: root.active ? Font.DemiBold : Font.Normal
         horizontalAlignment: Text.AlignHCenter
         elide: Text.ElideRight
+        Accessible.ignored: true
     }
 }

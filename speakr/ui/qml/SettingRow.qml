@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
 Rectangle {
@@ -20,6 +19,8 @@ Rectangle {
     property string actionText: qsTr("Open")
     property string actionKind: "config"
     property bool allowEmpty: false
+    property string saveState: "" // "saved", "saving", "error", or empty
+    property string validationMessage: ""
 
     signal changeRequested(string path, var value, var previousValue)
     signal actionRequested(string kind)
@@ -64,7 +65,7 @@ Rectangle {
         anchors.right: parent.right
         anchors.top: parent.top
         height: 1
-        color: root.tokens.border
+        color: root.tokens.withAlpha(root.tokens.border, 0.72)
     }
 
     GridLayout {
@@ -252,6 +253,27 @@ Rectangle {
                 accessibleDescription: root.description
                 onClicked: root.actionRequested(root.actionKind)
             }
+        }
+
+        PlainText {
+            Layout.fillWidth: true
+            Layout.columnSpan: rowLayout.columns
+            visible: root.validationMessage.length > 0 || root.saveState.length > 0
+            text: root.validationMessage.length > 0
+                  ? root.validationMessage
+                  : (root.saveState === "saved" ? qsTr("Saved")
+                     : (root.saveState === "saving" ? qsTr("Saving")
+                        : (root.saveState === "error" ? qsTr("Could not save") : "")))
+            color: root.validationMessage.length > 0 || root.saveState === "error"
+                   ? root.tokens.danger
+                   : (root.saveState === "saved" ? root.tokens.success
+                                                  : root.tokens.mutedText)
+            font.family: root.tokens.fontFamily
+            font.pixelSize: root.tokens.secondary
+            font.weight: Font.DemiBold
+            wrapMode: Text.Wrap
+            Accessible.role: root.validationMessage.length > 0 || root.saveState === "error"
+                             ? Accessible.AlertMessage : Accessible.StaticText
         }
     }
 }
