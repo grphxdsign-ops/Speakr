@@ -24,6 +24,7 @@ from PySide6.QtWidgets import QApplication
 
 from speakr.interface_state import InterfaceState
 from speakr.qt_ui import Bridge
+from tests.qml_lifecycle import dispose_qml_fixture
 
 
 class _VocabularyApp:
@@ -251,13 +252,15 @@ Item {{
         self.assertIsNotNone(page)
         return app, bridge, engine, fixture, page, window, warnings
 
-    def _dispose(self, bridge, engine, fixture, window):
-        bridge.close()
-        fixture.setParentItem(None)
-        fixture.deleteLater()
-        window.close()
-        engine.deleteLater()
-        self.qapp.processEvents()
+    def _dispose(self, bridge, engine, fixture, window, warnings):
+        dispose_qml_fixture(
+            self.qapp,
+            engine,
+            roots=(fixture,),
+            windows=(window,),
+            context_objects=(bridge,),
+        )
+        self.assertEqual(warnings, [])
 
     def _settle(self, item, cycles=8):
         for _ in range(cycles):
@@ -343,7 +346,7 @@ Item {{
             self.assertIn("2 replacements", summary.property("description"))
             self.assertEqual(warnings, [])
         finally:
-            self._dispose(bridge, engine, fixture, window)
+            self._dispose(bridge, engine, fixture, window, warnings)
 
     def test_content_bound_ids_and_forget_actions_require_confirmation(self):
         app, bridge, engine, fixture, page, window, warnings = self._fixture()
@@ -404,7 +407,7 @@ Item {{
             self.assertEqual(page.property("learnedWordCount"), 0)
             self.assertEqual(warnings, [])
         finally:
-            self._dispose(bridge, engine, fixture, window)
+            self._dispose(bridge, engine, fixture, window, warnings)
 
     def test_long_replacement_confirmation_keeps_actions_visible_and_scrollable(self):
         heard = "heard-" + "h" * 97
@@ -508,7 +511,7 @@ Item {{
             self.assertFalse(confirmation.property("visible"))
             self.assertEqual(warnings, [])
         finally:
-            self._dispose(bridge, engine, fixture, window)
+            self._dispose(bridge, engine, fixture, window, warnings)
 
     def test_recovery_routes_cover_invalid_changed_save_and_reload_failure(self):
         app, bridge, engine, fixture, page, window, warnings = self._fixture()
@@ -551,7 +554,7 @@ Item {{
             self.assertEqual(app.reload_attempts, 2)
             self.assertEqual(warnings, [])
         finally:
-            self._dispose(bridge, engine, fixture, window)
+            self._dispose(bridge, engine, fixture, window, warnings)
 
     def test_narrow_200_percent_reflow_and_visible_keyboard_focus(self):
         app, bridge, engine, fixture, page, window, warnings = self._fixture(
@@ -623,7 +626,7 @@ Item {{
             self.assertGreater(viewport.property("contentY"), 0)
             self.assertEqual(warnings, [])
         finally:
-            self._dispose(bridge, engine, fixture, window)
+            self._dispose(bridge, engine, fixture, window, warnings)
 
     def test_page_uses_only_shared_luminous_orbit_primitives(self):
         source = (self.qml / "VocabularyPage.qml").read_text(encoding="utf-8")

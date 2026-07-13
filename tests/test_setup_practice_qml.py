@@ -15,6 +15,8 @@ from PySide6.QtQuick import QQuickWindow
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
 
+from tests.qml_lifecycle import dispose_qml_fixture
+
 
 class _Bridge(QObject):
     capturingHotkeyChanged = Signal()
@@ -153,13 +155,15 @@ class SetupPracticeQmlTests(unittest.TestCase):
             page.ensurePolished()
         return engine, bridge, theme, page, window, warnings
 
-    def _dispose(self, engine, theme, page, window):
-        page.setParentItem(None)
-        page.deleteLater()
-        window.close()
-        theme.deleteLater()
-        engine.deleteLater()
-        self.qapp.processEvents()
+    def _dispose(self, engine, bridge, theme, page, window, warnings):
+        dispose_qml_fixture(
+            self.qapp,
+            engine,
+            roots=(page, theme),
+            windows=(window,),
+            context_objects=(bridge,),
+        )
+        self.assertEqual(warnings, [])
 
     def _settle(self, page):
         for _ in range(4):
@@ -243,7 +247,7 @@ class SetupPracticeQmlTests(unittest.TestCase):
             self.assertEqual(segments.property("count"), 5)
             self.assertEqual(warnings, [])
         finally:
-            self._dispose(engine, theme, page, window)
+            self._dispose(engine, bridge, theme, page, window, warnings)
 
     def test_practice_states_actions_and_temporary_results(self):
         engine, bridge, theme, page, window, warnings = self._fixture(
@@ -307,7 +311,7 @@ class SetupPracticeQmlTests(unittest.TestCase):
             self.assertIn(("startPractice", None), bridge.calls)
             self.assertEqual(warnings, [])
         finally:
-            self._dispose(engine, theme, page, window)
+            self._dispose(engine, bridge, theme, page, window, warnings)
 
     def test_leaving_shortcut_step_cancels_capture_before_ui_moves(self):
         engine, bridge, theme, page, window, warnings = self._fixture(
@@ -341,7 +345,7 @@ class SetupPracticeQmlTests(unittest.TestCase):
             self.assertFalse(capture_notice.property("visible"))
             self.assertEqual(warnings, [])
         finally:
-            self._dispose(engine, theme, page, window)
+            self._dispose(engine, bridge, theme, page, window, warnings)
 
     def test_narrow_200_percent_high_contrast_reflows_without_horizontal_scroll(self):
         fixtures = []
@@ -368,7 +372,7 @@ class SetupPracticeQmlTests(unittest.TestCase):
                 self.assertEqual(warnings, [])
         finally:
             for engine, bridge, theme, page, window, warnings in fixtures:
-                self._dispose(engine, theme, page, window)
+                self._dispose(engine, bridge, theme, page, window, warnings)
 
     def test_pages_use_shared_visual_tokens_and_no_remote_or_idle_effects(self):
         onboarding = (self.qml / "OnboardingPage.qml").read_text(encoding="utf-8")
