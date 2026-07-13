@@ -226,6 +226,17 @@ Item {
         })
     }
 
+    function scrollViewportBy(viewport, delta) {
+        if (viewport === null || viewport === undefined) return
+        var originY = Number(field(viewport, "originY", 0))
+        var contentHeight = Number(field(viewport, "contentHeight", 0))
+        var viewportHeight = Number(field(viewport, "height", 0))
+        var maximumY = originY + Math.max(0, contentHeight - viewportHeight)
+        var currentY = Number(field(viewport, "contentY", originY))
+        setField(viewport, "contentY",
+                 Math.max(originY, Math.min(maximumY, currentY + delta)))
+    }
+
     Connections {
         target: root.Window.window
         enabled: target !== null
@@ -851,10 +862,15 @@ Item {
         closePolicy: Popup.CloseOnEscape
         width: Math.min(root.width - root.tokens.space32,
                         root.tokens.metric(520))
+        height: Math.min(root.height - root.tokens.space32,
+                         confirmationContent.implicitHeight + padding * 2)
         x: Math.max(root.tokens.space16, (root.width - width) / 2)
         y: Math.max(root.tokens.space16, (root.height - height) / 2)
         padding: root.tokens.space24
-        onOpened: cancelRemoval.forceActiveFocus(Qt.TabFocusReason)
+        onOpened: {
+            root.setField(confirmationBodyScroll.contentItem, "contentY", 0)
+            cancelRemoval.forceActiveFocus(Qt.TabFocusReason)
+        }
         onClosed: {
             root.pendingAction = ""
             root.pendingTarget = ""
@@ -868,6 +884,7 @@ Item {
         }
 
         contentItem: ColumnLayout {
+            id: confirmationContent
             spacing: root.tokens.space16
             Accessible.role: Accessible.Dialog
             Accessible.name: root.pendingAction === "learned"
@@ -875,29 +892,87 @@ Item {
                              : qsTr("Confirm remove vocabulary entry")
             Accessible.description: root.pendingTarget
 
-            SectionHeading {
+            ScrollView {
+                id: confirmationBodyScroll
+                objectName: "vocabularyConfirmationBodyScroll"
                 Layout.fillWidth: true
-                tokens: root.tokens
-                title: root.pendingAction === "learned"
-                       ? qsTr("Forget this learned word?")
-                       : qsTr("Remove this vocabulary entry?")
-                description: root.pendingAction === "learned"
-                             ? qsTr("Speakr will remove only its local learning entry.")
-                             : qsTr("Speakr will remove the content-bound entry from the local dictionary file.")
-            }
+                Layout.fillHeight: true
+                Layout.minimumHeight: root.tokens.controlHeight
+                Layout.preferredHeight: Math.max(
+                                            root.tokens.controlHeight,
+                                            Math.min(confirmationBody.implicitHeight,
+                                                     root.tokens.metric(300)))
+                clip: true
+                contentWidth: availableWidth
+                focusPolicy: Qt.StrongFocus
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                Accessible.role: Accessible.Grouping
+                Accessible.name: root.pendingAction === "learned"
+                                 ? qsTr("Learned word removal details")
+                                 : qsTr("Vocabulary entry removal details")
+                Accessible.description: root.pendingTarget
 
-            PlainText {
-                Layout.fillWidth: true
-                text: root.pendingTarget
-                color: root.tokens.text
-                font.family: root.tokens.fontFamily
-                font.pixelSize: root.tokens.body
-                font.weight: Font.Medium
-                wrapMode: Text.Wrap
-                Accessible.name: text
+                Keys.onPressed: function(event) {
+                    var amount = root.tokens.controlHeight
+                    if (event.key === Qt.Key_PageUp
+                            || event.key === Qt.Key_PageDown)
+                        amount = Math.max(root.tokens.controlHeight,
+                                          confirmationBodyScroll.height
+                                          - root.tokens.space16)
+                    if (event.key === Qt.Key_Up || event.key === Qt.Key_PageUp) {
+                        root.scrollViewportBy(confirmationBodyScroll.contentItem,
+                                              -amount)
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Down
+                               || event.key === Qt.Key_PageDown) {
+                        root.scrollViewportBy(confirmationBodyScroll.contentItem,
+                                              amount)
+                        event.accepted = true
+                    }
+                }
+
+                background: Item {
+                    FocusRing {
+                        anchors.fill: parent
+                        tokens: root.tokens
+                        shown: confirmationBodyScroll.visualFocus
+                        cornerRadius: root.tokens.radiusControl
+                    }
+                }
+
+                ColumnLayout {
+                    id: confirmationBody
+                    width: confirmationBodyScroll.availableWidth
+                    spacing: root.tokens.space16
+
+                    SectionHeading {
+                        Layout.fillWidth: true
+                        tokens: root.tokens
+                        title: root.pendingAction === "learned"
+                               ? qsTr("Forget this learned word?")
+                               : qsTr("Remove this vocabulary entry?")
+                        description: root.pendingAction === "learned"
+                                     ? qsTr("Speakr will remove only its local learning entry.")
+                                     : qsTr("Speakr will remove the content-bound entry from the local dictionary file.")
+                    }
+
+                    PlainText {
+                        Layout.fillWidth: true
+                        text: root.pendingTarget
+                        color: root.tokens.text
+                        font.family: root.tokens.fontFamily
+                        font.pixelSize: root.tokens.body
+                        font.weight: Font.Medium
+                        wrapMode: Text.Wrap
+                        Accessible.name: text
+                    }
+                }
             }
 
             Flow {
+                id: confirmationActions
+                objectName: "vocabularyConfirmationActions"
                 Layout.fillWidth: true
                 spacing: root.tokens.space8
 

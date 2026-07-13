@@ -19,6 +19,7 @@ from PySide6.QtCore import (
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtQuickControls2 import QQuickStyle
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from speakr.interface_state import InterfaceState
@@ -191,8 +192,10 @@ class VocabularyQmlTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "speakr" / "ui" / "qml"
         )
 
-    def _fixture(self, *, text_scale=100, mode="dark"):
+    def _fixture(self, *, text_scale=100, mode="dark", app_setup=None):
         app = _VocabularyApp()
+        if app_setup is not None:
+            app_setup(app)
         bridge = Bridge(app)
         engine = QQmlApplicationEngine()
         engine.rootContext().setContextProperty("bridge", bridge)
@@ -399,6 +402,110 @@ Item {{
             self._settle(fixture)
             self.assertEqual(app.approved, ["Luminous"])
             self.assertEqual(page.property("learnedWordCount"), 0)
+            self.assertEqual(warnings, [])
+        finally:
+            self._dispose(bridge, engine, fixture, window)
+
+    def test_long_replacement_confirmation_keeps_actions_visible_and_scrollable(self):
+        heard = "heard-" + "h" * 97
+        intended = "intended-" + "i" * 94
+        self.assertEqual(len(heard), 103)
+        self.assertEqual(len(intended), 103)
+        entry_id = "12:long-bound-id"
+
+        def setup(app):
+            app.manual = [
+                {
+                    "id": entry_id,
+                    "kind": "replacement",
+                    "heard": heard,
+                    "intended": intended,
+                }
+            ]
+            app.learned = []
+
+        app, bridge, engine, fixture, page, window, warnings = self._fixture(
+            text_scale=200,
+            mode="high_contrast",
+            app_setup=setup,
+        )
+        try:
+            page.setProperty("tabIndex", 1)
+            self._settle(fixture)
+            remove = self._find_visual_child(
+                fixture, f"removeReplacementButton_{entry_id}"
+            )
+            confirmation = fixture.findChild(QObject, "vocabularyConfirmation")
+            body_scroll = fixture.findChild(
+                QObject, "vocabularyConfirmationBodyScroll"
+            )
+            actions = fixture.findChild(QObject, "vocabularyConfirmationActions")
+            cancel = fixture.findChild(QObject, "cancelVocabularyDeletion")
+            confirm = fixture.findChild(QObject, "confirmVocabularyDeletion")
+            for item in (
+                remove,
+                confirmation,
+                body_scroll,
+                actions,
+                cancel,
+                confirm,
+            ):
+                self.assertIsNotNone(item)
+
+            self.assertTrue(QMetaObject.invokeMethod(remove, "click"))
+            self._settle(fixture, 12)
+            self.assertTrue(confirmation.property("visible"))
+            self.assertEqual(page.property("pendingId"), entry_id)
+            self.assertLessEqual(confirmation.property("height"), window.height())
+            self.assertLessEqual(
+                confirmation.property("y") + confirmation.property("height"),
+                window.height() + 1,
+            )
+
+            body_viewport = body_scroll.property("contentItem")
+            self.assertGreater(
+                body_viewport.property("contentHeight"),
+                body_viewport.height() + 1,
+            )
+            for item in (actions, cancel, confirm):
+                position = item.mapToItem(window.contentItem(), QPointF(0, 0))
+                self.assertTrue(item.isVisible(), item.objectName())
+                self.assertGreaterEqual(position.x(), -1, item.objectName())
+                self.assertGreaterEqual(position.y(), -1, item.objectName())
+                self.assertLessEqual(
+                    position.x() + item.width(),
+                    window.width() + 1,
+                    item.objectName(),
+                )
+                self.assertLessEqual(
+                    position.y() + item.height(),
+                    window.height() + 1,
+                    item.objectName(),
+                )
+
+            self.assertEqual(
+                window.activeFocusItem().objectName(),
+                "cancelVocabularyDeletion",
+            )
+            body_scroll.forceActiveFocus(Qt.FocusReason.TabFocusReason)
+            self._settle(fixture)
+            self.assertEqual(body_viewport.property("contentY"), 0)
+            QTest.keyClick(window, Qt.Key.Key_PageDown)
+            self._settle(fixture)
+            self.assertGreater(body_viewport.property("contentY"), 0)
+
+            cancel.forceActiveFocus(Qt.FocusReason.TabFocusReason)
+            self._settle(fixture)
+            QTest.keyClick(window, Qt.Key.Key_Tab)
+            self._settle(fixture)
+            self.assertEqual(
+                window.activeFocusItem().objectName(),
+                "confirmVocabularyDeletion",
+            )
+            QTest.keyClick(window, Qt.Key.Key_Space)
+            self._settle(fixture)
+            self.assertEqual(app.removed, [entry_id])
+            self.assertFalse(confirmation.property("visible"))
             self.assertEqual(warnings, [])
         finally:
             self._dispose(bridge, engine, fixture, window)
