@@ -45,6 +45,7 @@ from speakr.renderer_handoff import (
     RendererHandoffParent as _RendererHandoffParent,
     is_guarded as _software_relaunch_is_guarded,
 )
+from speakr.release_core_proof import active_core_proof as _active_core_proof
 from speakr.streaming import DictationSession
 from speakr.transcriber import Transcriber
 from speakr.tray import Tray
@@ -312,6 +313,7 @@ class SpeakrApp:
 
         self._core_started = False
         self._shutting_down = False
+        self._release_core_proof = _active_core_proof()
 
     # ----- lifecycle -------------------------------------------------------
 
@@ -388,6 +390,10 @@ class SpeakrApp:
             return
         self._core_started = True
 
+        core_proof = getattr(self, "_release_core_proof", None)
+        if core_proof is not None and not core_proof.attach(self):
+            return
+
         threading.Thread(target=self._load_model, name="model-loader", daemon=True).start()
         threading.Thread(target=self._prepare_formatter, name="ollama-prepare", daemon=True).start()
         try:
@@ -461,6 +467,9 @@ class SpeakrApp:
                 str(exc),
             )
             self._legacy_state("error", "speech model failed")
+            core_proof = getattr(self, "_release_core_proof", None)
+            if core_proof is not None:
+                core_proof.fail()
             return
 
         if self._shutting_down:
@@ -492,6 +501,9 @@ class SpeakrApp:
             f"{self.transcriber.model_in_use} on {self.transcriber.device_in_use}",
         )
         self._notify_settings()
+        core_proof = getattr(self, "_release_core_proof", None)
+        if core_proof is not None:
+            core_proof.note_model_ready()
 
     def _prepare_formatter(self):
         try:
@@ -499,7 +511,11 @@ class SpeakrApp:
             if formatting.get("enabled", True) and formatting.get("use_ollama", True):
                 self.formatter.ensure_ollama()
         finally:
-            self.interface_state.update(cleanup_path=self._current_cleanup_path())
+            cleanup_path = self._current_cleanup_path()
+            self.interface_state.update(cleanup_path=cleanup_path)
+            core_proof = getattr(self, "_release_core_proof", None)
+            if core_proof is not None:
+                core_proof.note_formatter_ready(cleanup_path)
 
     def _current_cleanup_path(self):
         formatting = self.config.get("formatting", default={}) or {}
@@ -574,6 +590,9 @@ class SpeakrApp:
         if self._shutting_down:
             return
         self._shutting_down = True
+        core_proof = getattr(self, "_release_core_proof", None)
+        if core_proof is not None:
+            core_proof.cancel()
         self.log.info("Speakr shutting down")
         self.clear_practice()
         self.cancel_hotkey_capture()

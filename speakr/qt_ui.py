@@ -25,6 +25,11 @@ from typing import Any
 from speakr.hotkey import resolve_hotkey_mode
 from speakr.interface_state import InterfaceState
 from speakr.native_window import NativeWindowController
+from speakr.release_proof import (
+    proof_requested as _release_proof_requested,
+    quit_after_proof_requested as _quit_after_release_proof,
+    write_native_ready as _write_native_release_proof,
+)
 
 log = logging.getLogger("speakr.qt_ui")
 
@@ -2018,8 +2023,39 @@ def run_native_ui(app):
             raise QtUnavailable(
                 "the renderer handoff parent did not accept the native frontend"
             )
+        if _release_proof_requested():
+            def native_property(name, fallback):
+                try:
+                    value = native_window.property(name)
+                except (AttributeError, RuntimeError):
+                    return fallback
+                return fallback if value is None else value
+
+            try:
+                proof_written = _write_native_release_proof(
+                    tray_visible=tray.isVisible(),
+                    main_window_visible=main_window.isVisible(),
+                    main_window_exposed=main_window.isExposed(),
+                    main_window_required=main_window_required,
+                    material=native_property("material", "solid"),
+                    effect_tier=native_property("effectTier", "off"),
+                    native_material_available=native_property(
+                        "nativeMaterialAvailable", False
+                    ),
+                    custom_chrome_enabled=native_property(
+                        "customChromeEnabled", False
+                    ),
+                    software_renderer=software_renderer,
+                )
+            except Exception:
+                proof_written = False
+                log.debug("Could not write release readiness proof", exc_info=True)
+            if not proof_written:
+                log.warning("The requested release readiness proof was not written")
         start_core = _callable(app, "_start_core")
-        if start_core is not None:
+        if _release_proof_requested() and _quit_after_release_proof():
+            qt.QTimer.singleShot(0, qapp.quit)
+        elif start_core is not None:
             qt.QTimer.singleShot(120, start_core)
     except Exception as exc:
         _dispose_native_ui(

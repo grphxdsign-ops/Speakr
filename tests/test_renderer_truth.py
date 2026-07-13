@@ -336,6 +336,85 @@ class RendererDeviceTests(CleanChildMixin, unittest.TestCase):
         )
         self.assert_child_passed(completed)
 
+    def test_release_receipt_follows_native_commit_and_skips_core_start(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / "native-ready.json"
+            completed = _run_python(
+                """
+                import json
+                import os
+                from pathlib import Path
+
+                from speakr import native_window, qt_ui
+                from speakr.interface_state import InterfaceState
+
+                receipt = Path(os.environ['SPEAKR_RELEASE_PROOF_PATH'])
+                real_type = native_window.NativeWindowController
+
+                def controller_factory(**kwargs):
+                    assert kwargs['software_renderer'] is True
+                    kwargs['platform_name'] = 'test'
+                    kwargs['adapter'] = native_window._NullAdapter()
+                    return real_type(**kwargs)
+
+                qt_ui.NativeWindowController = controller_factory
+
+                class App:
+                    enabled = True
+                    _qt_frontend = None
+                    interface_state = InterfaceState(
+                        {'availability': 'ready', 'enabled': True}
+                    )
+
+                    @staticmethod
+                    def settings_snapshot():
+                        return {'ui': {
+                            'onboarding_complete': True,
+                            'open_window_on_start': True,
+                            'theme': 'system', 'visual_effects': 'full',
+                            'density': 'comfortable', 'text_scale': 'system',
+                            'reduced_motion': 'reduce', 'hud_visibility': 'off',
+                            'hud_size': 'standard', 'hud_edge': 'bottom',
+                            'hud_scale': 100, 'background_announcements': False,
+                        }, 'hotkey': 'right ctrl', 'toggle_mode': False,
+                        'app_tones': {}, 'hotkey_exclude_apps': []}
+
+                    practice_snapshot = staticmethod(lambda: {})
+                    list_manual_words = staticmethod(lambda: [])
+                    list_learned_words = staticmethod(lambda: [])
+                    subscribe_settings = staticmethod(lambda _cb: (lambda: None))
+                    subscribe_practice = staticmethod(lambda _cb: (lambda: None))
+
+                    def _frontend_committed(self, frontend):
+                        window = self._qt_frontend._main_window
+                        assert frontend == 'native'
+                        assert window.isVisible() and window.isExposed()
+                        assert not receipt.exists()
+                        return True
+
+                    @staticmethod
+                    def _start_core():
+                        raise AssertionError('release proof must not start core services')
+
+                assert qt_ui.run_native_ui(App()) == 0
+                payload = json.loads(receipt.read_text(encoding='utf-8'))
+                assert payload['frontend'] == 'native'
+                assert payload['tray_visible'] is True
+                assert payload['main_window_required'] is True
+                assert payload['main_window_visible'] is True
+                assert payload['main_window_exposed'] is True
+                assert payload['renderer'] == 'software'
+                print('native-release-receipt-clean')
+                """,
+                environment={
+                    "SPEAKR_QT_SOFTWARE": "1",
+                    "SPEAKR_RELEASE_PROOF_PATH": str(receipt),
+                    "SPEAKR_RELEASE_PROOF_QUIT": "1",
+                },
+            )
+            self.assert_child_passed(completed)
+            self.assertTrue(receipt.is_file())
+
 
 class PreparedHandoffTests(CleanChildMixin, unittest.TestCase):
     def setUp(self):

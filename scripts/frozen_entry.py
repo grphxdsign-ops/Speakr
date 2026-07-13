@@ -24,6 +24,13 @@ if getattr(sys, "frozen", False) and not os.environ.get("SPEAKR_HOME"):
     os.makedirs(home, exist_ok=True)
     os.environ["SPEAKR_HOME"] = home
 
+# The exact-artifact core proof installs its loopback-only socket policy and
+# offline model environment before importing any Speakr application module.
+# In ordinary launches the environment variable is absent and this is inert.
+from speakr.release_core_proof import install_core_proof_from_environment
+
+install_core_proof_from_environment()
+
 from speakr.app import main
 
 main()

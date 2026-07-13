@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 
@@ -52,7 +53,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("receipt", type=Path)
     args = parser.parse_args()
-    validate_receipt(args.receipt)
+    try:
+        validate_receipt(args.receipt)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        print(
+            f"Native readiness receipt failed validation ({type(exc).__name__}).",
+            file=sys.stderr,
+        )
+        return 1
     print("Native readiness receipt passed (fixed schema, sanitized vocabulary).")
     return 0
 

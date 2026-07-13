@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
+
 env:
   HF_HUB_OFFLINE: "1"
   TRANSFORMERS_OFFLINE: "1"
@@ -23,14 +27,15 @@ env:
 jobs:
   release_context:
     name: Resolve immutable release context
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       sha: ${{ steps.context.outputs.sha }}
       tag: ${{ steps.context.outputs.tag }}
       version: ${{ steps.context.outputs.version }}
       publish: ${{ steps.context.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
@@ -53,8 +58,8 @@ jobs:
           fi
 
           if [ -n "$candidate" ]; then
-            if [[ "$candidate" != v* ]]; then
-              echo "::warning::'$candidate' is not a v* release tag; this run is proof-only."
+            if [[ ! "$candidate" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "::warning::'$candidate' is not a versioned vMAJOR.MINOR.PATCH tag; this run is proof-only."
             elif ! git show-ref --verify --quiet "refs/tags/$candidate"; then
               echo "::warning::'$candidate' is not an existing repository tag; this run is proof-only."
             elif [ "$(git rev-list -n 1 "$candidate")" != "$sha" ]; then
@@ -93,16 +98,17 @@ jobs:
           [ -z "$tag" ] || echo "Verified tag: $tag"
 
   mac_dmg:
-    name: macOS signed/notarized DMG proof
+    name: macOS copied-artifact proof
     needs: release_context
     runs-on: macos-15
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.release_context.outputs.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
 
@@ -118,6 +124,25 @@ jobs:
         run: |
           python -m compileall -q speakr tests scripts
           python -m unittest discover -s tests -v
+
+      - name: Preseed the permitted local model for exact-artifact core proof
+        env:
+          HF_HOME: ${{ runner.temp }}/speakr-hf-proof
+          HF_HUB_OFFLINE: "0"
+          TRANSFORMERS_OFFLINE: "0"
+          HF_HUB_DISABLE_TELEMETRY: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import numpy as np
+          from faster_whisper import WhisperModel
+
+          model = WhisperModel("tiny", device="cpu", compute_type="int8")
+          segments, _ = model.transcribe(np.zeros(8000, dtype=np.float32), beam_size=1)
+          list(segments)
+          print("Permitted one-time model seed is ready for offline artifact proof.")
+          PY
 
       - name: Prepare Developer ID identity
         env:
@@ -231,6 +256,11 @@ jobs:
           xcrun stapler validate Speakr.dmg
 
       - name: Mount and prove the exact final DMG app offline
+        env:
+          HF_HOME: ${{ runner.temp }}/speakr-hf-proof
+          RELEASE_SHA: ${{ needs.release_context.outputs.sha }}
+          RELEASE_TAG: ${{ needs.release_context.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release_context.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -238,9 +268,12 @@ jobs:
           installroot="$RUNNER_TEMP/Applications"
           smoke_home="$RUNNER_TEMP/speakr-final-smoke-home"
           receipt="$RUNNER_TEMP/speakr-final-receipt.json"
-          rm -rf -- "$mountpoint" "$installroot" "$smoke_home"
-          rm -f -- "$receipt"
-          mkdir -p "$mountpoint" "$installroot" "$smoke_home"
+          core_home="$RUNNER_TEMP/speakr-core-smoke-home"
+          core_receipt="$RUNNER_TEMP/speakr-core-receipt.json"
+          core_ui_receipt="$RUNNER_TEMP/speakr-core-ui-receipt.json"
+          rm -rf -- "$mountpoint" "$installroot" "$smoke_home" "$core_home"
+          rm -f -- "$receipt" "$core_receipt" "$core_ui_receipt"
+          mkdir -p "$mountpoint" "$installroot" "$smoke_home" "$core_home"
           pid=""
           cleanup() {
             [ -z "$pid" ] || kill "$pid" 2>/dev/null || true
@@ -302,14 +335,118 @@ jobs:
             exit 1
           fi
           python scripts/validate_release_receipt.py "$receipt"
+
+          python - "$core_home/config.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          config = {
+              "model": "tiny",
+              "device": "cpu",
+              "compute_type": "int8",
+              "keep_mic_stream_open": False,
+              "log_transcripts": False,
+              "screen_context": {"enabled": False},
+              "edit_mode": {"enabled": False},
+              "learning": {"enabled": False},
+              "formatting": {
+                  "enabled": True,
+                  "use_ollama": False,
+                  "autostart_ollama": False,
+                  "include_recent_context": False,
+              },
+              "ui": {
+                  "onboarding_complete": True,
+                  "open_window_on_start": True,
+                  "hud_visibility": "off",
+              },
+          }
+          Path(sys.argv[1]).write_text(
+              json.dumps(config, sort_keys=True), encoding="utf-8"
+          )
+          PY
+
+          SPEAKR_HOME="$core_home" \
+          SPEAKR_RELEASE_PROOF_PATH="$core_ui_receipt" \
+          SPEAKR_RELEASE_CORE_PROOF_PATH="$core_receipt" \
+          HF_HOME="$HF_HOME" \
+            "$installed_app/Contents/MacOS/Speakr" >core-smoke.log 2>&1 &
+          pid=$!
+          for _ in $(seq 1 600); do
+            [ -f "$core_receipt" ] && break
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.5
+          done
+          if [ ! -f "$core_receipt" ] || [ ! -f "$core_ui_receipt" ]; then
+            echo "::error::Copied app did not prove native UI plus offline core readiness."
+            cat core-smoke.log
+            [ -f "$core_home/speakr.log" ] && cat "$core_home/speakr.log"
+            exit 1
+          fi
+          for _ in $(seq 1 20); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.5
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "::error::Core proof process did not quit after readiness."
+            exit 1
+          fi
+          set +e
+          wait "$pid"
+          status=$?
+          set -e
+          pid=""
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Core proof process exited with status $status."
+            cat core-smoke.log
+            exit 1
+          fi
+          python scripts/validate_release_receipt.py "$core_ui_receipt"
+          python scripts/validate_release_core_receipt.py "$core_receipt"
+
+          if [ "$MAC_DISTRIBUTION_SIGNED" = "true" ]; then
+            manifest_signed=true
+            manifest_notarized=true
+            manifest_kind=developer_id
+            manifest_identity="$(codesign -dv --verbose=4 "$installed_app" 2>&1 \
+              | awk '/^Authority=/ && !seen {sub(/^Authority=/, ""); print; seen=1}')"
+            manifest_team="$(codesign -dv --verbose=4 "$installed_app" 2>&1 \
+              | awk '/^TeamIdentifier=/ && !seen {sub(/^TeamIdentifier=/, ""); print; seen=1}')"
+            [ -n "$manifest_identity" ] && [ -n "$manifest_team" ]
+          else
+            manifest_signed=false
+            manifest_notarized=false
+            manifest_kind=ad_hoc
+            manifest_identity=ad_hoc
+            manifest_team=none
+          fi
+          python scripts/release_manifest.py create \
+            --output Speakr-macOS-manifest.json \
+            --artifact Speakr.dmg \
+            --dependency-lock requirements-release.txt \
+            --native-receipt "$core_ui_receipt" \
+            --core-receipt "$core_receipt" \
+            --source-sha "$RELEASE_SHA" \
+            --tag "$RELEASE_TAG" \
+            --version "$RELEASE_VERSION" \
+            --platform macos \
+            --architecture arm64 \
+            --signed "$manifest_signed" \
+            --notarized "$manifest_notarized" \
+            --signature-kind "$manifest_kind" \
+            --signer-identity "$manifest_identity" \
+            --signer-team "$manifest_team"
           hdiutil detach "$mountpoint"
           trap - EXIT
 
       - name: Upload macOS proof artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ needs.release_context.outputs.publish == 'true' && 'Speakr-macOS-release' || 'Speakr-macOS-proof-NON-DISTRIBUTABLE' }}
-          path: Speakr.dmg
+          path: |
+            Speakr.dmg
+            Speakr-macOS-manifest.json
           if-no-files-found: error
           retention-days: 14
 
@@ -317,13 +454,14 @@ jobs:
     name: Windows installed-artifact proof
     needs: release_context
     runs-on: windows-2025
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.release_context.outputs.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
 
@@ -341,6 +479,25 @@ jobs:
         run: |
           python -m compileall -q speakr tests scripts
           python -m unittest discover -s tests -v
+
+      - name: Preseed the permitted local model for exact-artifact core proof
+        env:
+          HF_HOME: ${{ runner.temp }}/speakr-hf-proof
+          HF_HUB_OFFLINE: "0"
+          TRANSFORMERS_OFFLINE: "0"
+          HF_HUB_DISABLE_TELEMETRY: "1"
+        shell: pwsh
+        run: |
+          @'
+          import numpy as np
+          from faster_whisper import WhisperModel
+
+          model = WhisperModel("tiny", device="cpu", compute_type="int8")
+          segments, _ = model.transcribe(np.zeros(8000, dtype=np.float32), beam_size=1)
+          list(segments)
+          print("Permitted one-time model seed is ready for offline artifact proof.")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Prepare Windows Authenticode identity
         env:
@@ -413,11 +570,14 @@ jobs:
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (!(Test-Path -LiteralPath $iscc)) {
-            choco install innosetup --version=6.7.1 -y --no-progress
-          }
+          choco install innosetup --version=6.7.1 -y --no-progress --allow-downgrade
+          if ($LASTEXITCODE -notin @(0, 1641, 3010)) { exit $LASTEXITCODE }
           if (!(Test-Path -LiteralPath $iscc)) {
             throw "Inno Setup compiler is unavailable"
+          }
+          $innoVersion = (Get-Item -LiteralPath $iscc).VersionInfo.ProductVersion
+          if ($innoVersion -notlike "6.7.1*") {
+            throw "Expected Inno Setup 6.7.1, found $innoVersion"
           }
           & $iscc "/DAppVersion=$env:APP_VERSION" scripts\installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -436,25 +596,35 @@ jobs:
           }
 
       - name: Silently install, scan, and prove the exact installed app offline
+        env:
+          HF_HOME: ${{ runner.temp }}/speakr-hf-proof
+          RELEASE_SHA: ${{ needs.release_context.outputs.sha }}
+          RELEASE_TAG: ${{ needs.release_context.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release_context.outputs.version }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $installRoot = Join-Path $env:RUNNER_TEMP "SpeakrInstalled"
           $smokeHome = Join-Path $env:RUNNER_TEMP "SpeakrSmokeHome"
           $receipt = Join-Path $env:RUNNER_TEMP "speakr-final-receipt.json"
+          $coreHome = Join-Path $env:RUNNER_TEMP "SpeakrCoreSmokeHome"
+          $coreReceipt = Join-Path $env:RUNNER_TEMP "speakr-core-receipt.json"
+          $coreUiReceipt = Join-Path $env:RUNNER_TEMP "speakr-core-ui-receipt.json"
           $installerLog = Join-Path $env:RUNNER_TEMP "speakr-installer.log"
           $process = $null
           $uninstaller = $null
 
-          foreach ($path in @($installRoot, $smokeHome)) {
+          foreach ($path in @($installRoot, $smokeHome, $coreHome)) {
             $resolvedParent = [IO.Path]::GetFullPath((Split-Path -Parent $path))
             if ($resolvedParent -ne [IO.Path]::GetFullPath($env:RUNNER_TEMP)) {
               throw "Refusing to clean an unexpected path: $path"
             }
             Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
           }
-          Remove-Item -LiteralPath $receipt -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $smokeHome | Out-Null
+          foreach ($path in @($receipt, $coreReceipt, $coreUiReceipt)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+          }
+          New-Item -ItemType Directory -Path $smokeHome, $coreHome | Out-Null
 
           try {
             if ($env:WINDOWS_DISTRIBUTION_SIGNED -eq "true") {
@@ -470,6 +640,8 @@ jobs:
 
             $installedExe = Join-Path $installRoot "Speakr.exe"
             if (!(Test-Path -LiteralPath $installedExe)) { throw "Installed executable is missing" }
+            $uninstaller = Join-Path $installRoot "unins000.exe"
+            if (!(Test-Path -LiteralPath $uninstaller)) { throw "Uninstaller is missing" }
             python scripts\scan_artifact_privacy.py $installRoot
             if ($env:WINDOWS_DISTRIBUTION_SIGNED -eq "true") {
               & $env:WINDOWS_SIGNTOOL verify /pa /all /v $installedExe
@@ -507,8 +679,97 @@ jobs:
             python scripts\validate_release_receipt.py $receipt
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-            $uninstaller = Join-Path $installRoot "unins000.exe"
-            if (!(Test-Path -LiteralPath $uninstaller)) { throw "Uninstaller is missing" }
+            $coreConfig = @{
+              model = "tiny"
+              device = "cpu"
+              compute_type = "int8"
+              keep_mic_stream_open = $false
+              log_transcripts = $false
+              screen_context = @{ enabled = $false }
+              edit_mode = @{ enabled = $false }
+              learning = @{ enabled = $false }
+              formatting = @{
+                enabled = $true
+                use_ollama = $false
+                autostart_ollama = $false
+                include_recent_context = $false
+              }
+              ui = @{
+                onboarding_complete = $true
+                open_window_on_start = $true
+                hud_visibility = "off"
+              }
+            }
+            $coreConfig | ConvertTo-Json -Depth 8 -Compress |
+              Set-Content -LiteralPath (Join-Path $coreHome "config.json") -Encoding utf8
+
+            $env:SPEAKR_HOME = $coreHome
+            $env:SPEAKR_RELEASE_PROOF_PATH = $coreUiReceipt
+            Remove-Item Env:SPEAKR_RELEASE_PROOF_QUIT -ErrorAction SilentlyContinue
+            $env:SPEAKR_RELEASE_CORE_PROOF_PATH = $coreReceipt
+            $process = Start-Process -FilePath $installedExe `
+              -RedirectStandardOutput core_smoke_out.log `
+              -RedirectStandardError core_smoke_err.log -PassThru
+
+            $deadline = [DateTime]::UtcNow.AddSeconds(310)
+            while (!(Test-Path -LiteralPath $coreReceipt) -and
+                   !$process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+            }
+            if (!$process.HasExited) {
+              if (!$process.WaitForExit(10000)) { throw "Core proof process did not quit after readiness" }
+            }
+            if ($process.ExitCode -ne 0) {
+              Get-Content core_smoke_out.log, core_smoke_err.log -ErrorAction SilentlyContinue
+              throw "Installed core proof process exited with $($process.ExitCode)"
+            }
+            if (!(Test-Path -LiteralPath $coreReceipt) -or
+                !(Test-Path -LiteralPath $coreUiReceipt)) {
+              Get-Content core_smoke_out.log, core_smoke_err.log -ErrorAction SilentlyContinue
+              Get-Content (Join-Path $coreHome "speakr.log") -ErrorAction SilentlyContinue
+              throw "Installed app did not prove native UI plus offline core readiness"
+            }
+            python scripts\validate_release_receipt.py $coreUiReceipt
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            python scripts\validate_release_core_receipt.py $coreReceipt
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            if ($env:WINDOWS_DISTRIBUTION_SIGNED -eq "true") {
+              $manifestSigned = "true"
+              $manifestKind = "authenticode"
+              $manifestIdentity = (Get-AuthenticodeSignature $installedExe).SignerCertificate.Subject
+              if ([string]::IsNullOrWhiteSpace($manifestIdentity)) {
+                throw "Signed installed app did not expose a signer identity"
+              }
+            }
+            else {
+              $manifestSigned = "false"
+              $manifestKind = "unsigned"
+              $manifestIdentity = "unsigned"
+            }
+            $manifestArgs = @(
+              "scripts\release_manifest.py", "create",
+              "--output", "Speakr-Windows-manifest.json",
+              "--artifact", "Speakr-Setup.exe",
+              "--dependency-lock", "requirements-release.txt",
+              "--native-receipt", $coreUiReceipt,
+              "--core-receipt", $coreReceipt,
+              "--source-sha", $env:RELEASE_SHA,
+              "--version", $env:RELEASE_VERSION,
+              "--platform", "windows",
+              "--architecture", "x86_64",
+              "--signed", $manifestSigned,
+              "--notarized", "false",
+              "--signature-kind", $manifestKind,
+              "--signer-identity", $manifestIdentity,
+              "--signer-team", "none"
+            )
+            if (![string]::IsNullOrWhiteSpace($env:RELEASE_TAG)) {
+              $manifestArgs += @("--tag", $env:RELEASE_TAG)
+            }
+            python @manifestArgs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           finally {
             if ($null -ne $process -and !$process.HasExited) {
@@ -528,10 +789,12 @@ jobs:
           }
 
       - name: Upload Windows proof artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Speakr-Windows-${{ needs.release_context.outputs.publish == 'true' && 'release' || 'proof-NON-DISTRIBUTABLE' }}
-          path: Speakr-Setup.exe
+          path: |
+            Speakr-Setup.exe
+            Speakr-Windows-manifest.json
           if-no-files-found: error
           retention-days: 14
 
@@ -539,11 +802,12 @@ jobs:
     name: Publish exact verified tag artifacts
     needs: [release_context, mac_dmg, windows_installer]
     if: needs.release_context.outputs.publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.release_context.outputs.sha }}
           fetch-depth: 0
@@ -559,24 +823,43 @@ jobs:
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$RELEASE_SHA"
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: Speakr-*-release
           path: release-artifacts
           merge-multiple: true
 
       - name: Verify publication inputs
+        env:
+          RELEASE_TAG: ${{ needs.release_context.outputs.tag }}
+          RELEASE_SHA: ${{ needs.release_context.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
           test -f release-artifacts/Speakr.dmg
           test -f release-artifacts/Speakr-Setup.exe
+          test -f release-artifacts/Speakr-macOS-manifest.json
+          test -f release-artifacts/Speakr-Windows-manifest.json
+          python scripts/release_manifest.py verify \
+            --manifest release-artifacts/Speakr-macOS-manifest.json \
+            --artifact release-artifacts/Speakr.dmg \
+            --dependency-lock requirements-release.txt \
+            --source-sha "$RELEASE_SHA" \
+            --tag "$RELEASE_TAG"
+          python scripts/release_manifest.py verify \
+            --manifest release-artifacts/Speakr-Windows-manifest.json \
+            --artifact release-artifacts/Speakr-Setup.exe \
+            --dependency-lock requirements-release.txt \
+            --source-sha "$RELEASE_SHA" \
+            --tag "$RELEASE_TAG"
           find release-artifacts -maxdepth 1 -type f -print
 
       - name: Upload assets to the verified GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ needs.release_context.outputs.tag }}
           files: |
             release-artifacts/Speakr.dmg
             release-artifacts/Speakr-Setup.exe
+            release-artifacts/Speakr-macOS-manifest.json
+            release-artifacts/Speakr-Windows-manifest.json
