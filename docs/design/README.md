@@ -12,6 +12,11 @@ The current Luminous Orbit set is:
 - [`luminous-orbit-settings-vocabulary.png`](luminous-orbit-settings-vocabulary.png): searchable visual-effects settings and separated vocabulary collections.
 - [`luminous-orbit-hud-motion.png`](luminous-orbit-hud-motion.png): the fixed-size HUD state sequence, errors, and motion timings.
 
+Implementation verification is documented in
+[`luminous-orbit-verification.md`](luminous-orbit-verification.md), including
+the one-command warning, geometry, accessibility, privacy, and platform
+screenshot harness.
+
 Generated text and small details are illustrative. `DESIGN.md` and
 `luminous-orbit-spec.md` are authoritative whenever a raster board differs
 from the product copy or accessibility contract.
