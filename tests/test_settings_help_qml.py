@@ -8,7 +8,17 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
+from PySide6.QtCore import (
+    Q_ARG,
+    Q_RETURN_ARG,
+    QMetaObject,
+    QObject,
+    Property,
+    QUrl,
+    Qt,
+    Signal,
+    Slot,
+)
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
@@ -31,6 +41,10 @@ class _App:
         )
         self.enabled = True
         self._text_scale = text_scale
+        self.setting_rejection = ""
+        self.reset_rejection = ""
+        self.setting_attempts = []
+        self.reset_attempts = []
 
     def settings_snapshot(self):
         return {
@@ -94,6 +108,44 @@ class _App:
 
     @staticmethod
     def stop_practice():
+        return True
+
+    def set_setting(self, path, value):
+        self.setting_attempts.append((path, value))
+        if self.setting_rejection == "busy":
+            self.interface_state.latch_issue(
+                "busy_setting",
+                "Wait for the current dictation to finish before changing this setting.",
+                "dismiss",
+            )
+            return False
+        if self.setting_rejection == "save":
+            self.interface_state.latch_issue(
+                "setting_save_failed",
+                "That setting could not be saved. Your previous file is unchanged.",
+                "open_config",
+            )
+            return False
+        if self.setting_rejection == "error":
+            raise OSError("simulated settings write failure")
+        return True
+
+    def reset_settings_section(self, section):
+        self.reset_attempts.append(section)
+        if self.reset_rejection == "busy":
+            self.interface_state.latch_issue(
+                "busy_setting",
+                "Wait for the current dictation to finish before resetting this section.",
+                "dismiss",
+            )
+            return False
+        if self.reset_rejection == "save":
+            self.interface_state.latch_issue(
+                "setting_save_failed",
+                "Those defaults could not be saved. Your previous file is unchanged.",
+                "open_config",
+            )
+            return False
         return True
 
 
@@ -209,6 +261,21 @@ class SettingsHelpQmlTests(unittest.TestCase):
         self.qapp.processEvents()
         return app, bridge, native_window, engine, main, warnings
 
+    def _process_queued_qml(self):
+        for _ in range(4):
+            self.qapp.processEvents()
+
+    @staticmethod
+    def _invoke_qml(target, method, *arguments):
+        qml_arguments = [Q_ARG("QVariant", argument) for argument in arguments]
+        return QMetaObject.invokeMethod(
+            target,
+            method,
+            Qt.ConnectionType.DirectConnection,
+            Q_RETURN_ARG("QVariant"),
+            *qml_arguments,
+        )
+
     def test_visual_effects_search_and_effective_material_are_truthful(self):
         app, bridge, native, engine, main, warnings = self._load_main(100)
         self.assertIsNotNone(app)
@@ -238,6 +305,188 @@ class SettingsHelpQmlTests(unittest.TestCase):
             self.assertEqual(settings.property("visibleResultCount"), 0)
             empty = main.findChild(QObject, "settingsEmptyState")
             self.assertTrue(empty.property("visible"))
+            self.assertEqual(warnings, [])
+        finally:
+            bridge.close()
+            engine.deleteLater()
+            self.qapp.processEvents()
+
+    def test_advanced_contains_and_searches_every_expert_setting_once(self):
+        app, bridge, native, engine, main, warnings = self._load_main(100)
+        self.assertIsNotNone(app)
+        self.assertIsNotNone(native)
+        try:
+            main.setProperty("currentPage", "settings")
+            self.qapp.processEvents()
+            settings = main.findChild(QObject, "settingsPage")
+            search = main.findChild(QObject, "settingsSearchField")
+            summary = main.findChild(QObject, "settingsResultSummary")
+            self.assertIsNotNone(settings)
+            self.assertIsNotNone(search)
+            self.assertIsNotNone(summary)
+
+            rows_value = settings.property("rows")
+            rows = rows_value.toVariant() if hasattr(rows_value, "toVariant") else rows_value
+            settings.setProperty("selectedCategory", "All")
+            search.setProperty("text", "")
+            self.qapp.processEvents()
+            self.assertEqual(settings.property("visibleResultCount"), len(rows))
+
+            required_paths = {
+                "sample_rate",
+                "model",
+                "beam_size",
+                "vad_threshold",
+                "formatting.use_ollama",
+                "formatting.autostart_ollama",
+                "formatting.ollama_model",
+                "device",
+                "compute_type",
+                "streaming.enabled",
+                "streaming.chunk_seconds",
+                "min_duration_seconds",
+                "max_duration_seconds",
+                "injection",
+                "formatting.ollama_url",
+                "formatting.timeout_seconds",
+                "formatting.keep_alive",
+            }
+            advanced_rows = [
+                row
+                for row in rows
+                if row.get("category") == "Advanced" or row.get("advanced") is True
+            ]
+            self.assertTrue(required_paths.issubset({row.get("path") for row in advanced_rows}))
+            self.assertIn(
+                "Per-app tones and exclusions",
+                {row.get("label") for row in advanced_rows},
+            )
+
+            settings.setProperty("selectedCategory", "Advanced")
+            queries = (
+                "Microphone sample rate",
+                "Speech model",
+                "Beam size",
+                "VAD",
+                "Use local Ollama when available",
+                "Start local Ollama automatically",
+                "Local Ollama model",
+                "Processing device",
+                "Compute type",
+                "Streaming transcription",
+                "Streaming chunk length",
+                "Minimum dictation length",
+                "Maximum dictation length",
+                "Text insertion",
+                "Local Ollama address",
+                "Ollama timeout",
+                "Ollama keep-alive",
+                "Per-app tones and exclusions",
+            )
+            for query in queries:
+                with self.subTest(query=query):
+                    search.setProperty("text", query)
+                    self.qapp.processEvents()
+                    self.assertGreater(settings.property("visibleResultCount"), 0)
+                    self.assertIn("Advanced", summary.property("text"))
+
+            settings.setProperty("selectedCategory", "All")
+            search.setProperty("text", "Speech model")
+            self.qapp.processEvents()
+            self.assertEqual(settings.property("visibleResultCount"), 1)
+            self.assertEqual(warnings, [])
+        finally:
+            bridge.close()
+            engine.deleteLater()
+            self.qapp.processEvents()
+
+    def test_rejected_setting_uses_busy_explanation_and_generic_save_error(self):
+        app, bridge, native, engine, main, warnings = self._load_main(100)
+        self.assertIsNotNone(native)
+        try:
+            main.setProperty("currentPage", "settings")
+            self.qapp.processEvents()
+            settings = main.findChild(QObject, "settingsPage")
+            self.assertIsNotNone(settings)
+
+            app.setting_rejection = "busy"
+            result = self._invoke_qml(settings, "commitChange", "toggle_mode", True, False)
+            self.assertFalse(result)
+            self._process_queued_qml()
+            self.assertEqual(app.setting_attempts[-1], ("toggle_mode", True))
+            self.assertEqual(
+                settings.property("saveError"),
+                "Wait for the current dictation to finish before changing this setting.",
+            )
+
+            app.setting_rejection = "save"
+            result = self._invoke_qml(
+                settings,
+                "commitChange",
+                "formatting.enabled",
+                False,
+                True,
+            )
+            self.assertFalse(result)
+            self._process_queued_qml()
+            self.assertEqual(app.setting_attempts[-1], ("formatting.enabled", False))
+            self.assertEqual(
+                settings.property("saveError"),
+                "That setting could not be saved. The previous value is still active.",
+            )
+
+            app.setting_rejection = "error"
+            with self.assertLogs("speakr.qt_ui", level="ERROR"):
+                result = self._invoke_qml(
+                    settings,
+                    "commitChange",
+                    "formatting.enabled",
+                    True,
+                    False,
+                )
+            self.assertFalse(result)
+            self._process_queued_qml()
+            self.assertEqual(
+                settings.property("saveError"),
+                "That setting could not be saved. The previous value is still active.",
+            )
+            self.assertEqual(warnings, [])
+        finally:
+            bridge.close()
+            engine.deleteLater()
+            self.qapp.processEvents()
+
+    def test_rejected_reset_preserves_confirmation_and_shows_busy_reason(self):
+        app, bridge, native, engine, main, warnings = self._load_main(100)
+        self.assertIsNotNone(native)
+        try:
+            main.setProperty("currentPage", "help")
+            self.qapp.processEvents()
+            help_page = main.findChild(QObject, "helpPage")
+            confirmation = main.findChild(QObject, "resetConfirmation")
+            self.assertIsNotNone(help_page)
+            self.assertIsNotNone(confirmation)
+
+            app.reset_rejection = "busy"
+            help_page.setProperty("pendingResetSection", "privacy")
+            result = self._invoke_qml(help_page, "confirmReset")
+            self.assertFalse(result)
+            self._process_queued_qml()
+            busy_message = (
+                "Wait for the current dictation to finish before resetting this section."
+            )
+            self.assertEqual(app.reset_attempts[-1], "privacy")
+            self.assertEqual(help_page.property("pendingResetSection"), "privacy")
+            self.assertEqual(help_page.property("resetError"), busy_message)
+            self.assertEqual(confirmation.property("detail"), busy_message)
+            self.assertTrue(confirmation.property("visible"))
+
+            app.reset_rejection = ""
+            result = self._invoke_qml(help_page, "confirmReset")
+            self.assertTrue(result)
+            self._process_queued_qml()
+            self.assertEqual(help_page.property("pendingResetSection"), "")
+            self.assertEqual(help_page.property("resetError"), "")
             self.assertEqual(warnings, [])
         finally:
             bridge.close()
@@ -293,6 +542,8 @@ class SettingsHelpQmlTests(unittest.TestCase):
         self.assertIn('onClicked: root.requestReset("interface")', source)
         self.assertIn('onClicked: root.requestReset("privacy")', source)
         self.assertIn("onClicked: root.confirmReset()", source)
+        self.assertIn("onClicked: root.cancelReset()", source)
+        self.assertIn("detail: root.resetError", source)
         self.assertIn('objectName: "resetConfirmation"', source)
 
     def test_page_contracts_use_shared_tokens_and_keep_local_boundaries(self):
@@ -316,6 +567,13 @@ class SettingsHelpQmlTests(unittest.TestCase):
                 rf'category: qsTr\("Privacy"\).*?path: "{re.escape(privacy_path)}"',
             )
         for advanced_path in (
+            "sample_rate",
+            "model",
+            "beam_size",
+            "vad_threshold",
+            "formatting.use_ollama",
+            "formatting.autostart_ollama",
+            "formatting.ollama_model",
             "device",
             "compute_type",
             "streaming.enabled",

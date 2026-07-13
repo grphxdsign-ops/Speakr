@@ -10,6 +10,8 @@ Item {
     property var appState: ({})
     property var settings: ({})
     property string pendingResetSection: ""
+    property string resetError: ""
+    property int rejectedResetGeneration: 0
     signal repeatSetupRequested()
 
     function focusHeading() {
@@ -24,11 +26,11 @@ Item {
     }
 
     function resetInterface() {
-        bridge.resetSettingsSection("interface")
+        return Boolean(bridge.resetSettingsSection("interface"))
     }
 
     function resetPrivacy() {
-        bridge.resetSettingsSection("privacy")
+        return Boolean(bridge.resetSettingsSection("privacy"))
     }
 
     function materialSummary() {
@@ -61,15 +63,68 @@ Item {
     }
 
     function requestReset(section) {
+        rejectedResetGeneration += 1
         pendingResetSection = section
+        resetError = ""
         Qt.callLater(function() { resetCancel.forceActiveFocus(Qt.TabFocusReason) })
+    }
+
+    function genericResetError() {
+        return qsTr("Those defaults could not be restored. Your current settings are unchanged.")
+    }
+
+    function resetIssueExplanation() {
+        var issue = appState !== null && appState !== undefined
+                  ? appState.last_issue : null
+        if (issue !== null && issue !== undefined) {
+            var code = String(issue.code || "")
+            var message = String(issue.message || "").trim()
+            if ((code === "busy_setting" || code === "setting_save_failed")
+                    && message.length > 0)
+                return message
+        }
+        return ""
+    }
+
+    function rejectedResetExplanation(previousStateVersion) {
+        var currentStateVersion = Number(appState.version || 0)
+        if (currentStateVersion <= previousStateVersion)
+            return genericResetError()
+        var issueExplanation = resetIssueExplanation()
+        return issueExplanation.length > 0 ? issueExplanation : genericResetError()
+    }
+
+    function refreshRejectedResetExplanation(generation, previousStateVersion) {
+        if (generation === rejectedResetGeneration
+                && pendingResetSection.length > 0)
+            resetError = rejectedResetExplanation(previousStateVersion)
+    }
+
+    function cancelReset() {
+        rejectedResetGeneration += 1
+        pendingResetSection = ""
+        resetError = ""
     }
 
     function confirmReset() {
         var section = pendingResetSection
-        pendingResetSection = ""
-        if (section === "interface") resetInterface()
-        else if (section === "privacy") resetPrivacy()
+        if (section.length === 0) return false
+        var stateVersion = Number(appState.version || 0)
+        var succeeded = section === "interface" ? resetInterface()
+                      : (section === "privacy" ? resetPrivacy() : false)
+        if (succeeded) {
+            rejectedResetGeneration += 1
+            pendingResetSection = ""
+            resetError = ""
+            return true
+        }
+        rejectedResetGeneration += 1
+        var generation = rejectedResetGeneration
+        resetError = rejectedResetExplanation(stateVersion)
+        Qt.callLater(function() {
+            root.refreshRejectedResetExplanation(generation, stateVersion)
+        })
+        return false
     }
 
     function microphoneSummary() {
@@ -416,6 +471,7 @@ Item {
                                ? qsTr("Reset interface settings?")
                                : qsTr("Reset privacy settings?")
                         message: qsTr("The selected section returns to its recommended local defaults. Vocabulary and speech models remain unchanged.")
+                        detail: root.resetError
                     }
 
                     Flow {
@@ -429,7 +485,7 @@ Item {
                             text: qsTr("Cancel")
                             kind: "primary"
                             accessibleDescription: qsTr("Keep current settings")
-                            onClicked: root.pendingResetSection = ""
+                            onClicked: root.cancelReset()
                         }
 
                         QuietButton {

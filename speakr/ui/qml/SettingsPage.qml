@@ -13,6 +13,7 @@ Item {
     property var lastChange: null
     property var pendingSensitiveChange: null
     property string saveError: ""
+    property int rejectedChangeGeneration: 0
     readonly property int visibleResultCount: resultCount()
 
     function focusHeading() {
@@ -40,20 +41,20 @@ Item {
 
         { category: qsTr("Microphone & Language"), label: qsTr("Input device"), description: qsTr("Leave blank to use the operating system default microphone. Changing this requires restarting Speakr."), keywords: "audio mic restart", path: "input_device", type: "text", allowEmpty: true, fallback: "" },
         { category: qsTr("Microphone & Language"), label: qsTr("Language"), description: qsTr("Automatic detection is best for multilingual use. A fixed language can improve consistency."), keywords: "locale speech", path: "language", type: "combo", options: [qsTr("Automatic"), "English", "Spanish", "French", "German", "Italian", "Portuguese"], values: [null, "en", "es", "fr", "de", "it", "pt"], fallback: null },
-        { category: qsTr("Microphone & Language"), label: qsTr("Microphone sample rate"), description: qsTr("Samples per second used by the local recorder. Changing this requires restarting Speakr."), keywords: "hz audio restart", path: "sample_rate", type: "number", fallback: 16000 },
+        { category: qsTr("Microphone & Language"), advanced: true, label: qsTr("Microphone sample rate"), description: qsTr("Samples per second used by the local recorder. Changing this requires restarting Speakr."), keywords: "hz audio restart", path: "sample_rate", type: "number", fallback: 16000 },
 
-        { category: qsTr("Accuracy"), label: qsTr("Speech model"), description: qsTr("Automatic selects an appropriate local model for the available hardware. Applying can require a local model load."), keywords: "whisper model size", path: "model", type: "confirm_combo", options: [qsTr("Automatic"), "tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"], values: ["auto", "tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"], fallback: "auto" },
-        { category: qsTr("Accuracy"), label: qsTr("Beam size"), description: qsTr("Higher values can improve local transcription at the cost of processing time."), keywords: "decoding", path: "beam_size", type: "combo", options: [qsTr("Automatic"), "1", "3", "5"], values: ["auto", 1, 3, 5], fallback: "auto" },
-        { category: qsTr("Accuracy"), label: qsTr("Sound detection threshold"), description: qsTr("Lower values hear quieter speech; higher values reject more background noise."), keywords: "vad voice quiet", path: "vad_threshold", type: "number", fallback: 0.35 },
+        { category: qsTr("Accuracy"), advanced: true, label: qsTr("Speech model"), description: qsTr("Automatic selects an appropriate local model for the available hardware. Applying can require a local model load."), keywords: "whisper model size", path: "model", type: "confirm_combo", options: [qsTr("Automatic"), "tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"], values: ["auto", "tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"], fallback: "auto" },
+        { category: qsTr("Accuracy"), advanced: true, label: qsTr("Beam size"), description: qsTr("Higher values can improve local transcription at the cost of processing time."), keywords: "decoding", path: "beam_size", type: "combo", options: [qsTr("Automatic"), "1", "3", "5"], values: ["auto", 1, 3, 5], fallback: "auto" },
+        { category: qsTr("Accuracy"), advanced: true, label: qsTr("Sound detection threshold"), description: qsTr("Lower values hear quieter speech; higher values reject more background noise."), keywords: "vad voice quiet", path: "vad_threshold", type: "number", fallback: 0.35 },
         { category: qsTr("Accuracy"), label: qsTr("Learn recurring words"), description: qsTr("Keep notable recurring words in a local vocabulary file."), keywords: "learning dictionary", path: "learning.enabled", type: "switch", fallback: true },
         { category: qsTr("Accuracy"), label: qsTr("Occurrences before learning"), description: qsTr("How many local appearances are required before a word becomes a hint."), keywords: "threshold vocabulary", path: "learning.min_occurrences", type: "number", fallback: 3 },
 
         { category: qsTr("Text Cleanup"), label: qsTr("Clean up dictated text"), description: qsTr("Remove filler, normalize spacing, and apply spoken layout commands locally."), keywords: "formatting filler", path: "formatting.enabled", type: "switch", fallback: true },
-        { category: qsTr("Text Cleanup"), label: qsTr("Use local Ollama when available"), description: qsTr("Apply optional local model polish. Basic cleanup remains available when Ollama is off or unavailable."), keywords: "llm polish", path: "formatting.use_ollama", type: "switch", fallback: true },
-        { category: qsTr("Text Cleanup"), label: qsTr("Start local Ollama automatically"), description: qsTr("Start the user's local Ollama process when cleanup needs it."), keywords: "serve model", path: "formatting.autostart_ollama", type: "switch", fallback: true },
-        { category: qsTr("Text Cleanup"), label: qsTr("Local Ollama model"), description: qsTr("Exact local model name used for optional cleanup."), keywords: "llama", path: "formatting.ollama_model", type: "text", fallback: "llama3.1:8b" },
+        { category: qsTr("Text Cleanup"), advanced: true, label: qsTr("Use local Ollama when available"), description: qsTr("Apply optional local model polish. Basic cleanup remains available when Ollama is off or unavailable."), keywords: "llm polish", path: "formatting.use_ollama", type: "switch", fallback: true },
+        { category: qsTr("Text Cleanup"), advanced: true, label: qsTr("Start local Ollama automatically"), description: qsTr("Start the user's local Ollama process when cleanup needs it."), keywords: "serve model", path: "formatting.autostart_ollama", type: "switch", fallback: true },
+        { category: qsTr("Text Cleanup"), advanced: true, label: qsTr("Local Ollama model"), description: qsTr("Exact local model name used for optional cleanup."), keywords: "llama", path: "formatting.ollama_model", type: "text", fallback: "llama3.1:8b" },
 
-        { category: qsTr("Per-App Behavior"), label: qsTr("Per-app tones and exclusions"), description: qsTr("Open the local configuration file to manage exact application names and casual, formal, neutral, or literal behavior."), keywords: "apps excluded tone literal", path: "", type: "action", actionText: qsTr("Open local config"), actionKind: "config" },
+        { category: qsTr("Per-App Behavior"), advanced: true, label: qsTr("Per-app tones and exclusions"), description: qsTr("Open the local configuration file to manage exact application names and casual, formal, neutral, or literal behavior."), keywords: "per-app tone excluded-app values apps exclusions literal", path: "", type: "action", actionText: qsTr("Open local config"), actionKind: "config" },
 
         { category: qsTr("Privacy"), label: qsTr("Keep microphone ready"), description: qsTr("Keep the local microphone stream open for lower latency. Turning Dictation off always closes it."), keywords: "stream mic indicator", path: "keep_mic_stream_open", type: "switch", fallback: true },
         { category: qsTr("Privacy"), label: qsTr("Rolling RAM audio"), description: qsTr("Seconds held only in RAM and continuously replaced so the first word is not clipped."), keywords: "preroll memory audio", path: "preroll_seconds", type: "number", fallback: 0.4 },
@@ -101,7 +102,10 @@ Item {
     }
 
     function matches(row) {
-        var categoryMatch = selectedCategory === qsTr("All") || row.category === selectedCategory
+        var categoryMatch = selectedCategory === qsTr("All")
+                            || row.category === selectedCategory
+                            || (selectedCategory === qsTr("Advanced")
+                                && Boolean(row.advanced))
         var query = searchField.text.trim().toLowerCase()
         if (query.length === 0) return categoryMatch
         var haystack = (row.category + " " + row.label + " " + row.description + " " + row.keywords).toLowerCase()
@@ -185,12 +189,47 @@ Item {
         return String(source)
     }
 
+    function genericSaveError() {
+        return qsTr("That setting could not be saved. The previous value is still active.")
+    }
+
+    function busySettingExplanation() {
+        var issue = appState !== null && appState !== undefined
+                  ? appState.last_issue : null
+        if (issue !== null && issue !== undefined
+                && String(issue.code || "") === "busy_setting") {
+            var message = String(issue.message || "").trim()
+            if (message.length > 0) return message
+        }
+        return ""
+    }
+
+    function rejectedSettingExplanation(previousStateVersion) {
+        var currentStateVersion = Number(appState.version || 0)
+        if (currentStateVersion <= previousStateVersion)
+            return genericSaveError()
+        var busyExplanation = busySettingExplanation()
+        return busyExplanation.length > 0 ? busyExplanation : genericSaveError()
+    }
+
+    function refreshRejectedSettingExplanation(generation, previousStateVersion) {
+        if (generation === rejectedChangeGeneration && lastChange === null)
+            saveError = rejectedSettingExplanation(previousStateVersion)
+    }
+
     function commitChange(path, value, previousValue) {
+        var stateVersion = Number(appState.version || 0)
         if (!Boolean(bridge.setSetting(path, value))) {
-            saveError = qsTr("That setting could not be saved. The previous value is still active.")
+            rejectedChangeGeneration += 1
+            var generation = rejectedChangeGeneration
+            saveError = rejectedSettingExplanation(stateVersion)
             lastChange = null
+            Qt.callLater(function() {
+                root.refreshRejectedSettingExplanation(generation, stateVersion)
+            })
             return false
         }
+        rejectedChangeGeneration += 1
         lastChange = { path: path, previous: previousValue }
         saveError = ""
         return true
@@ -463,7 +502,10 @@ Item {
                             currentValue: modelData.type === "hotkey"
                                           ? (root.appState.hotkey || root.setting(modelData.path, modelData.fallback))
                                           : root.setting(modelData.path, modelData.fallback)
-                            showCategory: root.selectedCategory === qsTr("All") || searchField.text.trim().length > 0
+                            showCategory: root.selectedCategory === qsTr("All")
+                                          || searchField.text.trim().length > 0
+                                          || (root.selectedCategory === qsTr("Advanced")
+                                              && modelData.category !== qsTr("Advanced"))
                             capturingHotkey: bridge.capturingHotkey
                             pendingHotkey: String(root.appState.pending_hotkey || "")
                             actionText: modelData.actionText || qsTr("Open")
