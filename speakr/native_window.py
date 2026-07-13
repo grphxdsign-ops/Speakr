@@ -222,11 +222,26 @@ class _NullAdapter:
     def enable_custom_chrome(self, _window: Any) -> bool:
         return False
 
-    def restore_custom_chrome(self, _window: Any) -> None:
-        return None
+    def restore_custom_chrome(self, _window: Any) -> bool:
+        return True
 
     def show_system_menu(self, _window: Any, _x: float, _y: float) -> bool:
         return False
+
+    def is_maximized(self, _window: Any) -> bool | None:
+        return None
+
+    def set_maximized(self, _window: Any, _maximized: bool) -> bool | None:
+        return None
+
+    def minimize_window(self, _window: Any) -> bool | None:
+        return None
+
+    def close_window(self, _window: Any) -> bool | None:
+        return None
+
+    def toggle_full_screen(self, _window: Any) -> bool | None:
+        return None
 
     def detach(self) -> None:
         return None
@@ -255,6 +270,9 @@ class _WindowsAdapter(_NullAdapter):
     _SWP_NOZORDER = 0x0004
     _SWP_NOACTIVATE = 0x0010
     _SWP_FRAMECHANGED = 0x0020
+    _SW_MINIMIZE = 6
+    _SW_MAXIMIZE = 3
+    _SW_RESTORE = 9
 
     def __init__(self, *, build: int | None = None, dwmapi: Any = None, user32: Any = None):
         self._build = _windows_build() if build is None else int(build)
@@ -307,6 +325,12 @@ class _WindowsAdapter(_NullAdapter):
                     wintypes.UINT,
                 ]
                 self._user32.SetWindowPos.restype = wintypes.BOOL
+                self._user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+                self._user32.ShowWindow.restype = wintypes.BOOL
+                self._user32.IsZoomed.argtypes = [wintypes.HWND]
+                self._user32.IsZoomed.restype = wintypes.BOOL
+                self._user32.IsIconic.argtypes = [wintypes.HWND]
+                self._user32.IsIconic.restype = wintypes.BOOL
             except (AttributeError, TypeError):
                 log.debug("Could not declare Windows system-menu prototypes", exc_info=True)
         self._hwnd = 0
@@ -460,6 +484,56 @@ class _WindowsAdapter(_NullAdapter):
             self._original_style = None
             self._chrome_hwnd = 0
         return restored
+
+    @staticmethod
+    def _window_handle(window: Any) -> int:
+        try:
+            return int(window.winId())
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return 0
+
+    def is_maximized(self, window: Any) -> bool | None:
+        hwnd = self._window_handle(window)
+        query = getattr(self._user32, "IsZoomed", None)
+        if not hwnd or not callable(query):
+            return None
+        try:
+            return bool(query(ctypes.c_void_p(hwnd)))
+        except Exception:
+            log.debug("Could not query the Windows maximized state", exc_info=True)
+            return None
+
+    def set_maximized(self, window: Any, maximized: bool) -> bool:
+        hwnd = self._window_handle(window)
+        show = getattr(self._user32, "ShowWindow", None)
+        if not hwnd or not callable(show):
+            return False
+        desired = bool(maximized)
+        current = self.is_maximized(window)
+        if current is desired:
+            return True
+        command = self._SW_MAXIMIZE if desired else self._SW_RESTORE
+        try:
+            # ShowWindow's return value is the previous visibility state, not
+            # an operation result. IsZoomed is the authoritative postcondition.
+            show(ctypes.c_void_p(hwnd), command)
+        except Exception:
+            log.debug("Could not change the Windows maximized state", exc_info=True)
+            return False
+        return self.is_maximized(window) is desired
+
+    def minimize_window(self, window: Any) -> bool:
+        hwnd = self._window_handle(window)
+        show = getattr(self._user32, "ShowWindow", None)
+        query = getattr(self._user32, "IsIconic", None)
+        if not hwnd or not callable(show):
+            return False
+        try:
+            show(ctypes.c_void_p(hwnd), self._SW_MINIMIZE)
+            return True if not callable(query) else bool(query(ctypes.c_void_p(hwnd)))
+        except Exception:
+            log.debug("Could not minimize the Windows window", exc_info=True)
+            return False
 
     def detach(self) -> bool:
         chrome_restored = self.restore_custom_chrome(None)
@@ -731,6 +805,55 @@ class _MacAdapter(_NullAdapter):
             self._chrome_state = None
         return restored
 
+    def _perform_window_action(self, selector: str) -> bool | None:
+        native_window = self._native_window
+        if native_window is None:
+            return None
+        action = getattr(native_window, selector, None)
+        if not callable(action):
+            return False
+        try:
+            action(None)
+            return True
+        except Exception:
+            log.debug("Could not perform macOS window action %s", selector, exc_info=True)
+            return False
+
+    def is_maximized(self, _window: Any) -> bool | None:
+        native_window = self._native_window
+        query = None if native_window is None else getattr(native_window, "isZoomed", None)
+        if not callable(query):
+            return None
+        try:
+            return bool(query())
+        except Exception:
+            log.debug("Could not query the macOS zoom state", exc_info=True)
+            return None
+
+    def set_maximized(self, window: Any, maximized: bool) -> bool | None:
+        current = self.is_maximized(window)
+        desired = bool(maximized)
+        if current is None:
+            # performZoom: is a toggle. Without a trustworthy pre-state it
+            # could perform the opposite of the requested operation.
+            return False
+        if current == desired:
+            return True
+        if not self._perform_window_action("performZoom_"):
+            return False
+        # AppKit can decline a zoom request. Only suppress the supported
+        # QWindow fallback after the requested native postcondition is true.
+        return self.is_maximized(window) == desired
+
+    def minimize_window(self, _window: Any) -> bool | None:
+        return self._perform_window_action("performMiniaturize_")
+
+    def close_window(self, _window: Any) -> bool | None:
+        return self._perform_window_action("performClose_")
+
+    def toggle_full_screen(self, _window: Any) -> bool | None:
+        return self._perform_window_action("toggleFullScreen_")
+
     def detach(self) -> bool:
         chrome_restored = self.restore_custom_chrome(None)
         material_restored = self.restore_material()
@@ -860,15 +983,59 @@ def create_native_window_controller_type(qt: Any) -> type:
                 setattr(self, attribute, value)
                 signal.emit()
 
+        @staticmethod
+        def _qt_window_has_state(window: Any, state_name: str) -> bool:
+            state_group = getattr(Qt, "WindowState", Qt)
+            state_flag = getattr(state_group, state_name, None)
+            if state_flag is None:
+                state_flag = getattr(Qt, state_name, None)
+            if state_flag is None:
+                return False
+            try:
+                return bool(window.windowState() & state_flag)
+            except (AttributeError, RuntimeError, TypeError):
+                return False
+
+        def _native_window_action(self, name: str, *args: object) -> bool | None:
+            if self._window is None or not self._custom_chrome_enabled:
+                return None
+            action = getattr(self._adapter, name, None)
+            if not callable(action):
+                return None
+            try:
+                result = action(self._window, *args)
+            except Exception:
+                log.debug("Native window action %s failed", name, exc_info=True)
+                return False
+            return None if result is None else bool(result)
+
+        def _window_is_maximized(self, window: Any) -> bool:
+            native = self._native_window_action("is_maximized")
+            if native is not None:
+                return native
+            return self._qt_window_has_state(window, "WindowMaximized")
+
+        def _restore_windows_frame_after_action_failure(self) -> bool:
+            if self._platform_name != "win32" or not self._custom_chrome_enabled:
+                return True
+            log.warning("Native Windows action failed; restoring the system frame")
+            if not self._restore_system_frame():
+                log.error(
+                    "Could not confirm system-frame restoration; "
+                    "keeping custom chrome enabled"
+                )
+                return False
+            self._set_value(
+                "_custom_chrome_enabled", False, self.customChromeEnabledChanged
+            )
+            return True
+
         def _sync_window_state(self, *_args) -> None:
             window = self._window
             if window is None:
                 maximized = active = False
             else:
-                try:
-                    maximized = bool(window.isMaximized())
-                except (AttributeError, RuntimeError):
-                    maximized = False
+                maximized = self._window_is_maximized(window)
                 try:
                     active = bool(window.isActive())
                 except (AttributeError, RuntimeError):
@@ -1025,7 +1192,16 @@ def create_native_window_controller_type(qt: Any) -> type:
                     log.exception("Custom chrome failed; restoring the system frame")
                     custom_enabled = False
                 if not custom_enabled:
-                    self._restore_system_frame()
+                    if not self._restore_system_frame():
+                        # This callback runs before QML component completion,
+                        # so raising aborts the native root before it can show.
+                        # The caller then selects the legacy visible fallback
+                        # instead of publishing a frameless, uncontrollable
+                        # window as though normal system chrome were present.
+                        raise RuntimeError(
+                            "Custom chrome failed and the system frame "
+                            "could not be restored"
+                        )
             self._set_value(
                 "_custom_chrome_enabled",
                 custom_enabled,
@@ -1042,20 +1218,46 @@ def create_native_window_controller_type(qt: Any) -> type:
             self._apply_resolution()
             return True
 
-        def _restore_system_frame(self) -> None:
+        def _restore_system_frame(self) -> bool:
             window = self._window
             if window is None:
-                return
-            self._remove_windows_hit_filter()
+                return False
             try:
-                self._adapter.restore_custom_chrome(window)
+                previous_flags = window.flags()
+            except (AttributeError, RuntimeError):
+                previous_flags = None
+            native_restored = True
+            try:
+                native_result = self._adapter.restore_custom_chrome(window)
+                native_restored = native_result is not False
             except Exception:
                 log.debug("Could not restore platform chrome", exc_info=True)
+                native_restored = False
+            flags_restored = self._original_flags is None
             if self._original_flags is not None:
                 try:
                     window.setFlags(self._original_flags)
+                    flags_restored = window.flags() == self._original_flags
                 except (AttributeError, RuntimeError):
                     log.exception("Could not restore the normal system frame")
+                    flags_restored = False
+            restored = native_restored and flags_restored
+            if restored:
+                self._remove_windows_hit_filter()
+                return True
+
+            # Keep the QML chrome and native hit testing coherent when the
+            # system frame cannot be proven. Reapply the prior Qt flags when
+            # possible; the controller will continue to expose custom chrome.
+            if previous_flags is not None:
+                try:
+                    window.setFlags(previous_flags)
+                except (AttributeError, RuntimeError):
+                    log.debug(
+                        "Could not preserve custom frame flags after restore failure",
+                        exc_info=True,
+                    )
+            return False
 
         def detach(self) -> None:
             self._remove_windows_hit_filter()
@@ -1117,31 +1319,77 @@ def create_native_window_controller_type(qt: Any) -> type:
 
         @Slot()
         def minimize(self):
-            if self._window is not None:
-                try:
-                    self._window.showMinimized()
-                except (AttributeError, RuntimeError):
-                    log.debug("Could not minimize the main window", exc_info=True)
+            window = self._window
+            if window is None:
+                return
+            handled = self._native_window_action("minimize_window")
+            if handled:
+                self._sync_window_state()
+                return
+            if handled is not None or (
+                self._platform_name == "win32" and self._custom_chrome_enabled
+            ):
+                if not self._restore_windows_frame_after_action_failure():
+                    self._sync_window_state()
+                    return
+            try:
+                window.showMinimized()
+            except (AttributeError, RuntimeError):
+                log.debug("Could not minimize the main window", exc_info=True)
 
         @Slot()
         def toggleMaximize(self):
-            if self._window is None:
+            window = self._window
+            if window is None:
                 return
+            desired = not self._window_is_maximized(window)
+            handled = self._native_window_action("set_maximized", desired)
+            if handled:
+                self._sync_window_state()
+                return
+            if handled is not None or (
+                self._platform_name == "win32" and self._custom_chrome_enabled
+            ):
+                if not self._restore_windows_frame_after_action_failure():
+                    self._sync_window_state()
+                    return
             try:
-                if self._window.isMaximized():
-                    self._window.showNormal()
+                if desired:
+                    window.showMaximized()
                 else:
-                    self._window.showMaximized()
+                    window.showNormal()
             except (AttributeError, RuntimeError):
                 log.debug("Could not toggle main-window maximization", exc_info=True)
+            self._sync_window_state()
+
+        @Slot()
+        def toggleFullScreen(self):
+            window = self._window
+            if window is None:
+                return
+            handled = self._native_window_action("toggle_full_screen")
+            if handled:
+                return
+            try:
+                if self._qt_window_has_state(window, "WindowFullScreen"):
+                    window.showNormal()
+                else:
+                    window.showFullScreen()
+            except (AttributeError, RuntimeError):
+                log.debug("Could not toggle main-window full screen", exc_info=True)
 
         @Slot()
         def closeMain(self):
-            if self._window is not None:
-                try:
-                    self._window.close()
-                except (AttributeError, RuntimeError):
-                    log.debug("Could not close the main window", exc_info=True)
+            window = self._window
+            if window is None:
+                return
+            handled = self._native_window_action("close_window")
+            if handled:
+                return
+            try:
+                window.close()
+            except (AttributeError, RuntimeError):
+                log.debug("Could not close the main window", exc_info=True)
 
         @Slot(float, float, result=bool)
         def showSystemMenu(self, x, y):

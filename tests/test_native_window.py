@@ -174,6 +174,9 @@ class WindowsAdapterTests(unittest.TestCase):
             self.style = style
             self.style_writes = []
             self.frame_refreshes = []
+            self.show_commands = []
+            self.zoomed = False
+            self.iconic = False
 
         @staticmethod
         def _value(value):
@@ -191,6 +194,25 @@ class WindowsAdapterTests(unittest.TestCase):
         def SetWindowPos(self, _hwnd, _after, _x, _y, _width, _height, flags):
             self.frame_refreshes.append(self._value(flags))
             return 1
+
+        def ShowWindow(self, _hwnd, command):
+            command = self._value(command)
+            self.show_commands.append(command)
+            if command == native_window._WindowsAdapter._SW_MAXIMIZE:
+                self.zoomed = True
+                self.iconic = False
+            elif command == native_window._WindowsAdapter._SW_RESTORE:
+                self.zoomed = False
+                self.iconic = False
+            elif command == native_window._WindowsAdapter._SW_MINIMIZE:
+                self.iconic = True
+            return 1
+
+        def IsZoomed(self, _hwnd):
+            return int(self.zoomed)
+
+        def IsIconic(self, _hwnd):
+            return int(self.iconic)
 
     def test_supported_build_applies_dark_mode_corners_and_mica(self):
         dwm = self._Dwm()
@@ -245,6 +267,28 @@ class WindowsAdapterTests(unittest.TestCase):
         self.assertEqual(user32.style, original_style)
         self.assertIsNone(adapter._original_style)
         self.assertEqual(adapter._chrome_hwnd, 0)
+
+    def test_native_window_state_uses_showwindow_and_iszoomed(self):
+        user32 = self._User32()
+        adapter = native_window._WindowsAdapter(build=0, user32=user32)
+        window = self._Window()
+
+        self.assertFalse(adapter.is_maximized(window))
+        self.assertTrue(adapter.set_maximized(window, True))
+        self.assertTrue(adapter.is_maximized(window))
+        self.assertEqual(user32.show_commands, [adapter._SW_MAXIMIZE])
+
+        self.assertTrue(adapter.set_maximized(window, True))
+        self.assertEqual(user32.show_commands, [adapter._SW_MAXIMIZE])
+
+        self.assertTrue(adapter.set_maximized(window, False))
+        self.assertFalse(adapter.is_maximized(window))
+        self.assertEqual(
+            user32.show_commands, [adapter._SW_MAXIMIZE, adapter._SW_RESTORE]
+        )
+
+        self.assertTrue(adapter.minimize_window(window))
+        self.assertEqual(user32.show_commands[-1], adapter._SW_MINIMIZE)
 
     @unittest.skipUnless(sys.platform == "win32", "requires a real Win32 HWND")
     def test_real_qt_window_keeps_native_styles_and_restores_system_frame(self):
@@ -318,6 +362,195 @@ application.processEvents()
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
+    @unittest.skipUnless(sys.platform == "win32", "requires a real Win32 HWND")
+    def test_production_main_button_native_maximizes_and_restores_exactly(self):
+        repo = Path(__file__).resolve().parents[1]
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(repo)
+        environment["QT_QPA_PLATFORM"] = "windows"
+        environment["QT_QUICK_BACKEND"] = "software"
+        code = r'''
+import ctypes
+from ctypes import wintypes
+from pathlib import Path
+
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt
+from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickWindow
+from PySide6.QtQuickControls2 import QQuickStyle
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
+from speakr.native_window import NativeWindowController, _WindowsAdapter
+from speakr.qt_ui import Bridge, _create_qml_root, _load_qt
+from tests.test_qml_load import _App
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", wintypes.RECT),
+        ("rcWork", wintypes.RECT),
+        ("dwFlags", wintypes.DWORD),
+    ]
+
+
+def pump(milliseconds=120):
+    QTest.qWait(milliseconds)
+    application.processEvents()
+
+
+def native_rect(hwnd):
+    value = wintypes.RECT()
+    assert user32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(value))
+    return (value.left, value.top, value.right, value.bottom)
+
+
+def work_rect(hwnd):
+    monitor = user32.MonitorFromWindow(ctypes.c_void_p(hwnd), 2)
+    assert monitor
+    value = MONITORINFO()
+    value.cbSize = ctypes.sizeof(value)
+    assert user32.GetMonitorInfoW(monitor, ctypes.byref(value))
+    return (
+        value.rcWork.left,
+        value.rcWork.top,
+        value.rcWork.right,
+        value.rcWork.bottom,
+    )
+
+
+def click_maximize_button(main):
+    button = main.findChild(QObject, "maximizeWindowButton")
+    assert button is not None
+    scene = button.mapToScene(QPointF(button.width() / 2, button.height() / 2))
+    QTest.mouseClick(
+        main,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(round(scene.x()), round(scene.y())),
+    )
+    pump(350)
+    return button
+
+
+QQuickStyle.setStyle("Basic")
+application = QApplication([])
+application.setQuitOnLastWindowClosed(False)
+qt = _load_qt()
+user32 = ctypes.windll.user32
+user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+user32.MonitorFromWindow.restype = wintypes.HANDLE
+
+fixture = _App()
+bridge = Bridge(fixture)
+controller = NativeWindowController(
+    qt=qt,
+    visual_effects="off",
+    platform_name="win32",
+    adapter=_WindowsAdapter(build=0),
+)
+engine = QQmlApplicationEngine()
+engine.rootContext().setContextProperty("bridge", bridge)
+engine.rootContext().setContextProperty("nativeWindow", controller)
+warnings = []
+engine.warnings.connect(
+    lambda values: warnings.extend(error.toString() for error in values)
+)
+main, component = _create_qml_root(
+    qt,
+    engine,
+    Path.cwd() / "speakr" / "ui" / "qml" / "Main.qml",
+    before_complete=controller.attach,
+)
+main.setX(120)
+main.setY(80)
+main.setWidth(960)
+main.setHeight(700)
+main.show()
+pump(300)
+assert controller.customChromeEnabled
+assert not hasattr(main, "isMaximized")
+hwnd = int(main.winId())
+normal_geometry = tuple(main.geometry().getRect())
+normal_native = native_rect(hwnd)
+
+button = click_maximize_button(main)
+assert user32.IsZoomed(ctypes.c_void_p(hwnd))
+assert controller.maximized
+assert button.property("windowAction") == "restore"
+maximized_geometry = tuple(main.geometry().getRect())
+maximized_native = native_rect(hwnd)
+assert maximized_geometry != normal_geometry
+assert maximized_native != normal_native
+
+work = work_rect(hwnd)
+horizontal_frame = user32.GetSystemMetrics(32) + user32.GetSystemMetrics(92) + 2
+vertical_frame = user32.GetSystemMetrics(33) + user32.GetSystemMetrics(92) + 2
+assert maximized_native[0] >= work[0] - horizontal_frame, (maximized_native, work)
+assert maximized_native[1] >= work[1] - vertical_frame, (maximized_native, work)
+assert maximized_native[2] <= work[2] + horizontal_frame, (maximized_native, work)
+assert maximized_native[3] <= work[3] + vertical_frame, (maximized_native, work)
+
+button = click_maximize_button(main)
+assert not user32.IsZoomed(ctypes.c_void_p(hwnd))
+assert not controller.maximized
+assert button.property("windowAction") == "maximize"
+assert tuple(main.geometry().getRect()) == normal_geometry
+assert native_rect(hwnd) == normal_native
+
+# A normal system-framed QWindow keeps Qt's supported maximize path.
+system_window = QQuickWindow()
+system_window.resize(720, 540)
+system_window.setPosition(180, 120)
+system_controller = NativeWindowController(
+    visual_effects="off",
+    platform_name="win32",
+    adapter=_WindowsAdapter(build=0),
+)
+assert system_controller.attach(system_window)
+assert not system_controller.customChromeEnabled
+system_window.show()
+pump(200)
+system_hwnd = int(system_window.winId())
+system_normal_geometry = tuple(system_window.geometry().getRect())
+system_controller.toggleMaximize()
+pump(300)
+assert user32.IsZoomed(ctypes.c_void_p(system_hwnd))
+assert system_controller.maximized
+system_controller.toggleMaximize()
+pump(300)
+assert not user32.IsZoomed(ctypes.c_void_p(system_hwnd))
+assert not system_controller.maximized
+assert tuple(system_window.geometry().getRect()) == system_normal_geometry
+
+assert warnings == [], warnings
+system_window.hide()
+system_controller.detach()
+main.hide()
+controller.detach()
+bridge.close()
+system_window.deleteLater()
+main.deleteLater()
+component.deleteLater()
+engine.deleteLater()
+application.processEvents()
+'''
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=repo,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+        )
+
 
 class MacAdapterTests(unittest.TestCase):
     def test_capability_is_lazy_and_requires_visual_effect_view(self):
@@ -389,6 +622,119 @@ class MacAdapterTests(unittest.TestCase):
         )
         self.assertEqual(len(converted), 1)
         self.assertEqual(converted[0]["c_void_p"], 456)
+
+    def test_window_actions_use_exact_appkit_selectors_and_zoom_state(self):
+        class Native:
+            def __init__(self):
+                self.calls = []
+                self.zoomed = False
+
+            def performClose_(self, sender):
+                self.calls.append(("performClose:", sender))
+
+            def performMiniaturize_(self, sender):
+                self.calls.append(("performMiniaturize:", sender))
+
+            def performZoom_(self, sender):
+                self.calls.append(("performZoom:", sender))
+                self.zoomed = not self.zoomed
+
+            def toggleFullScreen_(self, sender):
+                self.calls.append(("toggleFullScreen:", sender))
+
+            def isZoomed(self):
+                self.calls.append(("isZoomed", None))
+                return self.zoomed
+
+        native = Native()
+        adapter = native_window._MacAdapter(
+            appkit=object(), objc_module=object(), qpa_name="cocoa"
+        )
+        adapter._native_window = native
+        window = object()
+
+        self.assertTrue(adapter.close_window(window))
+        self.assertTrue(adapter.minimize_window(window))
+        self.assertFalse(adapter.is_maximized(window))
+        self.assertTrue(adapter.set_maximized(window, True))
+        self.assertTrue(adapter.is_maximized(window))
+        zoom_calls = native.calls.count(("performZoom:", None))
+        self.assertTrue(adapter.set_maximized(window, True))
+        self.assertEqual(native.calls.count(("performZoom:", None)), zoom_calls)
+        self.assertTrue(adapter.set_maximized(window, False))
+        self.assertFalse(adapter.is_maximized(window))
+        self.assertTrue(adapter.toggle_full_screen(window))
+
+        self.assertIn(("performClose:", None), native.calls)
+        self.assertIn(("performMiniaturize:", None), native.calls)
+        self.assertEqual(native.calls.count(("performZoom:", None)), 2)
+        self.assertIn(("toggleFullScreen:", None), native.calls)
+
+    def test_window_action_failures_are_reported_for_qwindow_fallback(self):
+        class Native:
+            @staticmethod
+            def _fail(*_args):
+                raise RuntimeError("synthetic AppKit failure")
+
+            performClose_ = _fail
+            performMiniaturize_ = _fail
+            performZoom_ = _fail
+            toggleFullScreen_ = _fail
+            isZoomed = _fail
+
+        adapter = native_window._MacAdapter(
+            appkit=object(), objc_module=object(), qpa_name="cocoa"
+        )
+        adapter._native_window = Native()
+        window = object()
+
+        self.assertFalse(adapter.close_window(window))
+        self.assertFalse(adapter.minimize_window(window))
+        self.assertIsNone(adapter.is_maximized(window))
+        self.assertFalse(adapter.set_maximized(window, True))
+        self.assertFalse(adapter.toggle_full_screen(window))
+
+    def test_zoom_requires_a_known_prestate_before_using_toggle_selector(self):
+        class Native:
+            def __init__(self):
+                self.zoom_calls = 0
+
+            @staticmethod
+            def isZoomed():
+                raise RuntimeError("synthetic state-query failure")
+
+            def performZoom_(self, _sender):
+                self.zoom_calls += 1
+
+        native = Native()
+        adapter = native_window._MacAdapter(
+            appkit=object(), objc_module=object(), qpa_name="cocoa"
+        )
+        adapter._native_window = native
+
+        self.assertFalse(adapter.set_maximized(object(), True))
+        self.assertEqual(native.zoom_calls, 0)
+
+    def test_zoom_verifies_the_requested_postcondition(self):
+        class Native:
+            def __init__(self):
+                self.zoom_calls = 0
+
+            @staticmethod
+            def isZoomed():
+                return False
+
+            def performZoom_(self, _sender):
+                self.zoom_calls += 1
+
+        native = Native()
+        adapter = native_window._MacAdapter(
+            appkit=object(), objc_module=object(), qpa_name="cocoa"
+        )
+        adapter._native_window = native
+
+        self.assertFalse(adapter.set_maximized(object(), True))
+        self.assertEqual(native.zoom_calls, 1)
 
     def test_reapplying_vibrancy_does_not_stack_effect_views(self):
         class Effect:
@@ -597,9 +943,218 @@ class NativeControllerTests(unittest.TestCase):
                 "active",
             ):
                 self.assertGreaterEqual(controller.metaObject().indexOfProperty(name), 0)
+            self.assertTrue(callable(controller.toggleFullScreen))
         finally:
             controller.detach()
             window.deleteLater()
+
+    def test_generic_qwindow_state_sync_never_requires_widget_api(self):
+        controller = native_window.NativeWindowController(
+            qt=self.qt,
+            visual_effects="off",
+            platform_name="test",
+        )
+        window = QQuickWindow()
+        try:
+            self.assertFalse(hasattr(window, "isMaximized"))
+            self.assertTrue(controller.attach(window))
+            window.show()
+            self.qapp.processEvents()
+
+            controller.toggleMaximize()
+            self.qapp.processEvents()
+            self.assertTrue(
+                bool(window.windowState() & self.qt.Qt.WindowState.WindowMaximized)
+            )
+            self.assertTrue(controller.maximized)
+
+            controller.toggleMaximize()
+            self.qapp.processEvents()
+            self.assertFalse(
+                bool(window.windowState() & self.qt.Qt.WindowState.WindowMaximized)
+            )
+            self.assertFalse(controller.maximized)
+        finally:
+            window.hide()
+            controller.detach()
+            window.deleteLater()
+            self.qapp.processEvents()
+
+    def test_failed_appkit_actions_use_supported_qwindow_fallbacks(self):
+        class Native:
+            @staticmethod
+            def _fail(*_args):
+                raise RuntimeError("synthetic AppKit failure")
+
+            performClose_ = _fail
+            performMiniaturize_ = _fail
+            performZoom_ = _fail
+            toggleFullScreen_ = _fail
+            isZoomed = _fail
+
+        adapter = native_window._MacAdapter(
+            appkit=object(), objc_module=object(), qpa_name="cocoa"
+        )
+        adapter._native_window = Native()
+        controller = native_window.NativeWindowController(
+            qt=self.qt,
+            visual_effects="off",
+            platform_name="darwin",
+            adapter=adapter,
+        )
+        window = QQuickWindow()
+        window.setProperty("customChromeReady", True)
+        try:
+            with mock.patch.object(adapter, "enable_custom_chrome", return_value=True):
+                self.assertTrue(controller.attach(window))
+            self.assertTrue(controller.customChromeEnabled)
+            window.show()
+            self.qapp.processEvents()
+
+            controller.toggleMaximize()
+            self.qapp.processEvents()
+            self.assertTrue(controller.maximized)
+            controller.toggleMaximize()
+            self.qapp.processEvents()
+            self.assertFalse(controller.maximized)
+
+            controller.toggleFullScreen()
+            self.qapp.processEvents()
+            self.assertTrue(
+                bool(window.windowState() & self.qt.Qt.WindowState.WindowFullScreen)
+            )
+            controller.toggleFullScreen()
+            self.qapp.processEvents()
+            self.assertFalse(
+                bool(window.windowState() & self.qt.Qt.WindowState.WindowFullScreen)
+            )
+
+            controller.minimize()
+            self.qapp.processEvents()
+            self.assertTrue(
+                bool(window.windowState() & self.qt.Qt.WindowState.WindowMinimized)
+            )
+            window.showNormal()
+            self.qapp.processEvents()
+            controller.closeMain()
+            self.qapp.processEvents()
+            self.assertFalse(window.isVisible())
+        finally:
+            window.hide()
+            controller.detach()
+            window.deleteLater()
+            self.qapp.processEvents()
+
+    def test_failed_windows_action_restores_system_frame_before_qt_fallback(self):
+        class FailingActionAdapter(_FakeAdapter):
+            def __init__(self):
+                super().__init__()
+                self.chrome_restores = 0
+
+            @staticmethod
+            def is_maximized(_window):
+                return None
+
+            @staticmethod
+            def set_maximized(_window, _maximized):
+                return False
+
+            def restore_custom_chrome(self, _window):
+                self.chrome_restores += 1
+                return True
+
+        adapter = FailingActionAdapter()
+        controller = native_window.NativeWindowController(
+            qt=self.qt,
+            visual_effects="off",
+            platform_name="win32",
+            adapter=adapter,
+        )
+        window = QQuickWindow()
+        window.setProperty("customChromeReady", True)
+        original_flags = window.flags()
+        try:
+            with mock.patch.object(
+                type(controller), "_install_windows_hit_filter", return_value=True
+            ):
+                self.assertTrue(controller.attach(window))
+            self.assertTrue(controller.customChromeEnabled)
+
+            with self.assertLogs("speakr.native_window", level="WARNING") as logs:
+                controller.toggleMaximize()
+            self.qapp.processEvents()
+
+            self.assertFalse(controller.customChromeEnabled)
+            self.assertEqual(window.flags(), original_flags)
+            self.assertEqual(adapter.chrome_restores, 1)
+            self.assertTrue(
+                bool(window.windowState() & self.qt.Qt.WindowState.WindowMaximized)
+            )
+            self.assertTrue(controller.maximized)
+            self.assertIn("restoring the system frame", "\n".join(logs.output))
+        finally:
+            window.hide()
+            controller.detach()
+            window.deleteLater()
+            self.qapp.processEvents()
+
+    def test_failed_windows_frame_restore_keeps_custom_chrome_truthful(self):
+        class UnrestorableAdapter(_FakeAdapter):
+            def __init__(self):
+                super().__init__()
+                self.chrome_restores = 0
+
+            @staticmethod
+            def is_maximized(_window):
+                return None
+
+            @staticmethod
+            def set_maximized(_window, _maximized):
+                return False
+
+            def restore_custom_chrome(self, _window):
+                self.chrome_restores += 1
+                return False
+
+        adapter = UnrestorableAdapter()
+        controller = native_window.NativeWindowController(
+            qt=self.qt,
+            visual_effects="off",
+            platform_name="win32",
+            adapter=adapter,
+        )
+        window = QQuickWindow()
+        window.setProperty("customChromeReady", True)
+        try:
+            with mock.patch.object(
+                type(controller), "_install_windows_hit_filter", return_value=True
+            ), mock.patch.object(
+                type(controller), "_remove_windows_hit_filter"
+            ) as remove_hit_filter:
+                self.assertTrue(controller.attach(window))
+                custom_flags = window.flags()
+                self.assertTrue(controller.customChromeEnabled)
+                remove_calls_before_action = remove_hit_filter.call_count
+
+                with self.assertLogs("speakr.native_window", level="WARNING") as logs:
+                    controller.toggleMaximize()
+                self.qapp.processEvents()
+
+                self.assertTrue(controller.customChromeEnabled)
+                self.assertEqual(window.flags(), custom_flags)
+                self.assertFalse(controller.maximized)
+                self.assertEqual(adapter.chrome_restores, 1)
+                self.assertEqual(
+                    remove_hit_filter.call_count, remove_calls_before_action
+                )
+                self.assertIn(
+                    "keeping custom chrome enabled", "\n".join(logs.output)
+                )
+        finally:
+            window.hide()
+            controller.detach()
+            window.deleteLater()
+            self.qapp.processEvents()
 
     def test_qml_can_publish_qt_rect_hit_regions_without_warnings(self):
         controller = native_window.NativeWindowController(
@@ -838,6 +1393,44 @@ QtObject {
             controller.detach()
             window.deleteLater()
 
+    def test_attach_aborts_before_show_when_system_frame_cannot_be_restored(self):
+        class UnrestorableAdapter(_FakeAdapter):
+            @staticmethod
+            def restore_custom_chrome(_window):
+                return False
+
+        adapter = UnrestorableAdapter(chrome_succeeds=True)
+        controller = native_window.NativeWindowController(
+            qt=self.qt,
+            visual_effects="off",
+            platform_name="win32",
+            adapter=adapter,
+        )
+        window = QQuickWindow()
+        window.setProperty("customChromeReady", True)
+        chrome_publications = []
+        controller.customChromeEnabledChanged.connect(
+            lambda: chrome_publications.append(controller.customChromeEnabled)
+        )
+        try:
+            with mock.patch.object(
+                type(controller), "_install_windows_hit_filter", return_value=False
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "system frame could not be restored"
+                ):
+                    controller.attach(window)
+
+            self.assertFalse(window.isVisible())
+            self.assertFalse(controller.customChromeEnabled)
+            self.assertEqual(chrome_publications, [])
+            self.assertTrue(
+                bool(window.flags() & self.qt.Qt.WindowType.FramelessWindowHint)
+            )
+        finally:
+            controller.detach()
+            window.deleteLater()
+
     def test_unsupported_platform_never_claims_custom_chrome(self):
         controller = native_window.NativeWindowController(
             qt=self.qt,
@@ -976,7 +1569,11 @@ Window {
             qt_ui,
             "_system_accessibility_preferences",
             return_value=accessibility,
-        ) as preferences:
+        ) as preferences, mock.patch.object(
+            native_window,
+            "_adapter_for_platform",
+            return_value=native_window._NullAdapter(),
+        ):
             self.assertEqual(qt_ui.run_native_ui(App()), 0)
             calls_after_cleanup = preferences.call_count
 
