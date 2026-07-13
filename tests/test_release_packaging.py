@@ -93,6 +93,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(self.workflow.count("softprops/action-gh-release"), 1)
         self.assertIn("v[0-9]+\\.[0-9]+\\.[0-9]+", self.workflow)
         self.assertIn("cancel-in-progress:", self.workflow)
+        self.assertEqual(self.workflow.count("git merge-base --is-ancestor"), 2)
         self.assertIsNone(
             re.search(r"(?m)^\s*-?\s*uses:\s+[^\s]+@v[0-9]+\s*(?:#.*)?$", self.workflow)
         )

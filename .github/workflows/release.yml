@@ -43,6 +43,7 @@ jobs:
         id: context
         env:
           REQUESTED_TAG: ${{ inputs.tag || '' }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
           set -euo pipefail
@@ -72,6 +73,12 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             if [ "$tag_verified" != "true" ]; then
               echo "::error::A tag-triggered run must resolve to that exact existing tag and commit."
+              exit 1
+            fi
+            git fetch --no-tags origin \
+              "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+            if ! git merge-base --is-ancestor "$sha" "origin/$DEFAULT_BRANCH"; then
+              echo "::error::A release tag must identify a commit already merged into $DEFAULT_BRANCH."
               exit 1
             fi
             publish="true"
@@ -833,12 +840,16 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.release_context.outputs.tag }}
           RELEASE_SHA: ${{ needs.release_context.outputs.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
           set -euo pipefail
           git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$RELEASE_SHA"
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git fetch --no-tags origin \
+            "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          git merge-base --is-ancestor "$RELEASE_SHA" "origin/$DEFAULT_BRANCH"
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
