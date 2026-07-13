@@ -32,6 +32,7 @@ jobs:
           - platform: macOS
             runner: macos-latest
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
 
     steps:
       - name: Check out pull request
