@@ -8,9 +8,19 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import Property, QMetaObject, QObject, QRectF, Signal, Slot, QUrl
+from PySide6.QtCore import (
+    Property,
+    QMetaObject,
+    QObject,
+    QPointF,
+    QRectF,
+    Signal,
+    Slot,
+    QUrl,
+)
 from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickItem
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
 
@@ -122,6 +132,20 @@ class _NativeAdapter:
         return None
 
 
+class _CaptureApp(_App):
+    def __init__(self):
+        super().__init__()
+        self.capture_callback = None
+        self.cancel_count = 0
+
+    def begin_hotkey_capture(self, callback):
+        self.capture_callback = callback
+        return True
+
+    def cancel_hotkey_capture(self):
+        self.cancel_count += 1
+
+
 class ShellHomeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -131,8 +155,18 @@ class ShellHomeTests(unittest.TestCase):
         cls.root = Path(__file__).resolve().parents[1]
         cls.qml = cls.root / "speakr" / "ui" / "qml"
 
-    def _load_main(self, *, text_scale=100):
-        app = _App(text_scale=text_scale)
+    @staticmethod
+    def _visual_items(item):
+        result = []
+        pending = list(item.childItems())
+        while pending:
+            child = pending.pop()
+            result.append(child)
+            pending.extend(child.childItems())
+        return result
+
+    def _load_main(self, *, text_scale=100, app=None):
+        app = app or _App(text_scale=text_scale)
         bridge = Bridge(app)
         controller = _WindowController()
         engine = QQmlApplicationEngine()
@@ -201,6 +235,32 @@ class ShellHomeTests(unittest.TestCase):
             engine.deleteLater()
             self.qapp.processEvents()
 
+    def test_missing_native_controller_keeps_only_the_system_titlebar(self):
+        app = _App()
+        bridge = Bridge(app)
+        engine = QQmlApplicationEngine()
+        engine.rootContext().setContextProperty("bridge", bridge)
+        warnings = []
+        engine.warnings.connect(
+            lambda values: warnings.extend(error.toString() for error in values)
+        )
+        try:
+            engine.load(QUrl.fromLocalFile(str(self.qml / "Main.qml")))
+            self.qapp.processEvents()
+            self.assertEqual(len(engine.rootObjects()), 1, warnings)
+            self.assertEqual(warnings, [])
+            main = engine.rootObjects()[0]
+            chrome = main.findChild(QObject, "windowChrome")
+            self.assertIsNotNone(chrome)
+            self.assertFalse(chrome.property("visible"))
+            self.assertGreater(
+                main.findChild(QObject, "pageContentSurface").height(), 0
+            )
+        finally:
+            bridge.close()
+            engine.deleteLater()
+            self.qapp.processEvents()
+
     def test_native_material_exposes_the_compositor_without_covering_fallbacks(self):
         _app, bridge, controller, engine, main = self._load_main()
         try:
@@ -216,6 +276,59 @@ class ShellHomeTests(unittest.TestCase):
             self.assertFalse(bool(backdrop.property("paintCanvas")))
             self.assertEqual(QColor(main.property("color")).alpha(), 0)
         finally:
+            bridge.close()
+            engine.deleteLater()
+            self.qapp.processEvents()
+
+    def test_navigation_and_practice_cancel_untimed_hotkey_capture(self):
+        app = _CaptureApp()
+        _app, bridge, _controller, engine, main = self._load_main(app=app)
+        try:
+            main.show()
+            for _ in range(20):
+                self.qapp.processEvents()
+            shortcut = main.findChild(QObject, "homeBoundedShortcutButton")
+            navigation = [
+                item
+                for item in self._visual_items(main.contentItem())
+                if "NavigationButton" in item.metaObject().className()
+                and item.isVisible()
+            ]
+            settings_nav = next(
+                (item for item in navigation if item.property("text") == "Settings"),
+                None,
+            )
+            home_nav = next(
+                (item for item in navigation if item.property("text") == "Home"),
+                None,
+            )
+            practice = main.findChild(QObject, "homeBoundedPracticeButton")
+            for control in (shortcut, settings_nav, home_nav, practice):
+                self.assertIsNotNone(control)
+
+            self.assertTrue(QMetaObject.invokeMethod(shortcut, "click"))
+            self.qapp.processEvents()
+            self.assertTrue(bridge.capturingHotkey)
+            self.assertTrue(QMetaObject.invokeMethod(settings_nav, "click"))
+            self.qapp.processEvents()
+            self.assertEqual(main.property("currentPage"), "settings")
+            self.assertFalse(bridge.capturingHotkey)
+            self.assertEqual(app.cancel_count, 1)
+
+            self.assertTrue(QMetaObject.invokeMethod(home_nav, "click"))
+            self.qapp.processEvents()
+            self.assertEqual(main.property("currentPage"), "home")
+            self.assertTrue(QMetaObject.invokeMethod(shortcut, "click"))
+            self.qapp.processEvents()
+            self.assertTrue(bridge.capturingHotkey)
+            self.assertTrue(QMetaObject.invokeMethod(practice, "click"))
+            self.qapp.processEvents()
+            self.assertEqual(main.property("currentPage"), "practice")
+            self.assertFalse(bridge.capturingHotkey)
+            self.assertEqual(app.cancel_count, 2)
+        finally:
+            bridge.cancelHotkeyCapture()
+            main.hide()
             bridge.close()
             engine.deleteLater()
             self.qapp.processEvents()
@@ -300,22 +413,54 @@ class ShellHomeTests(unittest.TestCase):
     def test_home_reflows_at_minimum_size_and_200_percent_text(self):
         _app, bridge, _controller, engine, main = self._load_main(text_scale=200)
         try:
+            main.show()
             main.setWidth(640)
             main.setHeight(520)
-            self.qapp.processEvents()
-            self.qapp.processEvents()
+            for _ in range(50):
+                self.qapp.processEvents()
             self.assertEqual(main.property("topNavigationColumns"), 2)
             self.assertEqual(main.property("topNavigationRows"), 3)
-            hero = main.findChild(QObject, "readinessHero")
+            content = main.findChild(QQuickItem, "pageContentSurface")
+            home = main.findChild(QQuickItem, "homePage")
+            viewport = main.findChild(QQuickItem, "homeBoundedViewport")
+            hero = main.findChild(QQuickItem, "homeBoundedReadinessHero")
             switch = main.findChild(QObject, "dictationSwitch")
             summary_repeater = main.findChild(QObject, "summaryRepeater")
+            self.assertIsNotNone(content)
+            self.assertIsNotNone(home)
+            self.assertIsNotNone(viewport)
             self.assertIsNotNone(hero)
             self.assertGreater(hero.width(), 0)
             self.assertGreater(hero.height(), 0)
             self.assertGreaterEqual(switch.width(), 44)
             self.assertIsNotNone(summary_repeater)
             self.assertEqual(summary_repeater.property("count"), 4)
+
+            content_origin = content.mapToScene(QPointF(0, 0))
+            content_left = content_origin.x()
+            content_right = content_left + content.width()
+            self.assertLessEqual(
+                float(viewport.property("contentWidth")), viewport.width() + 0.5
+            )
+
+            bounded = [
+                item
+                for item in self._visual_items(home)
+                if item.isVisible()
+                and item.width() > 0
+                and item.height() > 0
+            ]
+            self.assertIn(switch, bounded)
+            self.assertGreaterEqual(len(bounded), 40)
+            for item in bounded:
+                with self.subTest(item=item.objectName() or item.metaObject().className()):
+                    origin = item.mapToScene(QPointF(0, 0))
+                    self.assertGreaterEqual(origin.x(), content_left - 0.5)
+                    self.assertLessEqual(
+                        origin.x() + item.width(), content_right + 0.5
+                    )
         finally:
+            main.hide()
             bridge.close()
             engine.deleteLater()
             self.qapp.processEvents()

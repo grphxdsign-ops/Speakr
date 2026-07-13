@@ -167,8 +167,10 @@ Item {
 
     ScrollView {
         id: scroll
+        objectName: "homeBoundedViewport"
         anchors.fill: parent
         clip: true
+        contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
         ColumnLayout {
@@ -178,7 +180,9 @@ Item {
             Item { Layout.preferredHeight: root.tokens.space8 }
 
             GridLayout {
+                objectName: "homeBoundedHeader"
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 Layout.leftMargin: root.tokens.space24
                 Layout.rightMargin: root.tokens.space24
                 columns: width >= root.tokens.metric(520) ? 2 : 1
@@ -187,7 +191,9 @@ Item {
 
                 PlainText {
                     id: pageHeading
+                    objectName: "homeBoundedHeading"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: qsTr("Home")
                     color: root.tokens.text
                     font.family: root.tokens.fontFamily
@@ -198,16 +204,22 @@ Item {
                 }
 
                 RowLayout {
+                    objectName: "homeBoundedDictationControl"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     Layout.alignment: width >= root.tokens.metric(520) ? Qt.AlignRight : Qt.AlignLeft
                     spacing: root.tokens.space8
 
                     PlainText {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         text: root.value(root.appState, "enabled", true)
                               ? qsTr("Dictation on") : qsTr("Dictation off")
                         color: root.tokens.text
                         font.family: root.tokens.fontFamily
                         font.pixelSize: root.tokens.body
                         font.weight: Font.DemiBold
+                        wrapMode: Text.Wrap
                         Accessible.ignored: true
                     }
                     QuietSwitch {
@@ -225,8 +237,9 @@ Item {
 
             GlassSurface {
                 id: readinessHero
-                objectName: "readinessHero"
+                objectName: "homeBoundedReadinessHero"
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 Layout.leftMargin: root.tokens.space24
                 Layout.rightMargin: root.tokens.space24
                 implicitHeight: heroContent.implicitHeight + padding * 2
@@ -243,6 +256,7 @@ Item {
                     spacing: root.tokens.space16
 
                     GridLayout {
+                        Layout.minimumWidth: 0
                         Layout.fillWidth: true
                         columns: width >= root.tokens.metric(500) ? 2 : 1
                         columnSpacing: root.tokens.space16
@@ -250,11 +264,13 @@ Item {
 
                         RowLayout {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             spacing: root.tokens.space12
 
                             StatusOrb {
                                 Layout.alignment: Qt.AlignTop
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 0
                                 tokens: root.tokens
                                 statusKind: root.statusKind()
                                 label: root.statusText()
@@ -277,6 +293,7 @@ Item {
 
                     PlainText {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         text: root.statusDetail()
                         color: root.tokens.mutedText
                         font.family: root.tokens.fontFamily
@@ -286,7 +303,9 @@ Item {
                     }
 
                     SignalPath {
+                        objectName: "homeBoundedSignalPath"
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         Layout.maximumWidth: root.tokens.metric(560)
                         tokens: root.tokens
                         activeStage: root.stage()
@@ -295,7 +314,9 @@ Item {
             }
 
             GridLayout {
+                objectName: "homeBoundedActionGrid"
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 Layout.leftMargin: root.tokens.space24
                 Layout.rightMargin: root.tokens.space24
                 columns: width >= root.tokens.metric(680) ? 2 : 1
@@ -303,8 +324,10 @@ Item {
                 rowSpacing: root.tokens.space16
 
                 GlassSurface {
+                    objectName: "homeBoundedInstructionSurface"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.minimumWidth: 0
                     implicitHeight: instructionContent.implicitHeight + padding * 2
                     tokens: root.tokens
                     role: "content"
@@ -318,6 +341,7 @@ Item {
 
                         PlainText {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             text: root.setting("toggle_mode", false)
                                   ? qsTr("Press %1 to start and stop").arg(root.displayHotkey())
                                   : qsTr("Hold %1, speak, then release").arg(root.displayHotkey())
@@ -332,6 +356,7 @@ Item {
 
                         PlainText {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             text: qsTr("Speakr cleans up your words locally and inserts them at the cursor.")
                             color: root.tokens.mutedText
                             font.family: root.tokens.fontFamily
@@ -342,8 +367,10 @@ Item {
                 }
 
                 GlassSurface {
+                    objectName: "homeBoundedActionSurface"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.minimumWidth: 0
                     implicitHeight: actionContent.implicitHeight + padding * 2
                     tokens: root.tokens
                     role: "notice"
@@ -357,6 +384,7 @@ Item {
 
                         PlainText {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             text: qsTr("Ready when you are")
                             color: root.tokens.text
                             font.family: root.tokens.fontFamily
@@ -371,6 +399,7 @@ Item {
                             spacing: root.tokens.space12
 
                             QuietButton {
+                                objectName: "homeBoundedShortcutButton"
                                 tokens: root.tokens
                                 text: bridge.capturingHotkey ? qsTr("Cancel shortcut capture") : qsTr("Change shortcut")
                                 kind: bridge.capturingHotkey ? "danger" : "secondary"
@@ -382,6 +411,7 @@ Item {
                             }
 
                             QuietButton {
+                                objectName: "homeBoundedConfirmShortcutButton"
                                 visible: bridge.capturingHotkey
                                          && String(root.value(root.appState, "pending_hotkey", "")).length > 0
                                 tokens: root.tokens
@@ -392,6 +422,7 @@ Item {
                             }
 
                             QuietButton {
+                                objectName: "homeBoundedPracticeButton"
                                 tokens: root.tokens
                                 text: qsTr("Start Practice")
                                 kind: "primary"
@@ -410,20 +441,25 @@ Item {
             }
 
             ColumnLayout {
+                objectName: "homeBoundedSummarySection"
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 Layout.leftMargin: root.tokens.space24
                 Layout.rightMargin: root.tokens.space24
                 spacing: root.tokens.space12
 
                 SectionHeading {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     tokens: root.tokens
                     title: qsTr("At a glance")
                     description: qsTr("The local path Speakr will use for your next dictation.")
                 }
 
                 GridLayout {
+                    objectName: "homeBoundedSummaryGrid"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     columns: width >= root.tokens.metric(640) ? 2 : 1
                     columnSpacing: root.tokens.space12
                     rowSpacing: root.tokens.space12
@@ -445,9 +481,10 @@ Item {
 
                         delegate: GlassSurface {
                             id: summaryCard
-                            objectName: "summaryCard"
+                            objectName: "homeBoundedSummaryCard"
                             required property var modelData
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             implicitHeight: summaryContent.implicitHeight + padding * 2
                             tokens: root.tokens
                             role: "content"
@@ -457,6 +494,7 @@ Item {
                                 id: summaryContent
                                 anchors.left: parent.left
                                 anchors.right: parent.right
+                                Layout.minimumWidth: 0
                                 spacing: root.tokens.space12
 
                                 Rectangle {
@@ -482,10 +520,12 @@ Item {
 
                                 ColumnLayout {
                                     Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
                                     spacing: root.tokens.space4
 
                                     PlainText {
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         text: summaryCard.modelData.label
                                         color: root.tokens.text
                                         font.family: root.tokens.fontFamily
@@ -495,6 +535,7 @@ Item {
                                     }
                                     PlainText {
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         text: summaryCard.modelData.value
                                         color: root.tokens.mutedText
                                         font.family: root.tokens.fontFamily
@@ -509,7 +550,9 @@ Item {
             }
 
             InlineNotice {
+                objectName: "homeBoundedPrivacyNotice"
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 Layout.leftMargin: root.tokens.space24
                 Layout.rightMargin: root.tokens.space24
                 tokens: root.tokens
@@ -519,7 +562,9 @@ Item {
             }
 
             PlainText {
+                objectName: "homeBoundedLatestOutcome"
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 Layout.leftMargin: root.tokens.space24
                 Layout.rightMargin: root.tokens.space24
                 text: qsTr("Latest outcome: %1").arg(root.value(root.appState, "latest_outcome", qsTr("Ready for dictation")))

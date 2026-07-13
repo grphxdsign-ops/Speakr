@@ -76,11 +76,14 @@ ApplicationWindow {
     }
 
     function go(page) {
-        if (currentPage === "practice" && page !== "practice") {
+        var destination = pageNames.indexOf(page) >= 0 ? page : "home"
+        if (destination !== currentPage && bridge.capturingHotkey)
+            bridge.cancelHotkeyCapture()
+        if (currentPage === "practice" && destination !== "practice") {
             bridge.stopPractice()
             bridge.clearPractice()
         }
-        currentPage = pageNames.indexOf(page) >= 0 ? page : "home"
+        currentPage = destination
         pageTransition.restart()
         bridge.navigate(currentPage)
         Qt.callLater(function() { focusCurrentPage() })
@@ -228,8 +231,8 @@ ApplicationWindow {
                 objectName: "windowChrome"
                 Layout.fillWidth: true
                 Layout.preferredHeight: implicitHeight
-                visible: root.nativeController === null
-                         || Boolean(root.nativeController.customChromeEnabled)
+                visible: root.nativeController !== null
+                         && Boolean(root.nativeController.customChromeEnabled)
                 tokens: tokens
                 controller: root.nativeController
                 hostWindow: root
