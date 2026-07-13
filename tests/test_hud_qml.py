@@ -8,11 +8,20 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import Property, QObject, QPointF, Qt, QUrl
+from PySide6.QtCore import (
+    Property,
+    QCoreApplication,
+    QEvent,
+    QObject,
+    QPointF,
+    Qt,
+    QUrl,
+)
 from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem
@@ -73,6 +82,7 @@ class HudQmlTests(unittest.TestCase):
         engine.warnings.connect(
             lambda values: warnings.extend(error.toString() for error in values)
         )
+        engine._hud_test_warnings = warnings
         engine.load(QUrl.fromLocalFile(str(self.qml / "Hud.qml")))
         self._pump()
         self.assertEqual(len(engine.rootObjects()), 1, warnings)
@@ -85,9 +95,30 @@ class HudQmlTests(unittest.TestCase):
             cls.qapp.processEvents()
 
     def _close(self, bridge, engine):
-        bridge.close()
+        warnings = engine._hud_test_warnings
+        for root in engine.rootObjects():
+            root.hide()
+            root.deleteLater()
+        engine.collectGarbage()
         engine.deleteLater()
-        self._pump()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self._pump(5)
+        self.assertEqual(warnings, [])
+        bridge.close()
+        bridge.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self._pump(2)
+
+    @staticmethod
+    def _system_accessibility(reduced_motion):
+        return mock.patch(
+            "speakr.qt_ui._system_accessibility_preferences",
+            return_value={
+                "system_high_contrast": False,
+                "system_reduced_motion": bool(reduced_motion),
+                "system_reduce_transparency": False,
+            },
+        )
 
     @staticmethod
     def _visual_items(item):
@@ -455,12 +486,13 @@ class HudQmlTests(unittest.TestCase):
                     self._close(bridge, engine)
 
     def test_high_contrast_is_opaque_and_full_motion_uses_only_bounded_tokens(self):
-        app, bridge, engine, hud = self._load_hud(
-            theme="high_contrast",
-            visual_effects="full",
-            reduced_motion="system",
-            motion="system",
-        )
+        with self._system_accessibility(False):
+            app, bridge, engine, hud = self._load_hud(
+                theme="high_contrast",
+                visual_effects="full",
+                reduced_motion="system",
+                motion="system",
+            )
         try:
             theme = hud.findChild(QObject, "hudTheme")
             panel = hud.findChild(QObject, "hudPanel")
@@ -534,12 +566,39 @@ class HudQmlTests(unittest.TestCase):
         finally:
             self._close(bridge, engine)
 
+    def test_system_reduce_motion_preference_selects_zero_or_full_tokens(self):
+        for reduced_motion, expected_standard, expected_emphasis in (
+            (True, 0, 0),
+            (False, 160, 220),
+        ):
+            with self.subTest(reduced_motion=reduced_motion):
+                with self._system_accessibility(reduced_motion):
+                    app, bridge, engine, hud = self._load_hud(
+                        theme="dark",
+                        reduced_motion="system",
+                        motion="system",
+                    )
+                try:
+                    theme = hud.findChild(QObject, "hudTheme")
+                    self.assertEqual(
+                        bool(hud.property("reducedMotion")), reduced_motion
+                    )
+                    self.assertEqual(
+                        theme.property("motionStandard"), expected_standard
+                    )
+                    self.assertEqual(
+                        theme.property("motionEmphasis"), expected_emphasis
+                    )
+                finally:
+                    self._close(bridge, engine)
+
     def test_success_bloom_starts_after_crossfade_reveals_success_state(self):
-        app, bridge, engine, hud = self._load_hud(
-            theme="dark",
-            reduced_motion="system",
-            motion="system",
-        )
+        with self._system_accessibility(False):
+            app, bridge, engine, hud = self._load_hud(
+                theme="dark",
+                reduced_motion="system",
+                motion="system",
+            )
         try:
             ring = hud.findChild(QObject, "hudSuccessRing")
             bloom = hud.findChild(QObject, "hudSuccessBloom")
