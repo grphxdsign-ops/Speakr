@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import QObject, Property, QUrl
+from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
@@ -98,13 +98,85 @@ class _App:
 
 
 class _NativeWindow(QObject):
-    @Property(str, constant=True)
+    materialChanged = Signal()
+    effectTierChanged = Signal()
+    customChromeEnabledChanged = Signal()
+    nativeMaterialAvailableChanged = Signal()
+    systemReduceTransparencyChanged = Signal()
+    softwareRendererChanged = Signal()
+    maximizedChanged = Signal()
+    activeChanged = Signal()
+
+    @Property(str, notify=materialChanged)
     def material(self):
         return "mica"
 
-    @Property(str, constant=True)
+    @Property(str, notify=effectTierChanged)
     def effectTier(self):
         return "full"
+
+    @Property(bool, notify=customChromeEnabledChanged)
+    def customChromeEnabled(self):
+        return False
+
+    @Property(bool, notify=nativeMaterialAvailableChanged)
+    def nativeMaterialAvailable(self):
+        return True
+
+    @Property(bool, notify=systemReduceTransparencyChanged)
+    def systemReduceTransparency(self):
+        return False
+
+    @Property(bool, notify=softwareRendererChanged)
+    def softwareRenderer(self):
+        return False
+
+    @Property(bool, notify=maximizedChanged)
+    def maximized(self):
+        return False
+
+    @Property(bool, notify=activeChanged)
+    def active(self):
+        return False
+
+    @Slot(result=bool)
+    def beginSystemMove(self):
+        return False
+
+    @Slot(object, result=bool)
+    def beginSystemResize(self, _edge_mask):
+        return False
+
+    @Slot()
+    def minimize(self):
+        pass
+
+    @Slot()
+    def toggleMaximize(self):
+        pass
+
+    @Slot()
+    def closeMain(self):
+        pass
+
+    @Slot(float, float, result=bool)
+    def showSystemMenu(self, _x, _y):
+        return False
+
+    @Slot("QVariant", "QVariant", "QVariant", "QVariant", "QVariant")
+    def setHitRegions(
+        self,
+        _titlebar,
+        _minimize,
+        _maximize,
+        _close,
+        _resize_border,
+    ):
+        pass
+
+    @Slot(str, str)
+    def applyVisualPreferences(self, _theme, _visual_effects):
+        pass
 
 
 class SettingsHelpQmlTests(unittest.TestCase):
