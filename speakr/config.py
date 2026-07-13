@@ -8,6 +8,7 @@ import logging
 import logging.handlers
 import os
 import sys
+import threading
 from pathlib import Path
 
 # SPEAKR_HOME overrides where user data (config, dictionary, learned words,
@@ -20,6 +21,9 @@ LOG_PATH = ROOT / "speakr.log"
 # Where the running instance publishes its control-panel URL (the port can
 # differ per run), so a second launch can open the panel instead of dying.
 PANEL_URL_PATH = ROOT / "panel.url"
+# File-system wake signal used by a second launch to show the native window
+# without keeping a browser or network listener alive in the normal Qt path.
+SHOW_REQUEST_PATH = ROOT / "show.request"
 
 IS_MAC = sys.platform == "darwin"
 
@@ -128,6 +132,21 @@ DEFAULTS = {
         # ~5GB permanently, even while Speakr sits unused.
         "keep_alive": "10m",
     },
+    # Native-interface preferences. These values affect presentation only;
+    # they never enable networking, transcript storage, or cloud services.
+    "ui": {
+        "onboarding_complete": False,
+        "open_window_on_start": True,
+        "theme": "system",          # system | light | dark | high_contrast
+        "density": "comfortable",  # comfortable | compact
+        "text_scale": "system",    # system | 110 | 125 | 150 | 175 | 200
+        "reduced_motion": "system",  # system | reduce
+        "hud_visibility": "while_dictating",  # while_dictating | always | off
+        "hud_size": "standard",    # standard | large
+        "hud_edge": "bottom",      # bottom | top
+        "hud_scale": 100,           # 100 | 125 | 150 | 175 | 200
+        "background_announcements": False,
+    },
     # Tone per foreground app: casual | formal | neutral | literal.
     # "literal" skips the LLM pass entirely (good for code/terminals).
     # Keys are the process name on Windows ("slack.exe") and the lowercase
@@ -178,37 +197,96 @@ def _merge(base: dict, override: dict) -> dict:
 class Config:
     def __init__(self, path: Path = CONFIG_PATH):
         self.path = path
+        self._lock = threading.RLock()
         self.data = copy.deepcopy(DEFAULTS)
         self.load()
 
     def load(self):
-        if self.path.exists():
-            try:
-                # utf-8-sig: tolerate the BOM Notepad/PowerShell like to add
-                user = json.loads(self.path.read_text(encoding="utf-8-sig"))
-                self.data = _merge(DEFAULTS, user)
-            except (json.JSONDecodeError, OSError) as exc:
-                logging.getLogger("speakr").error("Failed to read %s: %s", self.path, exc)
-        else:
-            self.save()
+        with self._lock:
+            if self.path.exists():
+                try:
+                    # utf-8-sig: tolerate the BOM Notepad/PowerShell like to add
+                    user = json.loads(self.path.read_text(encoding="utf-8-sig"))
+                    self.data = _merge(DEFAULTS, user)
+                    # Migrate the short-lived preview key without breaking
+                    # anyone who tried the native interface before release.
+                    user_ui = user.get("ui", {}) if isinstance(user, dict) else {}
+                    if (
+                        isinstance(user_ui, dict)
+                        and "reduced_motion" not in user_ui
+                        and "motion" in user_ui
+                    ):
+                        self.data["ui"]["reduced_motion"] = (
+                            "reduce" if user_ui.get("motion") == "reduced" else "system"
+                        )
+                except (json.JSONDecodeError, OSError) as exc:
+                    logging.getLogger("speakr").error("Failed to read %s: %s", self.path, exc)
+            else:
+                self.save()
 
     def save(self):
-        self.path.write_text(json.dumps(self.data, indent=2) + "\n", encoding="utf-8")
+        """Atomically persist configuration so a failed write cannot leave
+        half-written JSON that prevents the next launch."""
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            try:
+                tmp.write_text(json.dumps(self.data, indent=2) + "\n", encoding="utf-8")
+                os.replace(tmp, self.path)
+            except Exception:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
 
     def get(self, *keys, default=None):
-        node = self.data
-        for key in keys:
-            if not isinstance(node, dict) or key not in node:
-                return default
-            node = node[key]
-        return node
+        with self._lock:
+            node = self.data
+            for key in keys:
+                if not isinstance(node, dict) or key not in node:
+                    return default
+                node = node[key]
+            return node
 
     def set(self, *keys, value):
-        node = self.data
-        for key in keys[:-1]:
-            node = node.setdefault(key, {})
-        node[keys[-1]] = value
-        self.save()
+        if not keys:
+            raise ValueError("at least one config key is required")
+        with self._lock:
+            before = copy.deepcopy(self.data)
+            try:
+                node = self.data
+                for key in keys[:-1]:
+                    node = node.setdefault(key, {})
+                node[keys[-1]] = copy.deepcopy(value)
+                self.save()
+            except Exception:
+                self.data = before
+                raise
+
+    def set_many(self, updates: dict[str, object]):
+        """Atomically save a validated group of dotted-path values."""
+        if not updates:
+            return
+        with self._lock:
+            before = copy.deepcopy(self.data)
+            try:
+                for path, value in updates.items():
+                    keys = tuple(part for part in str(path).split(".") if part)
+                    if not keys:
+                        raise ValueError("empty config path")
+                    node = self.data
+                    for key in keys[:-1]:
+                        node = node.setdefault(key, {})
+                    node[keys[-1]] = copy.deepcopy(value)
+                self.save()
+            except Exception:
+                self.data = before
+                raise
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return copy.deepcopy(self.data)
 
 
 def setup_logging():

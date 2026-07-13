@@ -30,10 +30,12 @@ class AudioRecorder:
         self._recorded_total = 0
         self._recording = False
         self._last_frame_at = 0.0  # monotonic time of the last mic callback
+        self._last_rms = 0.0
         self._lock = threading.Lock()
 
     def _callback(self, indata, frames, time_info, status):
         self._last_frame_at = time.monotonic()
+        self._last_rms = float(np.sqrt(np.mean(np.square(indata)))) if len(indata) else 0.0
         if status:
             log.warning("Audio stream status: %s", status)
         with self._lock:
@@ -65,11 +67,45 @@ class AudioRecorder:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+        self._last_rms = 0.0
 
     def start(self):
         """Called once at app startup when keep_stream_open is on."""
         if self.keep_stream_open:
             self._open_stream()
+
+    def clear_preroll(self):
+        """Forget every rolling RAM sample without writing it anywhere."""
+        with self._lock:
+            self._preroll.clear()
+            self._preroll_total = 0
+
+    def pause(self):
+        """Close the microphone and clear rolling audio while dictation is off."""
+        self._recording = False
+        self.clear_preroll()
+        self._close_stream()
+
+    def resume(self):
+        """Restore idle microphone readiness when the preference requests it."""
+        if self.keep_stream_open:
+            self._open_stream()
+
+    def set_keep_stream_open(self, enabled: bool):
+        self.keep_stream_open = bool(enabled)
+        if self.keep_stream_open:
+            self._open_stream()
+        elif not self._recording:
+            self.clear_preroll()
+            self._close_stream()
+
+    def current_level(self) -> float:
+        """Latest coarse RMS level for UI meters; contains no audio samples."""
+        return max(0.0, min(1.0, self._last_rms / 0.2))
+
+    @property
+    def stream_open(self) -> bool:
+        return self._stream is not None
 
     def _stream_is_stale(self) -> bool:
         """A long-open stream can die silently when the Windows default audio
@@ -85,9 +121,7 @@ class AudioRecorder:
     def reset_stream(self):
         """Force-close so the next open re-binds to the CURRENT default device."""
         log.warning("Resetting mic stream (stale or unhealthy)")
-        with self._lock:
-            self._preroll.clear()
-            self._preroll_total = 0
+        self.clear_preroll()
         self._close_stream()
         if self.keep_stream_open:
             try:

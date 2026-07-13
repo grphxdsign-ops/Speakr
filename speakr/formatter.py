@@ -3,6 +3,7 @@ via Ollama (never any remote service)."""
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 import subprocess
@@ -10,10 +11,35 @@ import sys
 import threading
 import time
 from collections import deque
+from urllib.parse import urlsplit
 
 import requests
 
 log = logging.getLogger("speakr.formatter")
+
+
+def _local_ollama_url(value) -> str | None:
+    """Return a canonical loopback HTTP origin, or None for a remote URL."""
+    try:
+        parsed = urlsplit(str(value).strip())
+        if parsed.scheme != "http" or parsed.username or parsed.password:
+            return None
+        if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+            return None
+        host = (parsed.hostname or "").casefold()
+        if host == "localhost":
+            host = "127.0.0.1"
+        else:
+            address = ipaddress.ip_address(host)
+            if not address.is_loopback:
+                return None
+            host = f"[{address.compressed}]" if address.version == 6 else address.compressed
+        port = parsed.port or 11434
+        if not (1 <= port <= 65535):
+            return None
+        return f"http://{host}:{port}"
+    except (TypeError, ValueError):
+        return None
 
 # Standalone hesitation sounds, with any trailing punctuation ("Um...", "uh,").
 FILLER_RE = re.compile(
@@ -151,11 +177,33 @@ class Formatter:
         self._autostart_attempted = False
         self._reprobing = False
         self._recent: deque[str] = deque(maxlen=3)
+        self._status_callback = None
+
+    def set_status_callback(self, callback):
+        """Publish reachability-only changes to the sanitized UI state."""
+        self._status_callback = callback
+
+    def _publish_status(self):
+        callback = self._status_callback
+        if callback is None:
+            return
+        try:
+            callback(self._ollama_ok is True)
+        except Exception:
+            log.debug("Cleanup status callback failed", exc_info=True)
+
+    def _ollama_url(self):
+        return _local_ollama_url(
+            self.config.get("formatting", "ollama_url", default="")
+        )
 
     def note_result(self, text: str):
         """Remember what was just dictated — context for the next utterance."""
         if text:
             self._recent.append(text)
+
+    def clear_recent_context(self):
+        self._recent.clear()
 
     def format(self, text: str, app_context: dict | None) -> str:
         if not text:
@@ -192,10 +240,13 @@ class Formatter:
         fmt = self.config.get("formatting", default={})
         if not (fmt.get("enabled", True) and fmt.get("use_ollama", True) and self._ollama_available()):
             return None
+        url = self._ollama_url()
+        if url is None:
+            return None
         exe = (app_context or {}).get("exe", "unknown app")
         try:
             resp = requests.post(
-                f"{fmt['ollama_url']}/api/chat",
+                f"{url}/api/chat",
                 json={
                     "model": fmt["ollama_model"],
                     "stream": False,
@@ -219,6 +270,7 @@ class Formatter:
         except (requests.RequestException, KeyError, ValueError) as exc:
             log.warning("Edit-mode request failed: %s", exc)
             self._ollama_ok = None
+            self._publish_status()
             return None
         if not edited:
             log.warning("Edit-mode produced empty output; leaving selection untouched")
@@ -231,11 +283,15 @@ class Formatter:
         """Called once at startup: if Ollama is installed but not running,
         start it locally so the LLM pass (corrections, lists, tone) works."""
         fmt = self.config.get("formatting", default={})
-        if not (fmt.get("use_ollama", True) and fmt.get("autostart_ollama", True)):
+        if not fmt.get("use_ollama", True):
+            self._ollama_ok = False
+            self._publish_status()
             return
         if self._probe():
             self._warn_if_model_missing()
             self._prewarm()
+            return
+        if not fmt.get("autostart_ollama", True):
             return
         self._autostart_attempted = True
         if sys.platform == "win32":
@@ -266,10 +322,13 @@ class Formatter:
         """Load the formatting model into memory now so the first dictation
         doesn't pay the multi-second cold start."""
         fmt = self.config.get("formatting")
+        url = self._ollama_url()
+        if url is None:
+            return
         try:
             started = time.monotonic()
             requests.post(
-                f"{fmt['ollama_url']}/api/chat",
+                f"{url}/api/chat",
                 json={
                     "model": fmt["ollama_model"],
                     "stream": False,
@@ -279,15 +338,24 @@ class Formatter:
                 },
                 timeout=120,
             ).raise_for_status()
+            self._ollama_ok = True
+            self._ollama_checked_at = time.monotonic()
+            self._publish_status()
             log.info("Ollama model %s pre-warmed in %.1fs", fmt["ollama_model"], time.monotonic() - started)
         except requests.RequestException as exc:
+            self._ollama_ok = False
+            self._ollama_checked_at = time.monotonic()
+            self._publish_status()
             log.warning("Ollama pre-warm failed: %s", exc)
 
     def _warn_if_model_missing(self):
         fmt = self.config.get("formatting")
+        url = self._ollama_url()
+        if url is None:
+            return
         wanted = fmt["ollama_model"].split(":")[0]
         try:
-            tags = requests.get(f"{fmt['ollama_url']}/api/tags", timeout=2).json()
+            tags = requests.get(f"{url}/api/tags", timeout=2).json()
             names = [m.get("name", "") for m in tags.get("models", [])]
         except (requests.RequestException, ValueError):
             return
@@ -298,12 +366,19 @@ class Formatter:
             )
 
     def _probe(self) -> bool:
-        url = self.config.get("formatting", "ollama_url")
+        url = self._ollama_url()
+        if url is None:
+            self._ollama_ok = False
+            self._ollama_checked_at = time.monotonic()
+            self._publish_status()
+            return False
         try:
             self._ollama_ok = requests.get(f"{url}/api/tags", timeout=1.5).ok
         except requests.RequestException:
             self._ollama_ok = False
         self._ollama_checked_at = time.monotonic()
+        if not self._ollama_ok:
+            self._publish_status()
         return self._ollama_ok
 
     def _ollama_available(self) -> bool:
@@ -331,6 +406,9 @@ class Formatter:
     def _ollama_clean(self, text: str, tone: str, exe: str, title: str,
                       screen_text: str = "") -> str | None:
         fmt = self.config.get("formatting")
+        url = self._ollama_url()
+        if url is None:
+            return None
         app_line = ""
         if exe:
             app_line = f"\nThe user is dictating into {exe}"
@@ -350,7 +428,7 @@ class Formatter:
             )
         try:
             resp = requests.post(
-                f"{fmt['ollama_url']}/api/chat",
+                f"{url}/api/chat",
                 json={
                     "model": fmt["ollama_model"],
                     "stream": False,
@@ -380,6 +458,7 @@ class Formatter:
         except (requests.RequestException, KeyError, ValueError) as exc:
             log.warning("Ollama formatting failed, using rule-based output: %s", exc)
             self._ollama_ok = None  # force re-probe next time
+            self._publish_status()
             return None
 
         if data.get("is_list") and isinstance(data.get("list_items"), list) and len(data["list_items"]) >= 2:
