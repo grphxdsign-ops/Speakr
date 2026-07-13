@@ -13,6 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
 from speakr import native_window
+from speakr.interface_state import InterfaceState
 
 
 class EffectResolutionTests(unittest.TestCase):
@@ -181,6 +182,18 @@ class WindowsAdapterTests(unittest.TestCase):
         adapter.restore_material()
         self.assertIn((1234, 38, 1), dwm.calls)
 
+    def test_detach_restores_all_dwm_attributes_and_forgets_handle(self):
+        dwm = self._Dwm()
+        adapter = native_window._WindowsAdapter(build=22621, dwmapi=dwm)
+        self.assertTrue(adapter.apply_material(self._Window(), "dark"))
+
+        adapter.detach()
+
+        self.assertIn((1234, 38, 1), dwm.calls)
+        self.assertIn((1234, 33, 0), dwm.calls)
+        self.assertIn((1234, 20, 0), dwm.calls)
+        self.assertEqual(adapter._hwnd, 0)
+
     def test_old_build_or_failed_backdrop_never_claims_mica(self):
         old = native_window._WindowsAdapter(build=22000, dwmapi=self._Dwm())
         self.assertFalse(old.native_available())
@@ -257,6 +270,74 @@ class MacAdapterTests(unittest.TestCase):
         self.assertTrue(adapter.apply_material(window, "light"))
         self.assertEqual(Effect.allocations, 1)
         self.assertEqual(native.content.added, 1)
+
+    def test_failed_material_cleanup_keeps_state_for_retry(self):
+        class Effect:
+            def __init__(self): self.failures = 1
+            def removeFromSuperview(self):
+                if self.failures:
+                    self.failures -= 1
+                    raise RuntimeError("transient remove failure")
+
+        class Native:
+            def __init__(self):
+                self.opacity = []
+                self.backgrounds = []
+            def setOpaque_(self, value): self.opacity.append(value)
+            def setBackgroundColor_(self, value): self.backgrounds.append(value)
+
+        adapter = native_window._MacAdapter(
+            appkit=SimpleNamespace(NSVisualEffectView=object()),
+            objc_module=object(),
+        )
+        effect = Effect()
+        native = Native()
+        adapter._effect_view = effect
+        adapter._native_window = native
+        adapter._was_opaque = True
+        adapter._background_color = "original"
+
+        self.assertFalse(adapter.restore_material())
+        self.assertIs(adapter._effect_view, effect)
+        self.assertEqual(adapter._background_color, "original")
+
+        self.assertTrue(adapter.restore_material())
+        self.assertIsNone(adapter._effect_view)
+        self.assertIsNone(adapter._was_opaque)
+        self.assertIsNone(adapter._background_color)
+
+    def test_failed_chrome_cleanup_keeps_state_for_retry(self):
+        class Button:
+            def __init__(self): self.hidden = None
+            def setHidden_(self, value): self.hidden = value
+
+        class Native:
+            def __init__(self):
+                self.style_failures = 1
+                self.button = Button()
+            def setStyleMask_(self, _value):
+                if self.style_failures:
+                    self.style_failures -= 1
+                    raise RuntimeError("transient style failure")
+            def setTitlebarAppearsTransparent_(self, _value): pass
+            def setTitleVisibility_(self, _value): pass
+            def standardWindowButton_(self, _kind): return self.button
+
+        adapter = native_window._MacAdapter(
+            appkit=SimpleNamespace(NSVisualEffectView=object()),
+            objc_module=object(),
+        )
+        native = Native()
+        state = (15, False, 0, [(1, False)])
+        adapter._native_window = native
+        adapter._chrome_state = state
+
+        self.assertFalse(adapter.restore_custom_chrome(None))
+        self.assertIs(adapter._chrome_state, state)
+
+        self.assertTrue(adapter.restore_custom_chrome(None))
+        self.assertIsNone(adapter._chrome_state)
+        self.assertFalse(native.button.hidden)
 
 
 try:
@@ -377,6 +458,35 @@ class NativeControllerTests(unittest.TestCase):
             controller.detach()
             window.deleteLater()
 
+    def test_explicit_high_contrast_theme_forces_solid_effects_off(self):
+        adapter = _FakeAdapter()
+        controller = native_window.NativeWindowController(
+            qt=self.qt,
+            visual_effects="full",
+            platform_name="win32",
+            adapter=adapter,
+        )
+        window = QQuickWindow()
+        try:
+            controller.attach(window)
+            self.assertEqual(controller.material, "mica")
+
+            qt_ui._apply_native_preferences(
+                controller,
+                self.qt,
+                {
+                    "ui": {"theme": "high_contrast", "visual_effects": "full"},
+                    "system_high_contrast": False,
+                    "system_reduce_transparency": False,
+                },
+            )
+
+            self.assertEqual(controller.effectTier, "off")
+            self.assertEqual(controller.material, "solid")
+        finally:
+            controller.detach()
+            window.deleteLater()
+
     def test_custom_chrome_failure_restores_normal_window_flags(self):
         adapter = _FakeAdapter(chrome_succeeds=False)
         controller = native_window.NativeWindowController(
@@ -480,6 +590,90 @@ Window {
             self.assertFalse(preferences["system_high_contrast"])
         finally:
             qt_ui._SYSTEM_ACCESSIBILITY = previous
+
+    def test_native_ui_disconnects_system_callbacks_before_teardown(self):
+        class App:
+            def __init__(self):
+                self.interface_state = InterfaceState(
+                    {"availability": "ready", "enabled": True}
+                )
+                self.enabled = True
+                self._qt_frontend = None
+
+            @staticmethod
+            def settings_snapshot():
+                return {
+                    "ui": {
+                        "onboarding_complete": True,
+                        "open_window_on_start": False,
+                        "theme": "system",
+                        "visual_effects": "off",
+                        "density": "comfortable",
+                        "text_scale": "system",
+                        "reduced_motion": "reduce",
+                        "hud_visibility": "off",
+                        "hud_size": "standard",
+                        "hud_edge": "bottom",
+                        "hud_scale": 100,
+                        "background_announcements": False,
+                    },
+                    "hotkey": "right ctrl",
+                    "toggle_mode": False,
+                    "app_tones": {},
+                    "hotkey_exclude_apps": [],
+                }
+
+            @staticmethod
+            def practice_snapshot(): return {}
+            @staticmethod
+            def list_manual_words(): return []
+            @staticmethod
+            def list_learned_words(): return []
+            @staticmethod
+            def subscribe_settings(_callback): return lambda: None
+            @staticmethod
+            def subscribe_practice(_callback): return lambda: None
+
+            def _start_core(self):
+                QApplication.instance().quit()
+
+        accessibility = {
+            "system_high_contrast": False,
+            "system_reduced_motion": False,
+            "system_reduce_transparency": False,
+        }
+        with mock.patch.object(
+            qt_ui,
+            "_system_accessibility_preferences",
+            return_value=accessibility,
+        ) as preferences:
+            self.assertEqual(qt_ui.run_native_ui(App()), 0)
+            calls_after_cleanup = preferences.call_count
+
+            self.qapp.paletteChanged.emit(self.qapp.palette())
+            self.qapp.applicationStateChanged.emit(
+                self.qt.Qt.ApplicationState.ApplicationActive
+            )
+            self.qapp.processEvents()
+
+            self.assertEqual(preferences.call_count, calls_after_cleanup)
+
+            with mock.patch.object(
+                qt_ui,
+                "_create_qml_root",
+                side_effect=qt_ui.QtUnavailable("synthetic QML failure"),
+            ):
+                with self.assertRaises(qt_ui.QtUnavailable):
+                    qt_ui.run_native_ui(App())
+            calls_after_failed_startup = preferences.call_count
+
+            self.qapp.paletteChanged.emit(self.qapp.palette())
+            self.qapp.applicationStateChanged.emit(
+                self.qt.Qt.ApplicationState.ApplicationActive
+            )
+            self.qapp.processEvents()
+
+            self.assertEqual(preferences.call_count, calls_after_failed_startup)
 
 
 if __name__ == "__main__":

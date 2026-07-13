@@ -333,6 +333,22 @@ class _WindowsAdapter(_NullAdapter):
                 self._DWMWA_SYSTEMBACKDROP_TYPE,
                 self._DWMSBT_NONE,
             )
+            self._set_int(
+                self._hwnd,
+                self._DWMWA_WINDOW_CORNER_PREFERENCE,
+                0,
+            )
+            self._set_int(
+                self._hwnd,
+                self._DWMWA_USE_IMMERSIVE_DARK_MODE,
+                0,
+            )
+
+    def detach(self) -> None:
+        try:
+            self.restore_material()
+        finally:
+            self._hwnd = 0
 
     def enable_custom_chrome(self, _window: Any) -> bool:
         # Qt owns the frameless flag; this adapter supplies DWM behavior and
@@ -412,7 +428,8 @@ class _MacAdapter(_NullAdapter):
             native_window = qt_view.window()
             if self._effect_view is not None and self._native_window is native_window:
                 return True
-            self.restore_material()
+            if not self.restore_material():
+                return False
             content = native_window.contentView()
             effect = self._appkit.NSVisualEffectView.alloc().initWithFrame_(
                 content.bounds()
@@ -443,20 +460,37 @@ class _MacAdapter(_NullAdapter):
             self.restore_material()
             return False
 
-    def restore_material(self) -> None:
-        try:
-            if self._effect_view is not None:
+    def restore_material(self) -> bool:
+        restored = True
+        if self._effect_view is not None:
+            try:
                 self._effect_view.removeFromSuperview()
-            if self._native_window is not None:
-                if self._was_opaque is not None:
+            except Exception:
+                restored = False
+                log.debug("Could not remove macOS Vibrancy view", exc_info=True)
+        if self._was_opaque is not None:
+            try:
+                if self._native_window is None:
+                    restored = False
+                else:
                     self._native_window.setOpaque_(self._was_opaque)
-                if self._background_color is not None:
+            except Exception:
+                restored = False
+                log.debug("Could not restore macOS window opacity", exc_info=True)
+        if self._background_color is not None:
+            try:
+                if self._native_window is None:
+                    restored = False
+                else:
                     self._native_window.setBackgroundColor_(self._background_color)
-        except Exception:
-            log.debug("Could not remove macOS Vibrancy", exc_info=True)
-        self._effect_view = None
-        self._was_opaque = None
-        self._background_color = None
+            except Exception:
+                restored = False
+                log.debug("Could not restore macOS window background", exc_info=True)
+        if restored:
+            self._effect_view = None
+            self._was_opaque = None
+            self._background_color = None
+        return restored
 
     def enable_custom_chrome(self, window: Any) -> bool:
         if not self._load():
@@ -505,27 +539,47 @@ class _MacAdapter(_NullAdapter):
             self.restore_custom_chrome(window)
             return False
 
-    def restore_custom_chrome(self, _window: Any) -> None:
-        try:
-            if self._native_window is None:
-                return
-            if self._chrome_state is not None:
-                style, transparent, visibility, button_states = self._chrome_state
-                self._native_window.setStyleMask_(style)
-                self._native_window.setTitlebarAppearsTransparent_(transparent)
-                self._native_window.setTitleVisibility_(visibility)
-                for kind, was_hidden in button_states:
-                    button = self._native_window.standardWindowButton_(kind)
-                    if button is not None and was_hidden is not None:
-                        button.setHidden_(was_hidden)
-        except Exception:
-            log.debug("Could not restore macOS system chrome", exc_info=True)
-        self._chrome_state = None
+    def restore_custom_chrome(self, _window: Any) -> bool:
+        if self._chrome_state is None:
+            return True
+        if self._native_window is None:
+            return False
+        restored = True
+        style, transparent, visibility, button_states = self._chrome_state
+        for description, operation in (
+            ("style", lambda: self._native_window.setStyleMask_(style)),
+            (
+                "titlebar transparency",
+                lambda: self._native_window.setTitlebarAppearsTransparent_(transparent),
+            ),
+            (
+                "title visibility",
+                lambda: self._native_window.setTitleVisibility_(visibility),
+            ),
+        ):
+            try:
+                operation()
+            except Exception:
+                restored = False
+                log.debug("Could not restore macOS %s", description, exc_info=True)
+        for kind, was_hidden in button_states:
+            try:
+                button = self._native_window.standardWindowButton_(kind)
+                if button is not None and was_hidden is not None:
+                    button.setHidden_(was_hidden)
+            except Exception:
+                restored = False
+                log.debug("Could not restore a macOS caption button", exc_info=True)
+        if restored:
+            self._chrome_state = None
+        return restored
 
-    def detach(self) -> None:
-        self.restore_material()
-        self._chrome_state = None
-        self._native_window = None
+    def detach(self) -> bool:
+        chrome_restored = self.restore_custom_chrome(None)
+        material_restored = self.restore_material()
+        if chrome_restored and material_restored:
+            self._native_window = None
+        return chrome_restored and material_restored
 
 
 def _adapter_for_platform(platform_name: str):

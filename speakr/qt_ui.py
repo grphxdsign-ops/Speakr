@@ -206,6 +206,14 @@ def _copy_list(value: Any) -> list:
     return []
 
 
+def _with_system_accessibility(value: Any) -> dict[str, Any]:
+    """Merge current non-content OS accessibility state into a snapshot."""
+
+    settings = _copy_mapping(value)
+    settings.update(_system_accessibility_preferences())
+    return settings
+
+
 def _callable(app: Any, *names: str):
     for name in names:
         candidate = getattr(app, name, None)
@@ -642,7 +650,7 @@ def _bridge_type(qt):
 
         @Slot(object)
         def _accept_settings(self, snapshot):
-            settings = _copy_mapping(snapshot)
+            settings = _with_system_accessibility(snapshot)
             if settings != self._settings:
                 self._settings = settings
                 self.settingsChanged.emit()
@@ -1069,14 +1077,10 @@ def _bridge_type(qt):
             method = _callable(self._app, "settings_snapshot")
             if method:
                 try:
-                    settings = _copy_mapping(method())
-                    settings.update(_system_accessibility_preferences())
-                    return settings
+                    return _with_system_accessibility(method())
                 except Exception:
                     log.exception("Could not read settings snapshot")
-            settings = _legacy_settings_snapshot(self._app)
-            settings.update(_system_accessibility_preferences())
-            return settings
+            return _with_system_accessibility(_legacy_settings_snapshot(self._app))
 
         def _read_practice(self):
             method = _callable(self._app, "practice_snapshot")
@@ -1306,6 +1310,41 @@ def _effective_native_theme(qt, preference: object) -> str:
         return "light"
 
 
+def _apply_native_preferences(
+    native_window, qt, settings: Any, accessibility: Any = None
+) -> None:
+    """Apply user and OS preferences with explicit High Contrast priority."""
+
+    snapshot = _copy_mapping(settings)
+    ui = _copy_mapping(snapshot.get("ui"))
+    environment = snapshot if accessibility is None else _copy_mapping(accessibility)
+    theme_preference = str(ui.get("theme", "system")).lower()
+    native_window.update_environment(
+        high_contrast=(
+            theme_preference == "high_contrast"
+            or bool(environment.get("system_high_contrast", False))
+        ),
+        reduce_transparency=bool(
+            environment.get("system_reduce_transparency", False)
+        ),
+    )
+    native_window.applyVisualPreferences(
+        _effective_native_theme(qt, theme_preference),
+        str(ui.get("visual_effects", "system")),
+    )
+
+
+def _disconnect_signal_callbacks(connections: list[tuple[Any, Any]]) -> None:
+    """Disconnect registered Qt callbacks before their captured state closes."""
+
+    while connections:
+        signal, callback = connections.pop()
+        try:
+            signal.disconnect(callback)
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+
+
 def _build_tray(qt, app, bridge, icon):
     tray = qt.QSystemTrayIcon(icon)
     menu = qt.QMenu()
@@ -1426,17 +1465,24 @@ def run_native_ui(app):
     tray = None
     qml_roots = []
     qml_components = []
+    system_preference_connections = []
     try:
         bridge = Bridge(app, getattr(app, "interface_state", None))
         engine.rootContext().setContextProperty("bridge", bridge)
 
         native_settings, accessibility = _native_preferences(app)
         native_ui = _copy_mapping(native_settings.get("ui"))
+        explicit_high_contrast = (
+            str(native_ui.get("theme", "system")).lower() == "high_contrast"
+        )
         native_window = NativeWindowController(
             qt=qt,
             theme=_effective_native_theme(qt, native_ui.get("theme", "system")),
             visual_effects=str(native_ui.get("visual_effects", "system")),
-            high_contrast=bool(accessibility.get("system_high_contrast", False)),
+            high_contrast=(
+                explicit_high_contrast
+                or bool(accessibility.get("system_high_contrast", False))
+            ),
             reduce_transparency=bool(
                 accessibility.get("system_reduce_transparency", False)
             ),
@@ -1445,18 +1491,7 @@ def run_native_ui(app):
         engine.rootContext().setContextProperty("nativeWindow", native_window)
 
         def sync_native_preferences(*_args):
-            settings = bridge.settings
-            ui = _copy_mapping(settings.get("ui"))
-            native_window.update_environment(
-                high_contrast=bool(settings.get("system_high_contrast", False)),
-                reduce_transparency=bool(
-                    settings.get("system_reduce_transparency", False)
-                ),
-            )
-            native_window.applyVisualPreferences(
-                _effective_native_theme(qt, ui.get("theme", "system")),
-                str(ui.get("visual_effects", "system")),
-            )
+            _apply_native_preferences(native_window, qt, bridge.settings)
 
         bridge.settingsChanged.connect(sync_native_preferences)
 
@@ -1464,20 +1499,21 @@ def run_native_ui(app):
             global _SYSTEM_ACCESSIBILITY
             _SYSTEM_ACCESSIBILITY = None
             current = _system_accessibility_preferences()
-            sync_native_preferences()
-            native_window.update_environment(
-                high_contrast=bool(current.get("system_high_contrast", False)),
-                reduce_transparency=bool(
-                    current.get("system_reduce_transparency", False)
-                ),
-            )
+            _apply_native_preferences(native_window, qt, bridge.settings, current)
             bridge.refresh()
 
         qapp.paletteChanged.connect(refresh_system_preferences)
-        qapp.applicationStateChanged.connect(
+        system_preference_connections.append(
+            (qapp.paletteChanged, refresh_system_preferences)
+        )
+        application_state_callback = (
             lambda state: refresh_system_preferences()
             if state == qt.Qt.ApplicationState.ApplicationActive
             else None
+        )
+        qapp.applicationStateChanged.connect(application_state_callback)
+        system_preference_connections.append(
+            (qapp.applicationStateChanged, application_state_callback)
         )
 
         main_root, main_component = _create_qml_root(
@@ -1501,6 +1537,7 @@ def run_native_ui(app):
         if start_core is not None:
             qt.QTimer.singleShot(120, start_core)
     except QtUnavailable:
+        _disconnect_signal_callbacks(system_preference_connections)
         if tray is not None:
             tray.hide()
         if bridge is not None:
@@ -1516,6 +1553,7 @@ def run_native_ui(app):
         engine.deleteLater()
         raise
     except Exception as exc:
+        _disconnect_signal_callbacks(system_preference_connections)
         if tray is not None:
             tray.hide()
         if bridge is not None:
@@ -1534,6 +1572,7 @@ def run_native_ui(app):
     try:
         return int(qapp.exec())
     finally:
+        _disconnect_signal_callbacks(system_preference_connections)
         if tray is not None:
             tray.hide()
         if bridge is not None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -152,6 +153,59 @@ class BridgeTests(unittest.TestCase):
             self.assertTrue(bridge.addReplacement("heard", "intended"))
         finally:
             bridge.close()
+
+    def test_subscription_snapshots_retain_current_system_accessibility(self):
+        class App:
+            def __init__(self):
+                self.interface_state = InterfaceState({"availability": "ready"})
+                self.enabled = True
+                self.settings_callback = None
+
+            @staticmethod
+            def settings_snapshot():
+                return {"ui": {"theme": "system"}}
+
+            @staticmethod
+            def practice_snapshot():
+                return {}
+
+            def subscribe_settings(self, callback):
+                self.settings_callback = callback
+                return lambda: None
+
+        accessibility = {
+            "system_high_contrast": True,
+            "system_reduced_motion": False,
+            "system_reduce_transparency": True,
+        }
+        app = App()
+        with mock.patch.object(
+            qt_ui, "_system_accessibility_preferences", return_value=accessibility
+        ):
+            bridge = qt_ui.Bridge(app)
+            try:
+                self.assertTrue(bridge.settings["system_high_contrast"])
+                self.assertTrue(bridge.settings["system_reduce_transparency"])
+
+                app.settings_callback(
+                    {
+                        "ui": {"theme": "dark"},
+                        "system_high_contrast": False,
+                        "system_reduce_transparency": False,
+                    }
+                )
+                self.qapp.processEvents()
+
+                self.assertEqual(bridge.settings["ui"]["theme"], "dark")
+                self.assertTrue(bridge.settings["system_high_contrast"])
+                self.assertTrue(bridge.settings["system_reduce_transparency"])
+
+                bridge.refresh()
+                self.qapp.processEvents()
+                self.assertTrue(bridge.settings["system_high_contrast"])
+                self.assertTrue(bridge.settings["system_reduce_transparency"])
+            finally:
+                bridge.close()
 
 
 if __name__ == "__main__":
