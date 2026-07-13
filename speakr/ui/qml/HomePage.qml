@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -62,8 +64,7 @@ Item {
 
     function statusDetail() {
         var custom = value(appState, "secondary", "")
-        if (custom.length > 0)
-            return custom
+        if (custom.length > 0) return custom
         if (value(appState, "availability", "starting") === "needs_attention")
             return qsTr("Use the recovery action below, then try again.")
         if (value(appState, "capture", "idle") === "listening")
@@ -75,8 +76,7 @@ Item {
             return qsTr("The local GPU was unavailable. Dictation continues on CPU.")
         if (statusCode === "formatting_fallback")
             return qsTr("Optional Ollama cleanup is unavailable. Basic cleanup remains active.")
-        if (statusCode === "no_speech")
-            return qsTr("Try again when you are ready.")
+        if (statusCode === "no_speech") return qsTr("Try again when you are ready.")
         return qsTr("Hold your shortcut, speak, then release to insert text.")
     }
 
@@ -91,27 +91,15 @@ Item {
                 .indexOf(String(value(appState, "status_code", "ready"))) >= 0
     }
 
-    function statusGlyph() {
-        if (statusIsError()) return "!"
-        if (statusIsWarning()) return "i"
-        if (!value(appState, "enabled", true)) return "○"
-        if (value(appState, "capture", "idle") === "listening") return "●"
+    function statusKind() {
+        if (statusIsError()) return "danger"
+        if (statusIsWarning()) return "warning"
+        if (!value(appState, "enabled", true)) return "neutral"
+        if (value(appState, "capture", "idle") === "listening") return "active"
         var pipeline = value(appState, "pipeline", "idle")
-        if (pipeline === "success" || (pipeline === "idle"
-                                      && value(appState, "availability", "starting") === "ready"))
-            return "✓"
-        return "…"
-    }
-
-    function statusColor() {
-        if (statusIsError()) return tokens.danger
-        if (statusIsWarning()) return tokens.warning
-        var pipeline = value(appState, "pipeline", "idle")
-        if (pipeline === "success" || (pipeline === "idle"
-                                      && value(appState, "availability", "starting") === "ready"
-                                      && value(appState, "enabled", true)))
-            return tokens.success
-        return tokens.accent
+        return pipeline === "success" || (pipeline === "idle"
+                                          && value(appState, "availability", "starting") === "ready")
+                ? "success" : "active"
     }
 
     function issueAction() {
@@ -189,11 +177,13 @@ Item {
 
             Item { Layout.preferredHeight: root.tokens.space8 }
 
-            RowLayout {
+            GridLayout {
                 Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
-                spacing: root.tokens.space16
+                Layout.leftMargin: root.tokens.space24
+                Layout.rightMargin: root.tokens.space24
+                columns: width >= root.tokens.metric(520) ? 2 : 1
+                columnSpacing: root.tokens.space16
+                rowSpacing: root.tokens.space8
 
                 PlainText {
                     id: pageHeading
@@ -207,86 +197,68 @@ Item {
                     Accessible.name: text
                 }
 
-                QuietSwitch {
-                    tokens: root.tokens
-                    checked: root.value(root.appState, "enabled", true)
-                    accessibleName: qsTr("Dictation")
-                    accessibleDescription: checked
-                                           ? qsTr("Dictation is on")
-                                           : qsTr("Dictation is off and the microphone stream is closed")
-                    onToggled: bridge.toggleDictation()
+                RowLayout {
+                    Layout.alignment: width >= root.tokens.metric(520) ? Qt.AlignRight : Qt.AlignLeft
+                    spacing: root.tokens.space8
+
+                    PlainText {
+                        text: root.value(root.appState, "enabled", true)
+                              ? qsTr("Dictation on") : qsTr("Dictation off")
+                        color: root.tokens.text
+                        font.family: root.tokens.fontFamily
+                        font.pixelSize: root.tokens.body
+                        font.weight: Font.DemiBold
+                        Accessible.ignored: true
+                    }
+                    QuietSwitch {
+                        objectName: "dictationSwitch"
+                        tokens: root.tokens
+                        checked: root.value(root.appState, "enabled", true)
+                        accessibleName: qsTr("Dictation")
+                        accessibleDescription: checked
+                                               ? qsTr("Dictation is on")
+                                               : qsTr("Dictation is off and the microphone stream is closed")
+                        onToggled: bridge.toggleDictation()
+                    }
                 }
             }
 
-            Rectangle {
+            GlassSurface {
+                id: readinessHero
+                objectName: "readinessHero"
                 Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
-                implicitHeight: statusContent.implicitHeight + root.tokens.space32
-                radius: root.tokens.radiusLarge
-                color: root.statusIsError()
-                       ? root.tokens.dangerSurface : root.tokens.surface
-                border.width: 1
-                border.color: root.statusIsError()
-                              ? root.tokens.danger : root.tokens.border
+                Layout.leftMargin: root.tokens.space24
+                Layout.rightMargin: root.tokens.space24
+                implicitHeight: heroContent.implicitHeight + padding * 2
+                tokens: root.tokens
+                role: "major"
+                fillColor: root.statusIsError() ? root.tokens.dangerSurface
+                                                : root.tokens.majorSurface
+                edgeColor: root.statusIsError() ? root.tokens.danger : root.tokens.border
 
                 ColumnLayout {
-                    id: statusContent
+                    id: heroContent
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.margins: root.tokens.space16
-                    spacing: root.tokens.space12
+                    spacing: root.tokens.space16
 
-                    RowLayout {
+                    GridLayout {
                         Layout.fillWidth: true
-                        spacing: root.tokens.space12
+                        columns: width >= root.tokens.metric(500) ? 2 : 1
+                        columnSpacing: root.tokens.space16
+                        rowSpacing: root.tokens.space12
 
-                        Rectangle {
-                            Layout.alignment: Qt.AlignTop
-                            implicitWidth: root.tokens.metric(28)
-                            implicitHeight: implicitWidth
-                            Layout.preferredWidth: implicitWidth
-                            Layout.preferredHeight: implicitHeight
-                            radius: width / 2
-                            color: root.statusColor()
-                            Accessible.ignored: true
-
-                            PlainText {
-                                anchors.centerIn: parent
-                                text: root.statusGlyph()
-                                color: root.tokens.highContrast
-                                       && (root.statusIsError() || root.statusIsWarning())
-                                       ? root.tokens.background : root.tokens.accentText
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.statusHeading
-                                font.weight: Font.Bold
-                            }
-                        }
-
-                        ColumnLayout {
+                        RowLayout {
                             Layout.fillWidth: true
-                            spacing: root.tokens.space4
+                            spacing: root.tokens.space12
 
-                            PlainText {
+                            StatusOrb {
+                                Layout.alignment: Qt.AlignTop
                                 Layout.fillWidth: true
-                                text: root.statusText()
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.statusHeading
-                                font.weight: Font.DemiBold
-                                wrapMode: Text.Wrap
-                                Accessible.role: Accessible.Heading
-                                Accessible.name: text
-                            }
-
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: root.statusDetail()
-                                color: root.tokens.mutedText
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.secondary
-                                wrapMode: Text.Wrap
+                                tokens: root.tokens
+                                statusKind: root.statusKind()
+                                label: root.statusText()
+                                description: root.statusDetail()
                             }
                         }
 
@@ -294,16 +266,28 @@ Item {
                             visible: root.value(root.appState, "availability", "") === "needs_attention"
                                      || root.value(root.appState, "pipeline", "") === "error"
                                      || root.issueAction().length > 0
+                            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                             tokens: root.tokens
                             text: root.issueActionLabel()
+                            kind: root.statusIsError() ? "danger" : "secondary"
                             accessibleDescription: qsTr("Perform the recommended recovery action")
                             onClicked: root.runIssueAction()
                         }
                     }
 
+                    PlainText {
+                        Layout.fillWidth: true
+                        text: root.statusDetail()
+                        color: root.tokens.mutedText
+                        font.family: root.tokens.fontFamily
+                        font.pixelSize: root.tokens.body
+                        wrapMode: Text.Wrap
+                        Accessible.name: text
+                    }
+
                     SignalPath {
                         Layout.fillWidth: true
-                        Layout.maximumWidth: root.tokens.metric(520)
+                        Layout.maximumWidth: root.tokens.metric(560)
                         tokens: root.tokens
                         activeStage: root.stage()
                     }
@@ -312,166 +296,232 @@ Item {
 
             GridLayout {
                 Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
-                columns: width >= root.tokens.metric(760) ? 2 : 1
+                Layout.leftMargin: root.tokens.space24
+                Layout.rightMargin: root.tokens.space24
+                columns: width >= root.tokens.metric(680) ? 2 : 1
                 columnSpacing: root.tokens.space16
-                rowSpacing: root.tokens.space12
+                rowSpacing: root.tokens.space16
 
-                ColumnLayout {
+                GlassSurface {
                     Layout.fillWidth: true
-                    spacing: root.tokens.space8
+                    Layout.fillHeight: true
+                    implicitHeight: instructionContent.implicitHeight + padding * 2
+                    tokens: root.tokens
+                    role: "content"
+                    elevated: false
 
-                    PlainText {
-                        Layout.fillWidth: true
-                        text: root.setting("toggle_mode", false)
-                              ? qsTr("Press %1 to start and stop").arg(root.displayHotkey())
-                              : qsTr("Hold %1, speak, then release").arg(root.displayHotkey())
-                        color: root.tokens.text
-                        font.family: root.tokens.fontFamily
-                        font.pixelSize: root.tokens.sectionHeading
-                        font.weight: Font.DemiBold
-                        wrapMode: Text.Wrap
-                        Accessible.role: Accessible.Heading
-                    }
+                    ColumnLayout {
+                        id: instructionContent
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        spacing: root.tokens.space8
 
-                    PlainText {
-                        Layout.fillWidth: true
-                        text: qsTr("Speakr cleans up your words locally and inserts them at the cursor.")
-                        color: root.tokens.mutedText
-                        font.family: root.tokens.fontFamily
-                        font.pixelSize: root.tokens.body
-                        wrapMode: Text.Wrap
+                        PlainText {
+                            Layout.fillWidth: true
+                            text: root.setting("toggle_mode", false)
+                                  ? qsTr("Press %1 to start and stop").arg(root.displayHotkey())
+                                  : qsTr("Hold %1, speak, then release").arg(root.displayHotkey())
+                            color: root.tokens.text
+                            font.family: root.tokens.fontFamily
+                            font.pixelSize: root.tokens.sectionHeading
+                            font.weight: Font.DemiBold
+                            wrapMode: Text.Wrap
+                            Accessible.role: Accessible.Heading
+                            Accessible.name: text
+                        }
+
+                        PlainText {
+                            Layout.fillWidth: true
+                            text: qsTr("Speakr cleans up your words locally and inserts them at the cursor.")
+                            color: root.tokens.mutedText
+                            font.family: root.tokens.fontFamily
+                            font.pixelSize: root.tokens.body
+                            wrapMode: Text.Wrap
+                        }
                     }
                 }
 
-                ColumnLayout {
+                GlassSurface {
                     Layout.fillWidth: true
-                    spacing: root.tokens.space8
+                    Layout.fillHeight: true
+                    implicitHeight: actionContent.implicitHeight + padding * 2
+                    tokens: root.tokens
+                    role: "notice"
+                    elevated: false
 
-                    Flow {
-                        Layout.fillWidth: true
+                    ColumnLayout {
+                        id: actionContent
+                        anchors.left: parent.left
+                        anchors.right: parent.right
                         spacing: root.tokens.space12
 
-                        QuietButton {
-                            tokens: root.tokens
-                            text: bridge.capturingHotkey ? qsTr("Cancel shortcut capture") : qsTr("Change shortcut")
-                            kind: bridge.capturingHotkey ? "danger" : "secondary"
-                            accessibleDescription: bridge.capturingHotkey
-                                                   ? qsTr("Stop waiting for a new shortcut")
-                                                   : qsTr("Wait for the next key or key combination without a timeout")
-                            onClicked: bridge.capturingHotkey
-                                       ? bridge.cancelHotkeyCapture() : bridge.beginHotkeyCapture()
+                        PlainText {
+                            Layout.fillWidth: true
+                            text: qsTr("Ready when you are")
+                            color: root.tokens.text
+                            font.family: root.tokens.fontFamily
+                            font.pixelSize: root.tokens.statusHeading
+                            font.weight: Font.DemiBold
+                            wrapMode: Text.Wrap
+                            Accessible.role: Accessible.Heading
                         }
 
-                        QuietButton {
-                            visible: bridge.capturingHotkey
-                                     && String(root.value(root.appState, "pending_hotkey", "")).length > 0
-                            tokens: root.tokens
-                            text: qsTr("Use %1").arg(String(root.value(root.appState, "pending_hotkey", "")))
-                            kind: "primary"
-                            accessibleDescription: qsTr("Confirm the captured dictation shortcut")
-                            onClicked: bridge.confirmHotkey()
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: root.tokens.space12
+
+                            QuietButton {
+                                tokens: root.tokens
+                                text: bridge.capturingHotkey ? qsTr("Cancel shortcut capture") : qsTr("Change shortcut")
+                                kind: bridge.capturingHotkey ? "danger" : "secondary"
+                                accessibleDescription: bridge.capturingHotkey
+                                                       ? qsTr("Stop waiting for a new shortcut")
+                                                       : qsTr("Wait for the next key or key combination without a timeout")
+                                onClicked: bridge.capturingHotkey
+                                           ? bridge.cancelHotkeyCapture() : bridge.beginHotkeyCapture()
+                            }
+
+                            QuietButton {
+                                visible: bridge.capturingHotkey
+                                         && String(root.value(root.appState, "pending_hotkey", "")).length > 0
+                                tokens: root.tokens
+                                text: qsTr("Use %1").arg(String(root.value(root.appState, "pending_hotkey", "")))
+                                kind: "primary"
+                                accessibleDescription: qsTr("Confirm the captured dictation shortcut")
+                                onClicked: bridge.confirmHotkey()
+                            }
+
+                            QuietButton {
+                                tokens: root.tokens
+                                text: qsTr("Start Practice")
+                                kind: "primary"
+                                accessibleDescription: qsTr("Open temporary practice dictation")
+                                onClicked: root.navigateRequested("practice")
+                            }
                         }
 
-                        QuietButton {
+                        HotkeyWarning {
+                            Layout.fillWidth: true
                             tokens: root.tokens
-                            text: qsTr("Start Practice")
-                            kind: "primary"
-                            accessibleDescription: qsTr("Open temporary practice dictation")
-                            onClicked: root.navigateRequested("practice")
+                            candidate: String(root.value(root.appState, "pending_hotkey", ""))
                         }
-                    }
-
-                    HotkeyWarning {
-                        Layout.fillWidth: true
-                        tokens: root.tokens
-                        candidate: String(root.value(root.appState, "pending_hotkey", ""))
                     }
                 }
             }
 
             ColumnLayout {
                 Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
-                spacing: 0
+                Layout.leftMargin: root.tokens.space24
+                Layout.rightMargin: root.tokens.space24
+                spacing: root.tokens.space12
 
-                PlainText {
+                SectionHeading {
                     Layout.fillWidth: true
-                    Layout.bottomMargin: root.tokens.space12
-                    text: qsTr("At a glance")
-                    color: root.tokens.text
-                    font.family: root.tokens.fontFamily
-                    font.pixelSize: root.tokens.sectionHeading
-                    font.weight: Font.DemiBold
-                    Accessible.role: Accessible.Heading
+                    tokens: root.tokens
+                    title: qsTr("At a glance")
+                    description: qsTr("The local path Speakr will use for your next dictation.")
                 }
 
-                Repeater {
-                    model: [
-                        { label: qsTr("Microphone"), value: root.microphoneSummary() },
-                        { label: qsTr("Speech model"), value: String(root.value(root.appState, "model", root.setting("model", "auto"))) === "auto" ? qsTr("Automatic") : String(root.value(root.appState, "model", root.setting("model", "auto"))) },
-                        { label: qsTr("Text cleanup"), value: root.value(root.appState, "cleanup_path", "rules") === "ollama" ? qsTr("Local model cleanup available") : qsTr("Basic cleanup active") },
-                        { label: qsTr("Privacy"), value: !root.value(root.appState, "enabled", true)
-                                                         ? qsTr("Microphone closed; rolling audio cleared")
-                                                         : (root.setting("keep_mic_stream_open", true)
-                                                            ? (root.setting("microphone_stream_open", false)
-                                                               ? qsTr("%1 seconds held only in RAM").arg(root.setting("preroll_seconds", 0.4))
-                                                               : qsTr("Microphone not ready; no rolling audio held"))
-                                                            : qsTr("Microphone opens only while dictating")) }
-                    ]
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: width >= root.tokens.metric(640) ? 2 : 1
+                    columnSpacing: root.tokens.space12
+                    rowSpacing: root.tokens.space12
 
-                    delegate: Rectangle {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        implicitHeight: rowContent.implicitHeight + root.tokens.space24
-                        color: "transparent"
-                        border.width: 0
+                    Repeater {
+                        objectName: "summaryRepeater"
+                        model: [
+                            { label: qsTr("Microphone"), value: root.microphoneSummary(), symbol: "M" },
+                            { label: qsTr("Speech model"), value: String(root.value(root.appState, "model", root.setting("model", "auto"))) === "auto" ? qsTr("Automatic") : String(root.value(root.appState, "model", root.setting("model", "auto"))), symbol: "S" },
+                            { label: qsTr("Text cleanup"), value: root.value(root.appState, "cleanup_path", "rules") === "ollama" ? qsTr("Local model cleanup available") : qsTr("Basic cleanup active"), symbol: "C" },
+                            { label: qsTr("Privacy"), value: !root.value(root.appState, "enabled", true)
+                                                             ? qsTr("Microphone closed; rolling audio cleared")
+                                                             : (root.setting("keep_mic_stream_open", true)
+                                                                ? (root.setting("microphone_stream_open", false)
+                                                                   ? qsTr("%1 seconds held only in RAM").arg(root.setting("preroll_seconds", 0.4))
+                                                                   : qsTr("Microphone not ready; no rolling audio held"))
+                                                                : qsTr("Microphone opens only while dictating")), symbol: "P" }
+                        ]
 
-                        Rectangle {
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            height: 1
-                            color: root.tokens.border
-                        }
+                        delegate: GlassSurface {
+                            id: summaryCard
+                            objectName: "summaryCard"
+                            required property var modelData
+                            Layout.fillWidth: true
+                            implicitHeight: summaryContent.implicitHeight + padding * 2
+                            tokens: root.tokens
+                            role: "content"
+                            elevated: false
 
-                        GridLayout {
-                            id: rowContent
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            columns: width >= root.tokens.metric(500) ? 2 : 1
-                            columnSpacing: root.tokens.space24
-                            rowSpacing: root.tokens.space4
+                            RowLayout {
+                                id: summaryContent
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                spacing: root.tokens.space12
 
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: modelData.label
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.body
-                                font.weight: Font.Medium
-                            }
+                                Rectangle {
+                                    Layout.preferredWidth: root.tokens.controlHeight
+                                    Layout.preferredHeight: Layout.preferredWidth
+                                    radius: root.tokens.radiusControl
+                                    color: root.tokens.highContrast
+                                           ? root.tokens.accent : root.tokens.hover
+                                    border.width: root.tokens.borderWidth
+                                    border.color: root.tokens.accent
+                                    Accessible.ignored: true
 
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: modelData.value
-                                color: root.tokens.mutedText
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.body
-                                wrapMode: Text.Wrap
+                                    PlainText {
+                                        anchors.centerIn: parent
+                                        text: summaryCard.modelData.symbol
+                                        color: root.tokens.highContrast
+                                               ? root.tokens.accentText : root.tokens.accent
+                                        font.family: root.tokens.fontFamily
+                                        font.pixelSize: root.tokens.statusHeading
+                                        font.weight: Font.Bold
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: root.tokens.space4
+
+                                    PlainText {
+                                        Layout.fillWidth: true
+                                        text: summaryCard.modelData.label
+                                        color: root.tokens.text
+                                        font.family: root.tokens.fontFamily
+                                        font.pixelSize: root.tokens.body
+                                        font.weight: Font.DemiBold
+                                        wrapMode: Text.Wrap
+                                    }
+                                    PlainText {
+                                        Layout.fillWidth: true
+                                        text: summaryCard.modelData.value
+                                        color: root.tokens.mutedText
+                                        font.family: root.tokens.fontFamily
+                                        font.pixelSize: root.tokens.secondary
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
 
+            InlineNotice {
+                Layout.fillWidth: true
+                Layout.leftMargin: root.tokens.space24
+                Layout.rightMargin: root.tokens.space24
+                tokens: root.tokens
+                kind: "success"
+                title: qsTr("Private by design")
+                message: qsTr("Audio and dictated text stay on this device. Speakr keeps no transcript history.")
+            }
+
             PlainText {
                 Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
+                Layout.leftMargin: root.tokens.space24
+                Layout.rightMargin: root.tokens.space24
                 text: qsTr("Latest outcome: %1").arg(root.value(root.appState, "latest_outcome", qsTr("Ready for dictation")))
                 color: root.tokens.mutedText
                 font.family: root.tokens.fontFamily

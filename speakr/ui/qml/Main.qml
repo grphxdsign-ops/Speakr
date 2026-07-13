@@ -15,14 +15,21 @@ ApplicationWindow {
     minimumHeight: 520
     visible: false
     title: qsTr("Speakr")
-    color: tokens.background
     flags: Qt.Window
+    color: nativeMaterialActive ? "transparent" : tokens.canvas
 
+    // The native controller reads this before Component completion. A failed
+    // opt-in restores the system frame before the window is ever shown.
+    property bool customChromeReady: true
+    property var nativeController: typeof nativeWindow === "undefined" ? null : nativeWindow
     property string currentPage: "home"
     property bool forceOnboarding: false
     readonly property bool showingOnboarding: forceOnboarding
                                                || !Boolean(setting("ui.onboarding_complete", false))
     readonly property bool wideNavigation: width >= tokens.metric(860)
+    readonly property bool nativeMaterialActive: nativeController !== null
+                                                 && (nativeController.material === "mica"
+                                                     || nativeController.material === "vibrancy")
     readonly property var pageNames: ["home", "practice", "vocabulary", "settings", "help"]
     readonly property var pageLabels: [qsTr("Home"), qsTr("Practice"), qsTr("Vocabulary"), qsTr("Settings"), qsTr("Help")]
     readonly property int topNavigationColumns: Math.max(
@@ -106,6 +113,14 @@ ApplicationWindow {
                                                   root.setting("system_reduced_motion", false))))
         systemHighContrast: Boolean(root.setting("ui.system_high_contrast",
                                                  root.setting("system_high_contrast", false)))
+        visualEffects: String(root.setting("ui.visual_effects", "system"))
+        systemReduceTransparency: root.nativeController !== null
+                                  ? Boolean(root.nativeController.systemReduceTransparency)
+                                  : Boolean(root.setting("ui.system_reduce_transparency",
+                                                         root.setting("system_reduce_transparency", false)))
+        softwareRenderer: root.nativeController !== null
+                          ? Boolean(root.nativeController.softwareRenderer)
+                          : Boolean(root.setting("ui.software_renderer", false))
     }
 
     palette.window: tokens.background
@@ -122,7 +137,6 @@ ApplicationWindow {
         sequence: StandardKey.Quit
         onActivated: bridge.quitApp()
     }
-
     Shortcut {
         sequence: "Ctrl+1"
         enabled: !root.showingOnboarding
@@ -173,6 +187,10 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        if (root.nativeController !== null)
+            root.nativeController.applyVisualPreferences(
+                        String(root.setting("ui.theme", "system")),
+                        String(root.setting("ui.visual_effects", "system")))
         if (root.showingOnboarding
                 || Boolean(root.setting("ui.open_window_on_start", true))) {
             root.show()
@@ -182,178 +200,139 @@ ApplicationWindow {
         }
     }
 
-    header: Rectangle {
-        implicitHeight: Math.max(tokens.metric(64), headerContent.implicitHeight + tokens.space16)
-        color: tokens.surface
-        border.width: 0
-
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 1
-            color: tokens.border
-        }
-
-        GridLayout {
-            id: headerContent
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.leftMargin: tokens.space24
-            anchors.rightMargin: tokens.space24
-            columns: width >= tokens.metric(560) ? 2 : 1
-            columnSpacing: tokens.space24
-            rowSpacing: tokens.space4
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: tokens.space12
-
-                RowLayout {
-                    spacing: tokens.space4
-                    Accessible.role: Accessible.Graphic
-                    Accessible.name: qsTr("Speakr signal path")
-
-                    Repeater {
-                        model: 3
-                        Rectangle {
-                            required property int index
-                            implicitWidth: tokens.metric(index === 1 ? 10 : 8)
-                            implicitHeight: implicitWidth
-                            Layout.preferredWidth: implicitWidth
-                            Layout.preferredHeight: implicitHeight
-                            radius: implicitWidth / 2
-                            color: index === 1 ? tokens.accent : tokens.text
-                        }
-                    }
-                }
-
-                PlainText {
-                    text: qsTr("Speakr")
-                    color: tokens.text
-                    font.family: tokens.fontFamily
-                    font.pixelSize: tokens.sectionHeading
-                    font.weight: Font.DemiBold
-                    Accessible.role: Accessible.Heading
-                    Accessible.name: text
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.alignment: root.wideNavigation ? Qt.AlignRight : Qt.AlignLeft
-                spacing: tokens.space8
-                Accessible.role: Accessible.Note
-                Accessible.name: qsTr("Everything stays on this device")
-
-                Rectangle {
-                    implicitWidth: tokens.metric(10)
-                    implicitHeight: implicitWidth
-                    Layout.preferredWidth: implicitWidth
-                    Layout.preferredHeight: implicitHeight
-                    radius: implicitWidth / 2
-                    color: tokens.success
-                }
-
-                PlainText {
-                    Layout.fillWidth: true
-                    text: qsTr("Everything stays on this device")
-                    color: tokens.text
-                    font.family: tokens.fontFamily
-                    font.pixelSize: tokens.secondary
-                    font.weight: Font.Medium
-                    wrapMode: Text.Wrap
-                }
-            }
-        }
+    CosmicBackdrop {
+        objectName: "cosmicBackdrop"
+        anchors.fill: parent
+        tokens: tokens
+        paintCanvas: !root.nativeMaterialActive
     }
 
-    StackLayout {
+    GlassSurface {
+        id: shell
+        objectName: "luminousShell"
         anchors.fill: parent
-        currentIndex: root.showingOnboarding ? 0 : 1
-        Accessible.role: Accessible.Application
-        Accessible.name: qsTr("Speakr private dictation")
-        Accessible.description: qsTr("Local voice dictation settings and status")
+        anchors.margins: root.nativeController !== null && root.nativeController.maximized
+                         ? 0 : tokens.space8
+        tokens: tokens
+        role: "shell"
+        padding: 0
+        cornerRadius: root.nativeController !== null && root.nativeController.maximized
+                      ? 0 : tokens.radiusShell
 
-        OnboardingPage {
-            tokens: tokens
-            appState: bridge.state
-            settings: bridge.settings
-            practice: bridge.practice
-            onCompleted: {
-                root.forceOnboarding = false
-                root.go("home")
-            }
-        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
 
-        GridLayout {
-            columns: root.wideNavigation ? 2 : 1
-            rows: root.wideNavigation ? 1 : 2
-            columnSpacing: 0
-            rowSpacing: 0
-
-            Loader {
-                Layout.fillHeight: root.wideNavigation
-                Layout.fillWidth: !root.wideNavigation
-                Layout.maximumWidth: root.width
-                Layout.preferredWidth: root.wideNavigation ? tokens.metric(210) : -1
-                Layout.preferredHeight: root.wideNavigation
-                                        ? -1
-                                        : root.topNavigationRows * tokens.controlHeight
-                                          + (root.topNavigationRows - 1) * tokens.space4
-                                          + tokens.space16
-                sourceComponent: root.wideNavigation ? sideNavigation : topNavigation
+            WindowChrome {
+                id: windowChrome
+                objectName: "windowChrome"
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+                visible: root.nativeController === null
+                         || Boolean(root.nativeController.customChromeEnabled)
+                tokens: tokens
+                controller: root.nativeController
+                hostWindow: root
             }
 
-            Rectangle {
-                id: contentPanel
+            StackLayout {
+                id: productSurface
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: tokens.background
-                transform: Translate { id: contentShift; x: 0 }
+                Layout.leftMargin: tokens.space8
+                Layout.rightMargin: tokens.space8
+                Layout.bottomMargin: tokens.space8
+                currentIndex: root.showingOnboarding ? 0 : 1
+                Accessible.role: Accessible.Application
+                Accessible.name: qsTr("Speakr private dictation")
+                Accessible.description: qsTr("Local voice dictation settings and status")
 
-                StackLayout {
-                    anchors.fill: parent
-                    currentIndex: root.pageIndex(root.currentPage)
+                OnboardingPage {
+                    tokens: tokens
+                    appState: bridge.state
+                    settings: bridge.settings
+                    practice: bridge.practice
+                    onCompleted: {
+                        root.forceOnboarding = false
+                        root.go("home")
+                    }
+                }
 
-                    HomePage {
-                        id: homePage
-                        tokens: tokens
-                        appState: bridge.state
-                        settings: bridge.settings
-                        onNavigateRequested: function(page) { root.go(page) }
+                GridLayout {
+                    columns: root.wideNavigation ? 2 : 1
+                    rows: root.wideNavigation ? 1 : 2
+                    columnSpacing: tokens.space8
+                    rowSpacing: tokens.space8
+
+                    Loader {
+                        Layout.fillHeight: root.wideNavigation
+                        Layout.fillWidth: !root.wideNavigation
+                        Layout.maximumWidth: root.width
+                        Layout.preferredWidth: root.wideNavigation ? tokens.metric(210) : -1
+                        Layout.preferredHeight: root.wideNavigation
+                                                ? -1
+                                                : root.topNavigationRows * tokens.controlHeight
+                                                  + (root.topNavigationRows - 1) * tokens.space4
+                                                  + tokens.space24
+                        sourceComponent: root.wideNavigation ? sideNavigation : topNavigation
                     }
 
-                    PracticePage {
-                        id: practicePage
+                    GlassSurface {
+                        id: contentPanel
+                        objectName: "pageContentSurface"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         tokens: tokens
-                        practice: bridge.practice
-                        appState: bridge.state
-                        onNavigateRequested: function(page) { root.go(page) }
-                    }
+                        role: "content"
+                        padding: 0
+                        cornerRadius: tokens.radiusPanel
+                        elevated: false
+                        transform: Translate { id: contentShift; x: 0 }
 
-                    VocabularyPage {
-                        id: vocabularyPage
-                        tokens: tokens
-                        appState: bridge.state
-                        manualWords: bridge.manualWords
-                        learnedWords: bridge.learnedWords
-                    }
+                        StackLayout {
+                            anchors.fill: parent
+                            currentIndex: root.pageIndex(root.currentPage)
 
-                    SettingsPage {
-                        id: settingsPage
-                        tokens: tokens
-                        settings: bridge.settings
-                        appState: bridge.state
-                    }
+                            HomePage {
+                                id: homePage
+                                objectName: "homePage"
+                                tokens: tokens
+                                appState: bridge.state
+                                settings: bridge.settings
+                                onNavigateRequested: function(page) { root.go(page) }
+                            }
 
-                    HelpPage {
-                        id: helpPage
-                        tokens: tokens
-                        appState: bridge.state
-                        settings: bridge.settings
-                        onRepeatSetupRequested: root.beginRepeatSetup()
+                            PracticePage {
+                                id: practicePage
+                                tokens: tokens
+                                practice: bridge.practice
+                                appState: bridge.state
+                                onNavigateRequested: function(page) { root.go(page) }
+                            }
+
+                            VocabularyPage {
+                                id: vocabularyPage
+                                tokens: tokens
+                                appState: bridge.state
+                                manualWords: bridge.manualWords
+                                learnedWords: bridge.learnedWords
+                            }
+
+                            SettingsPage {
+                                id: settingsPage
+                                tokens: tokens
+                                settings: bridge.settings
+                                appState: bridge.state
+                            }
+
+                            HelpPage {
+                                id: helpPage
+                                tokens: tokens
+                                appState: bridge.state
+                                settings: bridge.settings
+                                onRepeatSetupRequested: root.beginRepeatSetup()
+                            }
+                        }
                     }
                 }
             }
@@ -384,7 +363,7 @@ ApplicationWindow {
         anchors.fill: parent
         visible: bridge.quitting
         z: 100
-        color: tokens.withAlpha(tokens.background, 0.94)
+        color: tokens.withAlpha(tokens.background, 0.96)
         Accessible.role: Accessible.AlertMessage
         Accessible.name: qsTr("Quitting Speakr")
 
@@ -416,23 +395,18 @@ ApplicationWindow {
     Component {
         id: sideNavigation
 
-        Rectangle {
-            color: tokens.surface
-            border.width: 0
-
-            Rectangle {
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.right: parent.right
-                width: 1
-                color: tokens.border
-            }
+        GlassSurface {
+            objectName: "sideNavigation"
+            tokens: tokens
+            role: "navigation"
+            padding: tokens.space12
+            cornerRadius: tokens.radiusPanel
+            elevated: false
 
             ColumnLayout {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.margins: tokens.space12
                 spacing: tokens.space4
                 Accessible.role: Accessible.PageTabList
                 Accessible.name: qsTr("Main navigation")
@@ -459,26 +433,20 @@ ApplicationWindow {
     Component {
         id: topNavigation
 
-        Rectangle {
-            implicitHeight: navigationGrid.implicitHeight + tokens.space16
-            color: tokens.surface
-            border.width: 0
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 1
-                color: tokens.border
-            }
+        GlassSurface {
+            objectName: "topNavigation"
+            implicitHeight: navigationGrid.implicitHeight + tokens.space24
+            tokens: tokens
+            role: "navigation"
+            padding: tokens.space12
+            cornerRadius: tokens.radiusPanel
+            elevated: false
 
             GridLayout {
                 id: navigationGrid
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: tokens.space12
-                anchors.rightMargin: tokens.space12
                 columns: root.topNavigationColumns
                 columnSpacing: tokens.space4
                 rowSpacing: tokens.space4
