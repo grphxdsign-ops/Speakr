@@ -319,6 +319,13 @@ Press `Win+R`, run `shell:startup`, and drop a shortcut to `run.bat` there.
 
 Runs unit checks plus an end-to-end transcription of the given wav.
 
+Every pull request runs the Python and native-interface contract suite on
+Python 3.11 for both supported desktop platforms. Branch protection should
+require the `Validate (Windows)` and `Validate (macOS)` checks from the
+`Pull request validation` workflow. Those jobs keep Hugging Face offline and
+force Qt's offscreen software renderer, so validation never downloads a model
+or requires a display server.
+
 Release builds package `speakr/ui/qml/` and `assets/icon.png` as local data
 alongside the Qt Quick runtime. The build refuses to run when the
 `PySide6-Addons` distribution is installed, explicitly excludes the embedded
