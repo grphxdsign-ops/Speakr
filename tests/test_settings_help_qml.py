@@ -25,12 +25,11 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 
 from speakr.interface_state import InterfaceState
 from speakr.qt_ui import Bridge
+from tests.qml_lifecycle import qml_test_application
 
 
 class _App:
@@ -243,9 +242,7 @@ class _NativeWindow(QObject):
 class SettingsHelpQmlTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if QQuickStyle.name() != "Basic":
-            QQuickStyle.setStyle("Basic")
-        cls.qapp = QApplication.instance() or QApplication([])
+        cls.qapp = qml_test_application()
         cls.root = Path(__file__).resolve().parents[1]
         cls.qml = cls.root / "speakr" / "ui" / "qml"
 

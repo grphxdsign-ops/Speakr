@@ -382,7 +382,12 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from speakr.native_window import NativeWindowController, _WindowsAdapter
-from speakr.qt_ui import Bridge, _create_qml_root, _load_qt
+from speakr.qt_ui import (
+    Bridge,
+    _create_qml_root,
+    _load_qt,
+    _normalize_system_ui_font,
+)
 from tests.test_qml_load import _App
 
 
@@ -436,6 +441,7 @@ def click_maximize_button(main):
 
 QQuickStyle.setStyle("Basic")
 application = QApplication([])
+assert _normalize_system_ui_font(application)
 application.setQuitOnLastWindowClosed(False)
 qt = _load_qt()
 user32 = ctypes.windll.user32
@@ -866,6 +872,7 @@ try:
     from PySide6.QtWidgets import QApplication
 
     from speakr import qt_ui
+    from tests.qml_lifecycle import qml_test_application
 
     _QT_AVAILABLE = qt_ui.qt_available()
 except (ImportError, OSError):
@@ -911,7 +918,7 @@ class _FakeAdapter:
 class NativeControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.qapp = QApplication.instance() or QApplication([])
+        cls.qapp = qml_test_application()
         cls.qt = qt_ui._load_qt()
 
     def test_controller_exposes_contract_and_keeps_system_frame_without_opt_in(self):

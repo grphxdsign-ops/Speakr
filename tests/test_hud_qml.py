@@ -23,14 +23,12 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem
-from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 
 from speakr.app import SpeakrApp
 from speakr.interface_state import InterfaceState
 from speakr.qt_ui import Bridge
-from tests.qml_lifecycle import dispose_qml_fixture
+from tests.qml_lifecycle import dispose_qml_fixture, qml_test_application
 from tests.test_qml_load import _App
 
 
@@ -63,9 +61,7 @@ class _NativeWindow(QObject):
 class HudQmlTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if QQuickStyle.name() != "Basic":
-            QQuickStyle.setStyle("Basic")
-        cls.qapp = QApplication.instance() or QApplication([])
+        cls.qapp = qml_test_application()
         cls.root = Path(__file__).resolve().parents[1]
         cls.qml = cls.root / "speakr" / "ui" / "qml"
         cls.hud_source = (cls.qml / "Hud.qml").read_text(encoding="utf-8")
@@ -662,6 +658,7 @@ class HudQmlTests(unittest.TestCase):
             from PySide6.QtQuickControls2 import QQuickStyle
             from PySide6.QtTest import QTest
             from PySide6.QtWidgets import QApplication, QLineEdit, QWidget
+            from speakr.qt_ui import _normalize_system_ui_font
 
             class Bridge(QObject):
                 stateChanged = Signal()
@@ -714,6 +711,8 @@ class HudQmlTests(unittest.TestCase):
 
             QQuickStyle.setStyle("Basic")
             app = QApplication([])
+            if not _normalize_system_ui_font(app):
+                sys.exit(9)
             if app.platformName() != "windows":
                 sys.exit(77)
             host = QWidget()

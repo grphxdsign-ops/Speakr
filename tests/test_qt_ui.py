@@ -2,12 +2,79 @@ from __future__ import annotations
 
 import os
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from speakr.interface_state import InterfaceState
 from speakr import qt_ui
+
+
+class FontNormalizationTests(unittest.TestCase):
+    class Font:
+        default_family = "Native UI"
+
+        def __init__(self, source=None):
+            self._family = source.family() if isinstance(source, self.__class__) else ""
+
+        def family(self):
+            return self._family
+
+        def setFamily(self, value):
+            self._family = value
+
+        def defaultFamily(self):
+            return self.default_family
+
+    class FontDatabase:
+        class SystemFont:
+            GeneralFont = 0
+
+        @classmethod
+        def systemFont(cls, _role):
+            font = FontNormalizationTests.Font()
+            font.setFamily("Sans Serif")
+            return font
+
+    class Application:
+        def __init__(self):
+            self._font = FontNormalizationTests.Font()
+
+        def font(self):
+            return self._font
+
+        def setFont(self, value):
+            self._font = value
+
+    def test_generic_general_font_uses_concrete_qt_default(self):
+        application = self.Application()
+        qt = SimpleNamespace(QFont=self.Font, QFontDatabase=self.FontDatabase)
+
+        self.assertTrue(qt_ui._normalize_system_ui_font(application, qt))
+        self.assertEqual(application.font().family(), "Native UI")
+
+    def test_font_discovery_failure_never_blocks_startup(self):
+        class BrokenDatabase(self.FontDatabase):
+            @classmethod
+            def systemFont(cls, _role):
+                raise RuntimeError("font database unavailable")
+
+        application = self.Application()
+        qt = SimpleNamespace(QFont=self.Font, QFontDatabase=BrokenDatabase)
+
+        self.assertFalse(qt_ui._normalize_system_ui_font(application, qt))
+
+    def test_generic_font_without_concrete_default_preserves_original(self):
+        class NoDefaultFont(self.Font):
+            default_family = ""
+
+        application = self.Application()
+        application.font().setFamily("Original")
+        qt = SimpleNamespace(QFont=NoDefaultFont, QFontDatabase=self.FontDatabase)
+
+        self.assertFalse(qt_ui._normalize_system_ui_font(application, qt))
+        self.assertEqual(application.font().family(), "Original")
 
 
 @unittest.skipUnless(qt_ui.qt_available(), "PySide6-Essentials is optional")

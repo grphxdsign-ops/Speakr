@@ -5,7 +5,20 @@ from collections.abc import Iterable
 from PySide6.QtCore import QCoreApplication, QEvent, QObject
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem, QQuickWindow
+from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
+
+from speakr.qt_ui import _normalize_system_ui_font
+
+
+def qml_test_application() -> QApplication:
+    """Return the shared test application with production font normalization."""
+
+    if QQuickStyle.name() != "Basic":
+        QQuickStyle.setStyle("Basic")
+    application = QApplication.instance() or QApplication([])
+    _normalize_system_ui_font(application)
+    return application
 
 
 def drain_deferred_deletes(app: QApplication, *, cycles: int = 4) -> None:

@@ -13,12 +13,10 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
 from PySide6.QtCore import QMetaObject, QObject, Qt, QUrl
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
-from PySide6.QtQuickControls2 import QQuickStyle
-from PySide6.QtWidgets import QApplication
 
 from speakr.interface_state import InterfaceState
 from speakr.qt_ui import Bridge
-from tests.qml_lifecycle import dispose_qml_fixture
+from tests.qml_lifecycle import dispose_qml_fixture, qml_test_application
 
 
 class _App:
@@ -105,9 +103,7 @@ class _App:
 class QmlLoadTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if QQuickStyle.name() != "Basic":
-            QQuickStyle.setStyle("Basic")
-        cls.qapp = QApplication.instance() or QApplication([])
+        cls.qapp = qml_test_application()
 
     def test_main_and_hud_load_without_qml_warnings(self):
         app = _App()

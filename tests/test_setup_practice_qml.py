@@ -12,10 +12,8 @@ from PySide6.QtCore import QObject, Property, QMetaObject, QUrl, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
 from PySide6.QtQuick import QQuickWindow
-from PySide6.QtQuickControls2 import QQuickStyle
-from PySide6.QtWidgets import QApplication
 
-from tests.qml_lifecycle import dispose_qml_fixture
+from tests.qml_lifecycle import dispose_qml_fixture, qml_test_application
 
 
 class _Bridge(QObject):
@@ -107,9 +105,7 @@ class _Bridge(QObject):
 class SetupPracticeQmlTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if QQuickStyle.name() != "Basic":
-            QQuickStyle.setStyle("Basic")
-        cls.qapp = QApplication.instance() or QApplication([])
+        cls.qapp = qml_test_application()
         cls.qml = (
             Path(__file__).resolve().parents[1] / "speakr" / "ui" / "qml"
         )

@@ -82,7 +82,10 @@ opaque enough to preserve reading contrast and a clear layer hierarchy.
 
 ## Typography
 
-- System UI font only: Segoe UI on Windows and SF Pro on macOS.
+- Before QML loads, Qt resolves the system UI font (Segoe UI on native Windows
+  and SF Pro UI on native macOS) from its local font database. If GeneralFont
+  is generic, Qt's concrete default family is used. Private family names are
+  never hard-coded, and discovery failure never blocks the window.
 - Page heading: 28 px, semibold.
 - Section heading: 22 px, semibold.
 - Status heading: 18 px, semibold.
