@@ -360,7 +360,7 @@ Item {
 
                                         PlainText {
                                             Layout.fillWidth: true
-                                            text: qsTr("Audio stays in memory. Transcripts, screen context, vocabulary, and diagnostics stay on this computer. Speakr has no accounts, telemetry, analytics, or cloud fallback.")
+                                            text: qsTr("Your voice and dictated text stay on this computer. When Speakr is ready, it may keep a brief moment of microphone audio in memory so it does not miss your first word. That audio is continuously replaced and is not saved by Speakr.")
                                             color: root.tokens.text
                                             font.family: root.tokens.fontFamily
                                             font.pixelSize: root.tokens.body
@@ -369,7 +369,7 @@ Item {
 
                                         PlainText {
                                             Layout.fillWidth: true
-                                            text: qsTr("The only non-loopback activity is the one-time speech-model download. Optional Ollama cleanup stays on 127.0.0.1 and is never required.")
+                                            text: qsTr("Speakr does not require an account or send usage reports. The first time you use Speakr, it may download a speech model. After that, dictation works locally.")
                                             color: root.tokens.mutedText
                                             font.family: root.tokens.fontFamily
                                             font.pixelSize: root.tokens.secondary
@@ -448,12 +448,12 @@ Item {
                                               : qsTr("Local speech model ready"))
                                     description: root.modelBusy()
                                                  ? qsTr("This step has no time limit")
-                                                 : qsTr("No cloud speech service is used")
+                                                 : qsTr("Your speech is processed on this computer")
                                 }
 
                                 PlainText {
                                     Layout.fillWidth: true
-                                    text: qsTr("Automatic is recommended. It chooses a model for this computer and safely falls back to CPU.")
+                                    text: qsTr("Automatic is recommended. Speakr chooses a speech model that fits this computer.")
                                     color: root.tokens.mutedText
                                     font.family: root.tokens.fontFamily
                                     font.pixelSize: root.tokens.body

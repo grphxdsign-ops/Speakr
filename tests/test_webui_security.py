@@ -39,6 +39,8 @@ class _App:
         self.enabled = True
         self.capturing_hotkey = False
         self.pending_hotkey = None
+        self.retry_model_calls = 0
+        self.retry_setup_calls = 0
 
     def toggle_enabled(self):
         self.enabled = not self.enabled
@@ -63,6 +65,14 @@ class _App:
 
     @staticmethod
     def open_system_settings():
+        return True
+
+    def retry_model(self):
+        self.retry_model_calls += 1
+        return True
+
+    def retry_setup(self):
+        self.retry_setup_calls += 1
         return True
 
     @staticmethod
@@ -180,6 +190,9 @@ class WebUISecurityTests(unittest.TestCase):
         self.assertIn(".navbtn[aria-current=page]{background:var(--well);border-color:var(--line)", page)
         self.assertGreaterEqual(self._contrast("#747A92", "#F8FAFF"), 3.0)
         self.assertGreaterEqual(self._contrast("#737A99", "#282C45"), 3.0)
+        self.assertIn('label:"Retry speech model"', page)
+        self.assertIn('label:"Recheck setup"', page)
+        self.assertIn('$("recheckIssue").onclick=function(){action("retry_setup");}', page)
 
     def test_every_api_read_and_mutation_requires_header_token(self):
         status, _headers, _body = self.request("GET", "/api/state")
@@ -204,6 +217,38 @@ class WebUISecurityTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertTrue(json.loads(body)["ok"])
+
+    def test_setup_retries_are_allowlisted_and_token_authenticated(self):
+        for action, counter in (
+            ("retry_model", "retry_model_calls"),
+            ("retry_setup", "retry_setup_calls"),
+        ):
+            with self.subTest(action=action):
+                before = getattr(self.ui.app, counter)
+                status, _headers, _body = self.request(
+                    "POST", "/api/action", body={"action": action}
+                )
+                self.assertEqual(status, 403)
+                self.assertEqual(getattr(self.ui.app, counter), before)
+
+                status, headers, body = self.request(
+                    "POST",
+                    "/api/action",
+                    headers={"X-Speakr-Token": self.ui.token},
+                    body={"action": action},
+                )
+                self.assertEqual(status, 200)
+                self.assertIn("no-store", headers["Cache-Control"])
+                self.assertTrue(json.loads(body)["ok"])
+                self.assertEqual(getattr(self.ui.app, counter), before + 1)
+
+        status, _headers, _body = self.request(
+            "POST",
+            "/api/action",
+            headers={"X-Speakr-Token": self.ui.token},
+            body={"action": "retry_arbitrary"},
+        )
+        self.assertEqual(status, 404)
 
     def test_unexpected_host_and_origin_are_rejected(self):
         token = {"X-Speakr-Token": self.ui.token, "Host": "attacker.invalid"}

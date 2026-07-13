@@ -245,6 +245,32 @@ class SetupPracticeQmlTests(unittest.TestCase):
         finally:
             self._dispose(engine, bridge, theme, page, window, warnings)
 
+    def test_required_onboarding_copy_stays_plain_and_local(self):
+        source = (self.qml / "OnboardingPage.qml").read_text(encoding="utf-8")
+
+        self.assertIn("Your voice and dictated text stay on this computer.", source)
+        self.assertIn(
+            "When Speakr is ready, it may keep a brief moment of microphone audio in memory",
+            source,
+        )
+        self.assertIn("That audio is continuously replaced", source)
+        self.assertIn("is not saved by Speakr", source)
+        self.assertIn(
+            "The first time you use Speakr, it may download a speech model.",
+            source,
+        )
+        self.assertIn("After that, dictation works locally.", source)
+        for jargon in (
+            "telemetry",
+            "analytics",
+            "non-loopback",
+            "127.0.0.1",
+            "ollama",
+            "diagnostics",
+            "falls back to cpu",
+        ):
+            self.assertNotIn(jargon, source.casefold())
+
     def test_practice_states_actions_and_temporary_results(self):
         engine, bridge, theme, page, window, warnings = self._fixture(
             "PracticePage.qml"
