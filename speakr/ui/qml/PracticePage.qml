@@ -9,6 +9,9 @@ Item {
     required property var tokens
     property var practice: ({})
     property var appState: ({})
+    readonly property int pageMargin: width < tokens.metric(760)
+                                      ? tokens.space16 : tokens.space32
+
     signal navigateRequested(string page)
 
     function focusHeading() {
@@ -22,8 +25,24 @@ Item {
         return fallbackValue
     }
 
+    function isActive() {
+        return Boolean(value(practice, "active", false))
+    }
+
+    function isBusy() {
+        return Boolean(value(practice, "busy",
+                             value(practice, "processing", false)))
+    }
+
+    function hasResult() {
+        return Boolean(value(practice, "hasResult", false))
+                || heardText().length > 0 || wouldTypeText().length > 0
+    }
+
     function levelCount() {
-        var level = String(value(practice, "mic_level_band", value(appState, "mic_level_band", "silent")))
+        var level = String(value(practice, "mic_level_band",
+                                 value(practice, "level",
+                                       value(appState, "mic_level_band", "silent"))))
         if (level === "high") return 5
         if (level === "good") return 4
         if (level === "low") return 2
@@ -31,11 +50,36 @@ Item {
     }
 
     function levelLabel() {
-        var level = String(value(practice, "mic_level_band", value(appState, "mic_level_band", "silent")))
+        var level = String(value(practice, "mic_level_band",
+                                 value(practice, "level",
+                                       value(appState, "mic_level_band", "silent"))))
         if (level === "high") return qsTr("High")
         if (level === "good") return qsTr("Good")
         if (level === "low") return qsTr("Low")
         return qsTr("Waiting for sound")
+    }
+
+    function stateLabel() {
+        if (isActive())
+            return qsTr("Listening")
+        if (isBusy())
+            return qsTr("Transcribing locally")
+        if (hasResult())
+            return qsTr("Ready to review")
+        return qsTr("Ready to practice")
+    }
+
+    function stateDescription() {
+        if (isActive()) {
+            return levelCount() > 0
+                    ? qsTr("Sound detected. Input level: %1").arg(levelLabel())
+                    : qsTr("Waiting for sound")
+        }
+        if (isBusy())
+            return qsTr("Your temporary recording is being processed on this device")
+        if (hasResult())
+            return qsTr("Review the temporary result, retry, or clear it")
+        return qsTr("Start when you are ready. Nothing is timed.")
     }
 
     function heardText() {
@@ -45,6 +89,20 @@ Item {
     function wouldTypeText() {
         return String(value(practice, "would_type",
                             value(practice, "wouldType", value(practice, "text", ""))))
+    }
+
+    function practiceMessage() {
+        return String(value(practice, "error", value(practice, "message", "")))
+    }
+
+    function messageKind() {
+        var message = practiceMessage().toLowerCase()
+        if (message.indexOf("microphone") >= 0
+                || message.indexOf("could not finish") >= 0)
+            return "danger"
+        if (message.indexOf("wait") >= 0 || message.indexOf("not ready") >= 0)
+            return "warning"
+        return "info"
     }
 
     function vocabularyIssue() {
@@ -79,8 +137,10 @@ Item {
 
     ScrollView {
         id: scroll
+        objectName: "practiceScroll"
         anchors.fill: parent
         clip: true
+        contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
         ColumnLayout {
@@ -91,137 +151,160 @@ Item {
 
             ColumnLayout {
                 Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
+                Layout.leftMargin: root.pageMargin
+                Layout.rightMargin: root.pageMargin
                 spacing: root.tokens.space8
 
                 PlainText {
                     id: pageHeading
+                    objectName: "practicePageHeading"
                     Layout.fillWidth: true
                     text: qsTr("Practice")
                     color: root.tokens.text
                     font.family: root.tokens.fontFamily
                     font.pixelSize: root.tokens.pageHeading
                     font.weight: Font.DemiBold
+                    wrapMode: Text.Wrap
                     Accessible.role: Accessible.Heading
                     Accessible.name: text
                 }
 
                 PlainText {
                     Layout.fillWidth: true
-                    text: qsTr("Try a dictation without inserting text anywhere.")
+                    text: qsTr("Try a private dictation without inserting text anywhere.")
                     color: root.tokens.mutedText
                     font.family: root.tokens.fontFamily
                     font.pixelSize: root.tokens.body
                     wrapMode: Text.Wrap
                 }
-
-                PlainText {
-                    Layout.fillWidth: true
-                    text: qsTr("Not stored by Speakr; clears when you leave Practice.")
-                    color: root.tokens.text
-                    font.family: root.tokens.fontFamily
-                    font.pixelSize: root.tokens.body
-                    font.weight: Font.DemiBold
-                    wrapMode: Text.Wrap
-                    Accessible.name: text
-                }
             }
 
-            Rectangle {
+            GlassSurface {
+                id: practiceSurface
+                objectName: "practiceCaptureSurface"
                 Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
-                implicitHeight: practiceContent.implicitHeight + root.tokens.space32
-                radius: root.tokens.radiusLarge
-                color: root.tokens.surface
-                border.width: 1
-                border.color: root.tokens.border
+                Layout.leftMargin: root.pageMargin
+                Layout.rightMargin: root.pageMargin
+                implicitHeight: practiceContent.implicitHeight + padding * 2
+                tokens: root.tokens
+                role: "major"
+                padding: root.tokens.space24
 
                 ColumnLayout {
                     id: practiceContent
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.margins: root.tokens.space16
+                    anchors.fill: parent
                     spacing: root.tokens.space16
 
-                    RowLayout {
+                    SectionHeading {
                         Layout.fillWidth: true
-                        spacing: root.tokens.space16
+                        tokens: root.tokens
+                        title: qsTr("Private microphone check")
+                        description: qsTr("Use the level only to confirm the microphone is picking up sound.")
+                    }
 
-                        ColumnLayout {
+                    InlineNotice {
+                        objectName: "practicePrivacyNotice"
+                        Layout.fillWidth: true
+                        tokens: root.tokens
+                        kind: "info"
+                        title: qsTr("Temporary by design")
+                        message: qsTr("Not stored by Speakr; clears when you leave Practice.")
+                        detail: qsTr("Practice never inserts, logs, learns, enters cleanup context, or touches the clipboard.")
+                    }
+
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: width >= root.tokens.metric(560) ? 2 : 1
+                        columnSpacing: root.tokens.space16
+                        rowSpacing: root.tokens.space12
+
+                        StatusOrb {
+                            id: practiceStatus
+                            objectName: "practiceStatus"
                             Layout.fillWidth: true
-                            spacing: root.tokens.space8
-
-                            PlainText {
-                                text: root.value(root.practice, "active", false)
-                                      ? qsTr("Listening")
-                                      : (root.value(root.practice, "busy", false)
-                                         ? qsTr("Transcribing locally") : qsTr("Ready to practice"))
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.statusHeading
-                                font.weight: Font.DemiBold
-                                Accessible.role: Accessible.Heading
-                                Accessible.name: text
-                            }
-
-                            RowLayout {
-                                spacing: root.tokens.space8
-                                Accessible.role: Accessible.ProgressBar
-                                Accessible.name: qsTr("Microphone input level: %1").arg(root.levelLabel())
-
-                                Repeater {
-                                    model: 5
-                                    Rectangle {
-                                        required property int index
-                                        width: root.tokens.metric(28)
-                                        height: root.tokens.metric(10)
-                                        radius: height / 2
-                                        color: index < root.levelCount() ? root.tokens.accent : root.tokens.surfaceRaised
-                                        border.width: 1
-                                        border.color: index < root.levelCount() ? root.tokens.accent : root.tokens.border
-
-                                        Behavior on color {
-                                            ColorAnimation { duration: root.tokens.motionFast }
-                                        }
-                                    }
-                                }
-
-                                PlainText {
-                                    text: root.levelLabel()
-                                    color: root.tokens.mutedText
-                                    font.family: root.tokens.fontFamily
-                                    font.pixelSize: root.tokens.secondary
-                                }
-                            }
+                            tokens: root.tokens
+                            statusKind: root.isActive() || root.isBusy() ? "active"
+                                        : (root.hasResult() ? "success" : "neutral")
+                            symbol: root.hasResult() && !root.isBusy() ? "\u2713" : "\u2022"
+                            label: root.stateLabel()
+                            description: root.stateDescription()
                         }
 
-                        QuietButton {
-                            tokens: root.tokens
-                            text: root.value(root.practice, "active", false) ? qsTr("Stop") : qsTr("Start")
-                            kind: root.value(root.practice, "active", false) ? "secondary" : "primary"
-                            enabled: root.value(root.practice, "active", false)
-                                     || !root.value(root.practice, "busy", false)
-                            accessibleDescription: root.value(root.practice, "active", false)
-                                                   ? qsTr("Stop this temporary practice recording")
-                                                   : qsTr("Start a temporary practice recording")
-                            onClicked: root.value(root.practice, "active", false)
-                                       ? bridge.stopPractice() : bridge.startPractice()
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: root.tokens.space8
+                            layoutDirection: Qt.RightToLeft
+
+                            QuietButton {
+                                objectName: "practiceStartStopButton"
+                                tokens: root.tokens
+                                text: root.isActive() ? qsTr("Stop") : qsTr("Start")
+                                kind: root.isActive() ? "secondary" : "primary"
+                                enabled: root.isActive() || !root.isBusy()
+                                accessibleDescription: root.isActive()
+                                                       ? qsTr("Stop this temporary practice recording")
+                                                       : qsTr("Start a temporary practice recording")
+                                onClicked: root.isActive()
+                                           ? bridge.stopPractice() : bridge.startPractice()
+                            }
                         }
                     }
 
-                    PlainText {
+                    RowLayout {
+                        id: meter
+                        objectName: "practiceMicrophoneMeter"
                         Layout.fillWidth: true
-                        visible: root.value(root.practice, "error", "").length > 0
-                        text: root.value(root.practice, "error", "")
-                        color: root.tokens.danger
-                        font.family: root.tokens.fontFamily
-                        font.pixelSize: root.tokens.body
-                        wrapMode: Text.Wrap
-                        Accessible.role: Accessible.AlertMessage
-                        Accessible.name: text
+                        spacing: root.tokens.space8
+                        Accessible.role: Accessible.ProgressBar
+                        Accessible.name: qsTr("Microphone input level: %1").arg(root.levelLabel())
+                        Accessible.description: root.levelCount() > 0
+                                                ? qsTr("Sound detected")
+                                                : qsTr("Waiting for sound")
+
+                        Repeater {
+                            objectName: "practiceMeterSegments"
+                            model: 5
+
+                            Rectangle {
+                                objectName: "practiceMeterSegment"
+                                required property int index
+                                Layout.preferredWidth: root.tokens.metric(32)
+                                Layout.preferredHeight: root.tokens.space12
+                                radius: root.tokens.radiusSmall
+                                color: index < root.levelCount()
+                                       ? root.tokens.accent : root.tokens.surfaceRaised
+                                border.width: root.tokens.borderWidth
+                                border.color: index < root.levelCount()
+                                              ? root.tokens.accent : root.tokens.border
+
+                                Behavior on color {
+                                    ColorAnimation { duration: root.tokens.motionFast }
+                                }
+                            }
+                        }
+
+                        PlainText {
+                            Layout.fillWidth: true
+                            text: root.levelLabel()
+                            color: root.tokens.mutedText
+                            font.family: root.tokens.fontFamily
+                            font.pixelSize: root.tokens.secondary
+                            wrapMode: Text.Wrap
+                        }
+                    }
+
+                    InlineNotice {
+                        objectName: "practiceResultNotice"
+                        Layout.fillWidth: true
+                        visible: root.practiceMessage().length > 0
+                        tokens: root.tokens
+                        kind: root.messageKind()
+                        title: root.messageKind() === "danger"
+                               ? qsTr("Practice could not finish")
+                               : (root.messageKind() === "warning"
+                                  ? qsTr("Practice is not ready yet")
+                                  : qsTr("Nothing was added"))
+                        message: root.practiceMessage()
                     }
 
                     GridLayout {
@@ -247,8 +330,9 @@ Item {
 
                             PlainTextArea {
                                 id: heardTranscript
+                                objectName: "practiceHeardTranscript"
                                 Layout.fillWidth: true
-                                Layout.minimumHeight: root.tokens.metric(150)
+                                Layout.minimumHeight: root.tokens.metric(160)
                                 readOnly: true
                                 text: root.heardText()
                                 placeholderText: qsTr("Recognized speech will appear here.")
@@ -265,13 +349,23 @@ Item {
                                 bottomPadding: root.tokens.space16
                                 Accessible.role: Accessible.EditableText
                                 Accessible.name: qsTr("What Speakr heard")
-                                Accessible.description: qsTr("Read only. This text is held in memory and clears when Practice closes.")
+                                Accessible.description: qsTr("Read only. Held in memory and cleared when Practice closes.")
 
-                                background: Rectangle {
-                                    radius: root.tokens.radius
-                                    color: root.tokens.background
-                                    border.width: heardTranscript.activeFocus ? 2 : 1
-                                    border.color: heardTranscript.activeFocus ? root.tokens.focus : root.tokens.border
+                                background: Item {
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: root.tokens.radiusControl
+                                        color: root.tokens.contentSurface
+                                        border.width: root.tokens.borderWidth
+                                        border.color: root.tokens.border
+                                    }
+
+                                    FocusRing {
+                                        anchors.fill: parent
+                                        tokens: root.tokens
+                                        shown: heardTranscript.activeFocus
+                                        cornerRadius: root.tokens.radiusControl
+                                    }
                                 }
                             }
                         }
@@ -293,8 +387,9 @@ Item {
 
                             PlainTextArea {
                                 id: wouldTypeTranscript
+                                objectName: "practiceWouldTypeTranscript"
                                 Layout.fillWidth: true
-                                Layout.minimumHeight: root.tokens.metric(150)
+                                Layout.minimumHeight: root.tokens.metric(160)
                                 readOnly: true
                                 text: root.wouldTypeText()
                                 placeholderText: qsTr("Locally cleaned-up text will appear here.")
@@ -311,13 +406,23 @@ Item {
                                 bottomPadding: root.tokens.space16
                                 Accessible.role: Accessible.EditableText
                                 Accessible.name: qsTr("What Speakr would type")
-                                Accessible.description: qsTr("Read only. This is a temporary preview and is never inserted.")
+                                Accessible.description: qsTr("Read only. This temporary preview is never inserted.")
 
-                                background: Rectangle {
-                                    radius: root.tokens.radius
-                                    color: root.tokens.background
-                                    border.width: wouldTypeTranscript.activeFocus ? 2 : 1
-                                    border.color: wouldTypeTranscript.activeFocus ? root.tokens.focus : root.tokens.border
+                                background: Item {
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: root.tokens.radiusControl
+                                        color: root.tokens.contentSurface
+                                        border.width: root.tokens.borderWidth
+                                        border.color: root.tokens.border
+                                    }
+
+                                    FocusRing {
+                                        anchors.fill: parent
+                                        tokens: root.tokens
+                                        shown: wouldTypeTranscript.activeFocus
+                                        cornerRadius: root.tokens.radiusControl
+                                    }
                                 }
                             }
                         }
@@ -328,132 +433,136 @@ Item {
                         spacing: root.tokens.space12
 
                         QuietButton {
+                            objectName: "practiceRetryButton"
                             tokens: root.tokens
                             text: qsTr("Retry")
-                            enabled: !root.value(root.practice, "active", false)
-                                     && !root.value(root.practice, "busy", false)
+                            enabled: !root.isActive() && !root.isBusy()
                             accessibleDescription: qsTr("Start another temporary practice recording")
                             onClicked: bridge.startPractice()
                         }
 
                         QuietButton {
+                            objectName: "practiceClearButton"
                             tokens: root.tokens
                             text: qsTr("Clear")
-                            enabled: root.heardText().length > 0 || root.wouldTypeText().length > 0
-                            accessibleDescription: qsTr("Clear temporary practice text from memory")
+                            enabled: root.hasResult() || root.practiceMessage().length > 0
+                            accessibleDescription: qsTr("Clear temporary practice text and messages from memory")
                             onClicked: bridge.clearPractice()
                         }
                     }
                 }
             }
 
+            InlineNotice {
+                Layout.fillWidth: true
+                Layout.leftMargin: root.pageMargin
+                Layout.rightMargin: root.pageMargin
+                visible: root.vocabularyIssueVisible()
+                tokens: root.tokens
+                kind: root.vocabularyIssueCode() === "busy_setting"
+                      ? "warning" : "danger"
+                title: root.vocabularyIssueCode() === "busy_setting"
+                       ? qsTr("Vocabulary change is waiting")
+                       : qsTr("Vocabulary was not changed")
+                message: String(root.value(root.vocabularyIssue(), "message", ""))
+                detail: qsTr("Your typed values remain here so you can try again.")
+            }
+
             GridLayout {
                 Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
-                columns: width >= root.tokens.metric(650) ? 2 : 1
+                Layout.leftMargin: root.pageMargin
+                Layout.rightMargin: root.pageMargin
+                columns: width >= root.tokens.metric(680) ? 2 : 1
                 columnSpacing: root.tokens.space24
                 rowSpacing: root.tokens.space24
 
-                Rectangle {
-                    Layout.columnSpan: parent.columns
+                GlassSurface {
                     Layout.fillWidth: true
-                    visible: root.vocabularyIssueVisible()
-                    implicitHeight: practiceVocabularyIssue.implicitHeight + root.tokens.space24
-                    radius: root.tokens.radius
-                    color: root.vocabularyIssueCode() === "busy_setting"
-                           ? root.tokens.warningSurface : root.tokens.dangerSurface
-                    border.width: 1
-                    border.color: root.vocabularyIssueCode() === "busy_setting"
-                                  ? root.tokens.warning : root.tokens.danger
-                    Accessible.role: Accessible.AlertMessage
-                    Accessible.name: String(root.value(root.vocabularyIssue(), "message", ""))
+                    implicitHeight: wordContent.implicitHeight + padding * 2
+                    tokens: root.tokens
+                    role: "major"
+                    padding: root.tokens.space16
 
-                    PlainText {
-                        id: practiceVocabularyIssue
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.margins: root.tokens.space12
-                        text: String(root.value(root.vocabularyIssue(), "message", ""))
-                        color: root.vocabularyIssueCode() === "busy_setting"
-                               ? root.tokens.warning : root.tokens.danger
-                        font.family: root.tokens.fontFamily
-                        font.pixelSize: root.tokens.body
-                        wrapMode: Text.Wrap
+                    ColumnLayout {
+                        id: wordContent
+                        anchors.fill: parent
+                        spacing: root.tokens.space12
+
+                        SectionHeading {
+                            Layout.fillWidth: true
+                            tokens: root.tokens
+                            title: qsTr("Add a word")
+                            description: qsTr("Keep a name or specialized word available for future dictation.")
+                        }
+
+                        QuietTextField {
+                            id: wordField
+                            objectName: "practiceWordField"
+                            Layout.fillWidth: true
+                            tokens: root.tokens
+                            placeholderText: qsTr("Name or specialized word")
+                            accessibleName: qsTr("Word to add")
+                            onAccepted: root.submitWord()
+                        }
+
+                        QuietButton {
+                            id: addWordButton
+                            tokens: root.tokens
+                            text: qsTr("Add word")
+                            enabled: wordField.text.trim().length > 0
+                            accessibleDescription: qsTr("Add this word to manual vocabulary")
+                            onClicked: root.submitWord()
+                        }
                     }
                 }
 
-                ColumnLayout {
+                GlassSurface {
                     Layout.fillWidth: true
-                    spacing: root.tokens.space8
+                    implicitHeight: replacementContent.implicitHeight + padding * 2
+                    tokens: root.tokens
+                    role: "major"
+                    padding: root.tokens.space16
 
-                    PlainText {
-                        text: qsTr("Add a word")
-                        color: root.tokens.text
-                        font.family: root.tokens.fontFamily
-                        font.pixelSize: root.tokens.sectionHeading
-                        font.weight: Font.DemiBold
-                        Accessible.role: Accessible.Heading
-                    }
+                    ColumnLayout {
+                        id: replacementContent
+                        anchors.fill: parent
+                        spacing: root.tokens.space12
 
-                    QuietTextField {
-                        id: wordField
-                        objectName: "practiceWordField"
-                        Layout.fillWidth: true
-                        tokens: root.tokens
-                        placeholderText: qsTr("Name or specialized word")
-                        accessibleName: qsTr("Word to add")
-                        onAccepted: root.submitWord()
-                    }
+                        SectionHeading {
+                            Layout.fillWidth: true
+                            tokens: root.tokens
+                            title: qsTr("Add a replacement")
+                            description: qsTr("Tell Speakr which phrase should replace a recurring mishearing.")
+                        }
 
-                    QuietButton {
-                        id: addWordButton
-                        tokens: root.tokens
-                        text: qsTr("Add word")
-                        enabled: wordField.text.trim().length > 0
-                        onClicked: root.submitWord()
-                    }
-                }
+                        QuietTextField {
+                            id: heardField
+                            objectName: "practiceReplacementHeardField"
+                            Layout.fillWidth: true
+                            tokens: root.tokens
+                            placeholderText: qsTr("What Speakr heard")
+                            accessibleName: qsTr("Heard phrase")
+                        }
 
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: root.tokens.space8
+                        QuietTextField {
+                            id: intendedField
+                            objectName: "practiceReplacementIntendedField"
+                            Layout.fillWidth: true
+                            tokens: root.tokens
+                            placeholderText: qsTr("What you intended")
+                            accessibleName: qsTr("Intended phrase")
+                            onAccepted: root.submitReplacement()
+                        }
 
-                    PlainText {
-                        text: qsTr("Add a replacement")
-                        color: root.tokens.text
-                        font.family: root.tokens.fontFamily
-                        font.pixelSize: root.tokens.sectionHeading
-                        font.weight: Font.DemiBold
-                        Accessible.role: Accessible.Heading
-                    }
-
-                    QuietTextField {
-                        id: heardField
-                        objectName: "practiceReplacementHeardField"
-                        Layout.fillWidth: true
-                        tokens: root.tokens
-                        placeholderText: qsTr("What Speakr heard")
-                        accessibleName: qsTr("Heard phrase")
-                    }
-
-                    QuietTextField {
-                        id: intendedField
-                        objectName: "practiceReplacementIntendedField"
-                        Layout.fillWidth: true
-                        tokens: root.tokens
-                        placeholderText: qsTr("What you intended")
-                        accessibleName: qsTr("Intended phrase")
-                        onAccepted: root.submitReplacement()
-                    }
-
-                    QuietButton {
-                        id: addReplacementButton
-                        tokens: root.tokens
-                        text: qsTr("Add replacement")
-                        enabled: heardField.text.trim().length > 0 && intendedField.text.trim().length > 0
-                        onClicked: root.submitReplacement()
+                        QuietButton {
+                            id: addReplacementButton
+                            tokens: root.tokens
+                            text: qsTr("Add replacement")
+                            enabled: heardField.text.trim().length > 0
+                                     && intendedField.text.trim().length > 0
+                            accessibleDescription: qsTr("Add this phrase replacement")
+                            onClicked: root.submitReplacement()
+                        }
                     }
                 }
             }
