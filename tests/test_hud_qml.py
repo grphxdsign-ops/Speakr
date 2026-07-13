@@ -650,9 +650,19 @@ class HudQmlTests(unittest.TestCase):
                     status_code=status_code,
                 )
                 # The content crossfade swaps the state halfway through, then the
-                # panel edge runs its own bounded color transition.
-                QTest.qWait(300)
-                self._pump()
+                # panel edge runs its own bounded color transition. Wait for the
+                # semantic end state rather than assuming the hosted compositor
+                # will schedule every frame within one fixed wall-clock window.
+                self.assertTrue(
+                    self._wait_until(
+                        lambda: (
+                            hud.property("displayedKind") == expected_kind
+                            and QColor(panel.property("edgeColor"))
+                            == QColor(theme.property(semantic_role))
+                        ),
+                        timeout_ms=1000,
+                    )
+                )
                 self.assertEqual(hud.property("displayedKind"), expected_kind)
                 self.assertEqual(
                     QColor(glyph.property("color")),

@@ -13,7 +13,6 @@ AppId={{7C1E5A90-52F3-4B8A-9C1D-1A6B33F0E2D4}
 AppName=Speakr
 AppVersion={#AppVersion}
 AppPublisher=Speakr
-AppPublisherURL=https://speakr.cloud
 DefaultDirName={localappdata}\Programs\Speakr
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes

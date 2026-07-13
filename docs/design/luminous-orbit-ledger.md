@@ -19,8 +19,8 @@ review evidence and are never reused for a later lane.
 | 9 | HUD | `codex/luminous-09-hud` / `Speakr-wt-hud` | `b872be5` | 28 | `6636ff8` | Flags, focus guard, concurrency, job timers, motion, Large/HC modes. | MERGED |
 | 10 | Browser recovery | `codex/luminous-10-browser-recovery` / `Speakr-wt-recovery` | `b872be5` | 19 | `449e021` | Embedded-only visual parity plus auth/CSP/Host/Origin/no-store gates. | MERGED |
 | 11 | Verification harness | `codex/luminous-11-verification` / `Speakr-wt-verification` | `6eafb3d` | 29 | `72c9fcb` | 220-test gate, source-bound schema-3 report/manifest, hosted Windows/macOS checks. | MERGED |
-| 12 | Integration/personas | `codex/luminous-12-integration` / controller tree | `72c9fcb` | 38 | TBD | Eleven veto fixes, three audit rounds, 240-test local gate, schema-3 evidence, and required Windows/macOS checks. | READY TO MERGE |
-| 13 | Release proof | `codex/luminous-13-release` / new exact-main worktree | PR-12 merge | TBD | TBD | Installed Windows artifact, mounted macOS artifact, privacy scan, signing/notarization evidence. | BLOCKED ON PR-12 |
+| 12 | Integration/personas | `codex/luminous-12-integration` / controller tree | `72c9fcb` | 38 | `96c13d3` | Eleven veto fixes, three audit rounds, 240-test local gate, schema-3 evidence, and required Windows/macOS checks. | MERGED |
+| 13 | Release proof | `codex/luminous-13-release` / `Speakr-wt-release` | `96c13d3` | 39 | TBD | 274-test local gate, clean 10/10 aggregate verification, installed/copied runtime receipts, privacy scan, signed evidence manifests, and fail-closed publication. | DRAFT — HOSTED PROOF |
 
 ## Routed corrective PRs
 
@@ -52,5 +52,5 @@ none expanded transcription or privacy scope.
   merge after independent review.
 - `AGENTS.md`, `CLAUDE.md`, runtime config, logs, model data, dictionaries,
   learned vocabulary, and build output are user/runtime owned and excluded.
-- PR-12 and PR-13 are controller-serial. PR-13 cannot branch until PR-12 is
-  reviewed and merged.
+- PR-12 and PR-13 are controller-serial. PR-13 branched from the exact PR-12
+  squash merge only after PR-12 was reviewed and merged.

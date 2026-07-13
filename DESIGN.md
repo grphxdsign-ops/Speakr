@@ -306,3 +306,13 @@ lock, explicit Clear, and app exit.
 Native material is presentation-only. The compositor may sample pixels behind
 the window, but Speakr never receives those pixels in Python, QML state, logs,
 screenshots, telemetry, or network traffic.
+
+## Release proof
+
+Release builds use one pinned Python 3.11/PyInstaller contract and scan the
+unpacked plus installed/copied artifact. Exact-artifact smoke runs prove the
+native tray/window first, then load a preseeded local model with Ollama off,
+Hugging Face offline, and a loopback-only DNS/socket guard. Tag publication is
+centralized, requires both platform manifests, and fails closed unless Windows
+is Authenticode signed and macOS is Developer ID signed and notarized. See
+`docs/release-proof.md` for the receipt and evidence schemas.

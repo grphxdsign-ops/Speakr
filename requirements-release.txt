@@ -1,0 +1,15 @@
+# Direct runtime and packaging dependencies for reproducible Python 3.11
+# release environments. Transitive resolution is verified with ``pip check``.
+faster-whisper==1.2.1
+sounddevice==0.5.5
+numpy==2.4.6
+pystray==0.19.5
+Pillow==12.2.0
+pyperclip==1.11.0
+requests==2.34.2
+PySide6-Essentials==6.11.1
+keyboard==0.13.5; sys_platform == "win32"
+comtypes==1.4.16; sys_platform == "win32"
+pyobjc-framework-Quartz==12.2.1; sys_platform == "darwin"
+pyobjc-framework-Cocoa==12.2.1; sys_platform == "darwin"
+PyInstaller==6.21.0

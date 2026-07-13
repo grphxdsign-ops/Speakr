@@ -106,7 +106,7 @@ git clone https://github.com/grphxdsign-ops/Speakr.git
 cd Speakr
 python3.11 -m venv .venv-package
 source .venv-package/bin/activate
-python -m pip install -r requirements.txt pyinstaller
+python -m pip install -r requirements-release.txt
 PYTHON=.venv-package/bin/python bash package_mac.sh
 mv dist/Speakr.app /Applications/
 open /Applications/Speakr.app
@@ -326,8 +326,11 @@ require the `Validate (Windows)` and `Validate (macOS)` checks from the
 force Qt's offscreen software renderer, so validation never downloads a model
 or requires a display server.
 
-Release builds package `speakr/ui/qml/` and `assets/icon.png` as local data
-alongside the Qt Quick runtime. The build refuses to run when the
+Release builds use the pinned Python 3.11 dependencies in
+`requirements-release.txt` and one shared PyInstaller contract in
+`scripts/build_release.py`. They package `speakr/ui/qml/`, the native-interface
+capability marker, and `assets/icon.png` as local data alongside the Qt Quick
+runtime. The build refuses to run when the
 `PySide6-Addons` distribution is installed, explicitly excludes the embedded
 browser modules, and scans the artifact for real Addons libraries such as
 QtCharts. Qt's QML binding itself requires `PySide6.QtNetwork` to import, but
@@ -340,8 +343,15 @@ python scripts/scan_artifact_privacy.py dist/Speakr
 # macOS: python scripts/scan_artifact_privacy.py dist/Speakr.app
 ```
 
-The scan requires `Main.qml`, `Hud.qml`, and the icon; rejects WebView2,
-QtWebEngine, Chromium, Qt WebView/WebChannel, WebSockets, and concrete
-PySide6-Addons module/library families; and rejects non-loopback URLs in
-shipped UI assets. The packaged-app smoke test also fails if startup falls
-back to the browser recovery interface.
+The scan requires `Main.qml`, `Hud.qml`, the icon, and the fixed native-window
+capability marker; rejects WebView2, QtWebEngine, Chromium, Qt
+WebView/WebChannel, WebSockets, concrete PySide6-Addons module/library
+families, and updater/telemetry/crash-report SDKs; and rejects non-loopback URLs
+in shipped UI assets. The release job then installs or mounts the final
+artifact and requires a sanitized readiness receipt proving that the native
+window and tray actually appeared. A second launch of that same installed app
+loads a preseeded local `tiny` model with Ollama disabled, Hugging Face offline,
+and a loopback-only socket/DNS guard; it must reach model and rule-cleanup
+readiness without a blocked outbound attempt. Details, including proof-only
+versus publish-eligible runs, are in
+[the release proof contract](docs/release-proof.md).

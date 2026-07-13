@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import ipaddress
+import os
 import socket
 import tempfile
 import unittest
@@ -9,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from speakr import config as cfg_mod
+from speakr import transcriber as transcriber_module
 from speakr.formatter import Formatter, _local_ollama_url
 from speakr.interface_state import InterfaceState
 from speakr import webui
@@ -52,6 +54,15 @@ class _App:
 
 
 class OutboundBoundaryTests(unittest.TestCase):
+    def test_model_download_path_forces_telemetry_off(self):
+        self.assertEqual(os.environ.get("HF_HUB_DISABLE_TELEMETRY"), "1")
+        self.assertEqual(os.environ.get("DO_NOT_TRACK"), "1")
+        source = Path(transcriber_module.__file__).read_text(encoding="utf-8")
+        self.assertLess(
+            source.index('os.environ["HF_HUB_DISABLE_TELEMETRY"]'),
+            source.index("from faster_whisper import WhisperModel"),
+        )
+
     def test_cleanup_reachability_publishes_without_autostart(self):
         class LocalNoAutostart(_Config):
             def get(self, *keys, default=None):

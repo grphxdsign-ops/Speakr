@@ -14,6 +14,12 @@ import numpy as np
 
 log = logging.getLogger("speakr.transcriber")
 
+# The only permitted non-loopback runtime request is the user's one-time model
+# download.  Disable Hugging Face's optional telemetry path before its library
+# is imported so that download cannot double as analytics.
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+os.environ["DO_NOT_TRACK"] = "1"
+
 _nvidia_dlls_exposed = False
 
 
