@@ -70,6 +70,7 @@ class Scenario:
     onboarding: bool = False
     hud_size: str = "standard"
     hud_state: str = ""
+    simulated_system_high_contrast: bool = False
 
 
 SCENARIOS = (
@@ -130,6 +131,16 @@ SCENARIOS = (
         "high_contrast",
         "off",
         page="vocabulary",
+    ),
+    Scenario(
+        "home-system-high-contrast-divergent-640x520-200",
+        "main",
+        640,
+        520,
+        200,
+        "light",
+        "full",
+        simulated_system_high_contrast=True,
     ),
     Scenario(
         "onboarding-light-reduced-640x520-200",
@@ -225,20 +236,47 @@ def _close(
     )
 
 
-def _save_window(window: QObject, destination: Path) -> tuple[int, int]:
+def _renderer_api_name(window: QObject) -> str:
+    interface = window.rendererInterface()
+    value = interface.graphicsApi()
+    name = getattr(value, "name", "")
+    if name:
+        return str(name)
+    return str(value).rsplit(".", 1)[-1]
+
+
+def _software_renderer_requested() -> bool:
+    return any(
+        str(os.environ.get(name, "")).strip().casefold() == "software"
+        for name in ("QT_QUICK_BACKEND", "QSG_RHI_BACKEND")
+    ) or str(os.environ.get("SPEAKR_QT_SOFTWARE", "")).strip().casefold() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _save_window(window: QObject, destination: Path) -> tuple[int, int, str]:
     image = window.grabWindow()
     if image.isNull() or image.width() <= 0 or image.height() <= 0:
         raise RuntimeError(f"Qt returned an empty image for {destination.stem}")
     if not image.save(str(destination), "PNG"):
         raise RuntimeError(f"Qt could not save {destination}")
-    return image.width(), image.height()
+    renderer_api = _renderer_api_name(window)
+    if _software_renderer_requested() and renderer_api.casefold() != "software":
+        raise RuntimeError(
+            "software screenshot capture requested but Qt reported "
+            f"{renderer_api or 'an unknown graphics API'}"
+        )
+    return image.width(), image.height(), renderer_api
 
 
 def _capture_main(
     application: QApplication,
     scenario: Scenario,
     destination: Path,
-) -> tuple[int, int, list[str]]:
+) -> tuple[int, int, str, list[str]]:
     app = _ArtifactApp(scenario)
     bridge = Bridge(app)
     native_window = _WindowController()
@@ -249,7 +287,7 @@ def _capture_main(
     engine.warnings.connect(
         lambda values: warnings.extend(error.toString() for error in values)
     )
-    captured: tuple[int, int] | None = None
+    captured: tuple[int, int, str] | None = None
     try:
         engine.load(QUrl.fromLocalFile(str(QML_DIR / "Main.qml")))
         _pump(application)
@@ -258,6 +296,24 @@ def _capture_main(
                 "Main.qml did not load cleanly: " + "; ".join(warnings)
             )
         window = engine.rootObjects()[0]
+        if scenario.simulated_system_high_contrast:
+            theme = window.findChild(QObject, "themeTokens")
+            if theme is None:
+                raise RuntimeError("Main.qml did not expose themeTokens")
+            theme.setProperty(
+                "systemPaletteOverride",
+                {
+                    "window": "#000000",
+                    "windowText": "#FFFFFF",
+                    "base": "#FFFFFF",
+                    "text": "#000000",
+                    "button": "#000000",
+                    "buttonText": "#FFFFFF",
+                    "highlight": "#FFD400",
+                    "highlightedText": "#000000",
+                },
+            )
+            theme.setProperty("systemHighContrast", True)
         window.setWidth(scenario.width)
         window.setHeight(scenario.height)
         if not scenario.onboarding:
@@ -319,7 +375,7 @@ def _capture_hud(
     application: QApplication,
     scenario: Scenario,
     destination: Path,
-) -> tuple[int, int, list[str]]:
+) -> tuple[int, int, str, list[str]]:
     app = _ArtifactApp(scenario)
     bridge = Bridge(app)
     native_window = _NativeWindow()
@@ -330,7 +386,7 @@ def _capture_hud(
     engine.warnings.connect(
         lambda values: warnings.extend(error.toString() for error in values)
     )
-    captured: tuple[int, int] | None = None
+    captured: tuple[int, int, str] | None = None
     try:
         engine.load(QUrl.fromLocalFile(str(QML_DIR / "Hud.qml")))
         _pump(application)
@@ -371,7 +427,7 @@ def _clear_managed_artifacts(output: Path) -> None:
         previous = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeError):
         previous = {}
-    if isinstance(previous, dict) and previous.get("schema_version") == 1:
+    if isinstance(previous, dict) and previous.get("schema_version") in (1, 2):
         artifacts = previous.get("scenarios", [])
         if not isinstance(artifacts, list):
             artifacts = []
@@ -415,11 +471,11 @@ def capture_scenarios(
         scenario = SCENARIO_BY_NAME[name]
         destination = output / f"{scenario.name}.png"
         if scenario.surface == "main":
-            width, height, warnings = _capture_main(
+            width, height, renderer_api, warnings = _capture_main(
                 application, scenario, destination
             )
         else:
-            width, height, warnings = _capture_hud(
+            width, height, renderer_api, warnings = _capture_hud(
                 application, scenario, destination
             )
         artifacts.append(
@@ -432,21 +488,27 @@ def capture_scenarios(
                 "text_scale": scenario.text_scale,
                 "theme": scenario.theme,
                 "visual_effects": scenario.visual_effects,
+                "simulated_system_high_contrast": (
+                    scenario.simulated_system_high_contrast
+                ),
+                "renderer_api": renderer_api,
                 "qml_warnings": warnings,
                 "sha256": _sha256(destination),
             }
         )
 
     manifest: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "purpose": "platform layout evidence; not a pixel-perfect golden",
         "capture_scope": {
             "proves": (
-                "QML layout, platform typography, and labelled renderer output"
+                "QML layout, platform typography, and effective renderer API "
+                "observed after each capture"
             ),
             "does_not_prove": (
                 "native Mica/Vibrancy, an active OS High Contrast palette, "
-                "focus retention, or accessibility technology behavior"
+                "focus retention, or accessibility technology behavior; the "
+                "divergent system High Contrast scenario is a labelled fixture"
             ),
         },
         "platform": {
@@ -456,8 +518,11 @@ def capture_scenarios(
             "python": platform.python_version(),
             "qt": qVersion(),
             "qpa": application.platformName(),
-            "qt_quick_backend": os.environ.get("QT_QUICK_BACKEND", ""),
-            "qsg_rhi_backend": os.environ.get("QSG_RHI_BACKEND", ""),
+            "qt_quick_backend_request": os.environ.get("QT_QUICK_BACKEND", ""),
+            "qsg_rhi_backend_request": os.environ.get("QSG_RHI_BACKEND", ""),
+            "effective_renderer_apis": sorted(
+                {artifact["renderer_api"] for artifact in artifacts}
+            ),
         },
         "scenarios": artifacts,
     }

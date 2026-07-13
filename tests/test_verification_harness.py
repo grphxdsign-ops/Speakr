@@ -26,6 +26,7 @@ from PySide6.QtWidgets import QApplication
 from scripts.capture_ui_verification import capture_scenarios
 from scripts.verify_luminous_interface import (
     REQUIRED_EVIDENCE_TESTS,
+    ROUTED_PR12_PRODUCT_VETOES,
     detect_missing_interactive_windows_proof,
     detect_qml_runtime_warnings,
     diff_check_commands,
@@ -33,6 +34,7 @@ from scripts.verify_luminous_interface import (
     native_rect_matches_work_area,
     run_verification,
     sanitize_evidence_text,
+    scan_raw_runtime_outputs,
 )
 from speakr import qt_ui
 from speakr.interface_state import InterfaceState
@@ -154,6 +156,35 @@ class VerificationHarnessTests(unittest.TestCase):
             [misspelled],
         )
 
+    def test_every_qml_component_compiles_without_errors(self):
+        engine = QQmlApplicationEngine()
+        warnings = []
+        components = []
+        engine.warnings.connect(
+            lambda values: warnings.extend(error.toString() for error in values)
+        )
+        try:
+            for path in sorted(self.qml.glob("*.qml")):
+                with self.subTest(component=path.name):
+                    component = QQmlComponent(
+                        engine, QUrl.fromLocalFile(str(path))
+                    )
+                    components.append(component)
+                    self.assertEqual(
+                        component.status(),
+                        QQmlComponent.Status.Ready,
+                        [error.toString() for error in component.errors()],
+                    )
+                    self.assertEqual(component.errors(), [])
+            self.assertEqual(warnings, [])
+        finally:
+            dispose_qml_fixture(
+                self.qapp,
+                engine,
+                components=tuple(components),
+            )
+        self.assertEqual(warnings, [])
+
     def test_every_qml_component_is_reachable_and_has_no_unbounded_effect(self):
         sources = {
             path.stem: path.read_text(encoding="utf-8")
@@ -205,19 +236,54 @@ class VerificationHarnessTests(unittest.TestCase):
                 "file:///tmp/Icon.qml:50: QML Image: Cannot open: file:///tmp/missing.svg",
                 "qt.qpa.fonts: Populating font family aliases took 68 ms. Replace uses of missing font family 'SF Pro Text'",
                 "Scenegraph already initialized, setBackend() request ignored",
+                "Unable to initialize renderer Direct3D",
             )
         )
         matches = detect_qml_runtime_warnings(clean + diagnostics)
-        self.assertEqual(len(matches), 9)
+        self.assertEqual(len(matches), 10)
         skipped_focus = (
             "test_windows_native_probe_preserves_foreground_focus_and_caret "
             "(test_hud_qml.HudQmlTests.test_windows_native_probe_preserves_"
-            "foreground_focus_and_caret) ... skipped 'interactive desktop unavailable'"
+            "foreground_focus_and_caret) ... skipped 'interactive desktop unavailable'\n"
+            "test_native_windows_gpu_and_software_preserve_focus_and_caret "
+            "(test_renderer_truth.RendererDeviceTests.test_native_windows_gpu_"
+            "and_software_preserve_focus_and_caret) ... skipped "
+            "'Windows focus/caret identity unavailable'"
         )
-        expected = 1 if sys.platform == "win32" else 0
+        expected = 2 if sys.platform == "win32" else 0
         self.assertEqual(
             len(detect_missing_interactive_windows_proof(skipped_focus)), expected
         )
+
+    def test_raw_runtime_log_marker_scan_is_explicit_and_fail_closed(self):
+        clean = {
+            "unit_and_interface_tests": "Ran 211 tests\nOK\n",
+            "platform_screenshots": "Captured 11 UI scenarios\n",
+            "qmllint": "file:///advisory.qml:1: warning: advisory only\n",
+        }
+        self.assertEqual(scan_raw_runtime_outputs(clean), {})
+
+        dirty = dict(clean)
+        dirty["platform_screenshots"] += (
+            "Unable to initialize graphics renderer Direct3D\n"
+        )
+        self.assertEqual(
+            scan_raw_runtime_outputs(dirty),
+            {
+                "platform_screenshots": [
+                    "Unable to initialize graphics renderer Direct3D"
+                ]
+            },
+        )
+
+    def test_pr12_product_vetoes_are_routed_without_claiming_resolution(self):
+        self.assertEqual(
+            [item["id"] for item in ROUTED_PR12_PRODUCT_VETOES],
+            list(range(1, 12)),
+        )
+        for item in ROUTED_PR12_PRODUCT_VETOES:
+            self.assertIn("PR-12 integration", item["owner"])
+            self.assertTrue(item["veto"].endswith("."))
 
     def test_review_evidence_redacts_machine_local_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -535,6 +601,7 @@ class VerificationHarnessTests(unittest.TestCase):
     def test_platform_screenshot_manifest_is_complete_and_idempotent(self):
         names = (
             "help-light-off-640x520-200",
+            "home-system-high-contrast-divergent-640x520-200",
             "hud-error-high-contrast-large-200",
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -566,8 +633,16 @@ class VerificationHarnessTests(unittest.TestCase):
             first = capture_scenarios(output, names)
             second = capture_scenarios(output, names)
             self.assertEqual(first, second)
+            self.assertEqual(first["schema_version"], 2)
             self.assertEqual(len(first["scenarios"]), len(names))
             self.assertIn(first["platform"]["qpa"], {"offscreen", "windows", "cocoa"})
+            self.assertEqual(
+                first["platform"]["effective_renderer_apis"], ["Software"]
+            )
+            self.assertEqual(
+                first["platform"]["qt_quick_backend_request"], "software"
+            )
+            self.assertNotIn("qt_quick_backend", first["platform"])
             self.assertFalse(stale_managed.exists())
             self.assertFalse(retired_managed.exists())
             self.assertEqual(unrelated.read_text(encoding="utf-8"), "keep")
@@ -577,8 +652,17 @@ class VerificationHarnessTests(unittest.TestCase):
                 {artifact["file"] for artifact in first["scenarios"]},
             )
             self.assertIn("does_not_prove", first["capture_scope"])
+            system_high_contrast = next(
+                artifact
+                for artifact in first["scenarios"]
+                if artifact["name"].startswith("home-system-high-contrast")
+            )
+            self.assertTrue(
+                system_high_contrast["simulated_system_high_contrast"]
+            )
             for artifact in first["scenarios"]:
                 self.assertEqual(artifact["qml_warnings"], [])
+                self.assertEqual(artifact["renderer_api"], "Software")
                 self.assertEqual(len(artifact["sha256"]), 64)
                 self.assertGreater(artifact["width"], 0)
                 self.assertGreater(artifact["height"], 0)

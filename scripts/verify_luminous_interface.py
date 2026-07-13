@@ -32,14 +32,22 @@ REQUIRED_EVIDENCE_TESTS = {
         "tests.test_qml_load.QmlLoadTests.test_qml_teardown_destroys_roots_and_engine_before_bridge",
         "tests.test_qml_components.QmlComponentContractTests.test_new_primitives_load_without_warnings",
         "tests.test_settings_help_qml.SettingsHelpQmlTests.test_settings_load_render_and_teardown_emit_no_qml_warnings",
+        "tests.test_verification_harness.VerificationHarnessTests.test_every_qml_component_compiles_without_errors",
         "tests.test_verification_harness.VerificationHarnessTests.test_every_qml_component_is_reachable_and_has_no_unbounded_effect",
         "tests.test_verification_harness.VerificationHarnessTests.test_runtime_warning_parser_rejects_green_qml_failures",
         "tests.test_verification_harness.VerificationHarnessTests.test_platform_screenshot_runtime_diagnostics_fail_report",
+        "tests.test_verification_harness.VerificationHarnessTests.test_raw_runtime_log_marker_scan_is_explicit_and_fail_closed",
     ),
     "effects_contrast_and_fallbacks": (
         "tests.test_qml_components.QmlComponentContractTests.test_effect_resolution_and_material_opacity_are_deterministic",
-        "tests.test_qml_load.QmlLoadTests.test_light_and_dark_tokens_meet_contrast_contracts",
+        "tests.test_qml_load.QmlLoadTests.test_light_dark_and_manual_high_contrast_tokens_meet_contrast_contracts",
+        "tests.test_qml_components.QmlComponentContractTests.test_system_high_contrast_overrides_every_saved_theme_and_effect_choice",
+        "tests.test_qml_components.QmlComponentContractTests.test_divergent_system_palette_uses_canonical_pairs_in_rendered_components",
+        "tests.test_qml_components.QmlComponentContractTests.test_manual_high_contrast_component_states_and_focus_render_at_100_and_200_percent",
+        "tests.test_native_window.EffectResolutionTests.test_resolution_priority_and_native_materials",
         "tests.test_native_window.NativeControllerTests.test_explicit_high_contrast_theme_forces_solid_effects_off",
+        "tests.test_native_window.NativeControllerTests.test_native_failure_and_accessibility_preferences_fall_back_safely",
+        "tests.test_renderer_truth.RendererDeviceTests.test_software_preflight_renders_and_leaves_no_quick_objects",
         "tests.test_hud_qml.HudQmlTests.test_software_renderer_forces_reduced_tier_without_native_hud_blur",
         "tests.test_verification_harness.VerificationHarnessTests.test_effect_tier_theme_and_contrast_matrix",
     ),
@@ -57,6 +65,7 @@ REQUIRED_EVIDENCE_TESTS = {
         "tests.test_settings_help_qml.SettingsHelpQmlTests.test_settings_and_help_reflow_at_640_by_520_and_scaled_text",
         "tests.test_vocabulary_qml.VocabularyQmlTests.test_narrow_200_percent_reflow_and_visible_keyboard_focus",
         "tests.test_hud_qml.HudQmlTests.test_latched_monitor_geometry_reflows_large_hud_at_150_and_200_percent",
+        "tests.test_shell_home.ShellHomeTests.test_os_high_contrast_shell_screenshot_overrides_saved_light_full_at_100_and_200_percent",
         "tests.test_verification_harness.VerificationHarnessTests.test_all_pages_reflow_and_focus_heading_across_size_scale_matrix",
     ),
     "custom_chrome_and_native_fallback": (
@@ -64,7 +73,9 @@ REQUIRED_EVIDENCE_TESTS = {
         "tests.test_native_window.NativeControllerTests.test_custom_chrome_failure_restores_normal_window_flags",
         "tests.test_native_window.NativeControllerTests.test_run_native_ui_custom_chrome_fails_closed_under_offscreen_qpa",
         "tests.test_shell_home.ShellHomeTests.test_custom_chrome_reports_logical_hit_regions_and_44px_controls",
+        "tests.test_shell_home.ShellHomeTests.test_shell_uses_shared_tokens_and_accessible_window_copy",
         "tests.test_shell_home.ShellHomeTests.test_system_frame_fallback_hides_duplicate_custom_titlebar",
+        "tests.test_renderer_truth.RendererDeviceTests.test_gpu_preflight_failure_is_retryable_and_cleanup_is_exact",
         "tests.test_verification_harness.VerificationHarnessTests.test_windows_real_qpa_custom_maximize_changes_hwnd_and_restores",
     ),
     "hud_focus_concurrency_and_large_mode": (
@@ -72,32 +83,103 @@ REQUIRED_EVIDENCE_TESTS = {
         "tests.test_hud_qml.HudQmlTests.test_overlapping_capture_keeps_previous_job_secondary_and_stale_retire_is_safe",
         "tests.test_hud_qml.HudQmlTests.test_real_settle_timer_waits_for_capture_and_cannot_retire_newer_job",
         "tests.test_hud_qml.HudQmlTests.test_latched_monitor_geometry_reflows_large_hud_at_150_and_200_percent",
+        "tests.test_hud_qml.HudQmlTests.test_os_high_contrast_overrides_saved_hud_theme_and_full_effects",
+        "tests.test_renderer_truth.RendererDeviceTests.test_native_windows_gpu_and_software_preserve_focus_and_caret",
         "tests.test_verification_harness.VerificationHarnessTests.test_hud_focus_guard_fails_closed_and_latches_recovery",
     ),
     "keyboard_and_heading_focus": (
         "tests.test_shell_home.ShellHomeTests.test_navigation_and_practice_cancel_untimed_hotkey_capture",
         "tests.test_shell_home.ShellHomeTests.test_fullscreen_shortcut_uses_standard_key_and_invokes_controller",
         "tests.test_shell_home.ShellHomeTests.test_window_controls_follow_platform_visual_focus_order",
+        "tests.test_shell_home.ShellHomeTests.test_shell_uses_shared_tokens_and_accessible_window_copy",
         "tests.test_settings_help_qml.SettingsHelpQmlTests.test_focus_targets_remain_visible_at_supported_text_scales",
+        "tests.test_settings_help_qml.SettingsHelpQmlTests.test_windows_qpa_keeps_keyboard_and_reset_focus_visible",
         "tests.test_vocabulary_qml.VocabularyQmlTests.test_narrow_200_percent_reflow_and_visible_keyboard_focus",
+        "tests.test_verification_harness.VerificationHarnessTests.test_all_pages_reflow_and_focus_heading_across_size_scale_matrix",
     ),
     "privacy_and_outbound_boundary": (
         "tests.test_qml_load.QmlLoadTests.test_hostile_markup_in_plain_text_never_fetches_an_image",
         "tests.test_outbound_boundary.OutboundBoundaryTests.test_offline_interface_path_connects_only_to_loopback",
+        "tests.test_outbound_boundary.OutboundBoundaryTests.test_ollama_origin_is_forced_to_numeric_loopback",
         "tests.test_outbound_boundary.OutboundBoundaryTests.test_remote_ollama_config_cannot_send_dictated_text",
         "tests.test_artifact_privacy_scan.ArtifactPrivacyScanTests.test_rejects_remote_url_in_qml_but_not_localhost",
         "tests.test_artifact_privacy_scan.ArtifactPrivacyScanTests.test_rejects_browser_engine_and_addons_names",
+        "tests.test_artifact_privacy_scan.ArtifactPrivacyScanTests.test_release_environment_is_essentials_only",
+        "tests.test_artifact_privacy_scan.ArtifactPrivacyScanTests.test_qml_keeps_required_qtnetwork_binding_without_app_api_imports",
         "tests.test_verification_harness.VerificationHarnessTests.test_verification_tools_add_no_network_surface",
     ),
     "lifecycle_and_fail_closed_guards": (
         "tests.test_verification_harness.VerificationHarnessTests.test_close_hides_main_while_tray_and_event_loop_remain_alive",
         "tests.test_verification_harness.VerificationHarnessTests.test_show_main_restores_hidden_and_minimized_window",
         "tests.test_verification_harness.VerificationHarnessTests.test_hud_focus_guard_fails_closed_and_latches_recovery",
+        "tests.test_renderer_truth.RendererDeviceTests.test_required_main_gate_and_commit_order",
+        "tests.test_renderer_truth.PreparedHandoffTests.test_frontend_commit_orders_prepare_before_core_and_aborts_once",
     ),
     "platform_screenshot_artifacts": (
         "tests.test_verification_harness.VerificationHarnessTests.test_platform_screenshot_manifest_is_complete_and_idempotent",
     ),
 }
+
+
+# These are product-owned findings from the first PR-12 review. PR-11 records
+# and routes them without changing production QML or behavior.
+ROUTED_PR12_PRODUCT_VETOES = (
+    {
+        "id": 1,
+        "owner": "Shell/Home + HUD + browser recovery (PR-12 integration)",
+        "veto": "Toggle-mode Hold/release instructions are unsafe/contradictory across Home, HUD, browser — interaction truth.",
+    },
+    {
+        "id": 2,
+        "owner": "Settings + Onboarding + browser recovery (PR-12 integration)",
+        "veto": "Windows '+' hotkeys force Toggle while Settings/Onboarding show impossible Hold; capture promises combinations but captures one key — hotkey presentation.",
+    },
+    {
+        "id": 3,
+        "owner": "Browser recovery (PR-12 integration)",
+        "veto": "Browser shortcut capture falsely says 'no hidden background access' despite untimed global hook — privacy copy.",
+    },
+    {
+        "id": 4,
+        "owner": "Shell/Home (PR-12 integration)",
+        "veto": "Title-bar local privacy cue disappears below 720px/above 150% — low-vision/privacy.",
+    },
+    {
+        "id": 5,
+        "owner": "Browser recovery (PR-12 integration)",
+        "veto": "Browser privacy checkboxes are all labeled 'Enabled' and never show On/Off truth — browser a11y/privacy.",
+    },
+    {
+        "id": 6,
+        "owner": "Onboarding/Practice (PR-12 integration)",
+        "veto": "Practice idle shows Retry before an attempt and says Waiting for sound before listening — Practice truth.",
+    },
+    {
+        "id": 7,
+        "owner": "Onboarding/Practice (PR-12 integration)",
+        "veto": "Onboarding Practice has competing Start Practice + Finish setup primaries and duplicate Skip/Finish path — new/elderly hierarchy.",
+    },
+    {
+        "id": 8,
+        "owner": "Shared foundation accessibility (PR-12 integration)",
+        "veto": "SectionHeading titles are ignored/grouped, absent from screen-reader heading navigation — shared a11y.",
+    },
+    {
+        "id": 9,
+        "owner": "Shell/Home (PR-12 integration)",
+        "veto": "Home uses forbidden four-card summary and pushes status/privacy/latest outcome below default 960x700 fold — shell/Home hierarchy.",
+    },
+    {
+        "id": 10,
+        "owner": "Onboarding/Practice (PR-12 integration)",
+        "veto": "Future onboarding steps are disabled but announced as 'Return to…' — setup a11y.",
+    },
+    {
+        "id": 11,
+        "owner": "HUD (PR-12 integration)",
+        "veto": "HUD opt-in background announcements expose every pipeline stage instead of coalesced Listening / Processing locally / final — HUD a11y/privacy.",
+    },
+)
 
 
 def invalid_evidence_test_ids(
@@ -146,6 +228,14 @@ QML_RUNTIME_WARNING_PATTERNS = (
         r"(?im)^.*Scenegraph already initialized,\s*"
         r"setBackend\(\) request ignored.*$"
     ),
+    re.compile(
+        r"(?im)^.*(?:qml|qrc|file):.*\.qml.*(?:error|warning).*$"
+    ),
+    re.compile(r"(?im)^.*scene\s*graph.*(?:error|failed).*$"),
+    re.compile(
+        r"(?im)^.*(?:failed|unable) to (?:create|initialize).*"
+        r"(?:RHI|renderer|graphics|Direct3D|Metal|OpenGL|Vulkan).*$"
+    ),
 )
 
 # Runtime diagnostics may surface from either the unittest process or the
@@ -160,7 +250,7 @@ RUNTIME_DIAGNOSTIC_STEPS = frozenset(
 
 
 def detect_qml_runtime_warnings(output: str) -> list[str]:
-    """Return unique runtime QML warning lines from a test-process log."""
+    """Return unique QML/renderer diagnostics from a runtime-process log."""
 
     matches = []
     seen = set()
@@ -173,14 +263,32 @@ def detect_qml_runtime_warnings(output: str) -> list[str]:
     return matches
 
 
+def scan_raw_runtime_outputs(outputs: dict[str, str]) -> dict[str, list[str]]:
+    """Scan unredacted subprocess output and return only failing markers.
+
+    The raw text stays in memory: review logs are path-redacted separately.
+    Only runtime steps are eligible so advisory qmllint text cannot be
+    misrepresented as an application-rendering failure.
+    """
+
+    findings: dict[str, list[str]] = {}
+    for name in sorted(RUNTIME_DIAGNOSTIC_STEPS):
+        diagnostics = detect_qml_runtime_warnings(outputs.get(name, ""))
+        if diagnostics:
+            findings[name] = diagnostics
+    return findings
+
+
 def detect_missing_interactive_windows_proof(output: str) -> list[str]:
     """Reject a green Windows run that skipped its focus/caret probe."""
 
     if platform.system() != "Windows":
         return []
     pattern = re.compile(
-        r"(?im)^.*test_windows_native_probe_preserves_foreground_focus_and_caret"
-        r".*\.\.\.\s+skipped.*$"
+        r"(?im)^.*(?:"
+        r"test_windows_native_probe_preserves_foreground_focus_and_caret|"
+        r"test_native_windows_gpu_and_software_preserve_focus_and_caret"
+        r").*\.\.\.\s+skipped.*$"
     )
     return [" ".join(match.group(0).strip().split()) for match in pattern.finditer(output)]
 
@@ -361,15 +469,18 @@ def run_verification(output: Path) -> int:
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     report: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "running",
         "automated_status": "running",
         "manual_platform_status": "required",
+        "routed_product_findings_status": "open_pr12_inputs",
+        "routed_product_findings": ROUTED_PR12_PRODUCT_VETOES,
         "root": "<repo>",
         "required_evidence_tests": REQUIRED_EVIDENCE_TESTS,
         "manual_platform_gates": (
             "Windows WM_NCHITTEST with physical mixed-DPI coordinates",
             "Windows 11 Snap Layout hover and Win+Z",
+            "Windows system High Contrast and NVDA behavior",
             "macOS compositor, zoom/fullscreen, and VoiceOver",
             "foreground caret identity when an interactive Windows desktop is unavailable",
         ),
@@ -377,6 +488,10 @@ def run_verification(output: Path) -> int:
             "tests.test_hud_qml.HudQmlTests.test_windows_native_probe_preserves_foreground_focus_and_caret": (
                 "A skip is not focus-retention proof; run the foreground/caret "
                 "gate on an interactive Windows desktop."
+            ),
+            "tests.test_renderer_truth.RendererDeviceTests.test_native_windows_gpu_and_software_preserve_focus_and_caret": (
+                "A skip is not renderer/focus proof; run both renderer paths "
+                "on an interactive Windows desktop."
             ),
             "tests.test_verification_harness.VerificationHarnessTests.test_windows_10_real_qpa_uses_scene_glass_and_visible_system_frame": (
                 "Required on Windows; skipped by design on non-Windows hosts."
@@ -422,6 +537,7 @@ def run_verification(output: Path) -> int:
         output,
         qmllint_executable=qmllint_executable,
     )
+    raw_runtime_outputs: dict[str, str] = {}
     for index, (name, command, overrides) in enumerate(commands, start=1):
         environment = os.environ.copy()
         environment.update(overrides)
@@ -434,6 +550,8 @@ def run_verification(output: Path) -> int:
             check=False,
         )
         combined_output = completed.stdout + "\n" + completed.stderr
+        if name in RUNTIME_DIAGNOSTIC_STEPS:
+            raw_runtime_outputs[name] = combined_output
         runtime_warnings = (
             detect_qml_runtime_warnings(combined_output)
             if name in RUNTIME_DIAGNOSTIC_STEPS
@@ -488,6 +606,47 @@ def run_verification(output: Path) -> int:
             return completed.returncode or 1
         print(f"PASS: {name}")
         _write_report(report_path, report)
+
+    raw_findings = scan_raw_runtime_outputs(raw_runtime_outputs)
+    raw_scan_index = len(commands) + 1
+    raw_scan_log = f"{raw_scan_index:02d}-raw_runtime_log_marker_scan.log"
+    raw_scan_text = (
+        "Scanned unredacted in-memory stdout/stderr from: "
+        + ", ".join(sorted(raw_runtime_outputs))
+        + "\nForbidden QML/renderer diagnostic markers: "
+        + str(sum(len(items) for items in raw_findings.values()))
+        + "\n"
+    )
+    (output / raw_scan_log).write_text(raw_scan_text, encoding="utf-8")
+    safe_raw_findings = {
+        name: [sanitize_evidence_text(item, output) for item in items]
+        for name, items in raw_findings.items()
+    }
+    report["steps"].append(
+        {
+            "name": "raw_runtime_log_marker_scan",
+            "command": ["internal", "scan unredacted runtime stdout/stderr"],
+            "exit_code": 1 if raw_findings else 0,
+            "log": raw_scan_log,
+            "scanned_steps": sorted(raw_runtime_outputs),
+            "runtime_qml_warnings": safe_raw_findings,
+            "missing_platform_proof": [],
+        }
+    )
+    if raw_findings:
+        report["status"] = "failed"
+        report["automated_status"] = "failed"
+        report["failed_step"] = "raw_runtime_log_marker_scan"
+        _write_report(report_path, report)
+        print(
+            "FAILED: raw_runtime_log_marker_scan "
+            f"({sum(len(items) for items in raw_findings.values())} marker(s)); "
+            f"see {output / raw_scan_log}",
+            file=sys.stderr,
+        )
+        return 1
+    print("PASS: raw_runtime_log_marker_scan")
+    _write_report(report_path, report)
 
     report["status"] = "passed"
     report["automated_status"] = "passed"
