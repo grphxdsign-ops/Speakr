@@ -1294,6 +1294,7 @@ class SpeakrApp:
         sections = {
             "interface": {
                 "ui.theme": "system",
+                "ui.visual_effects": "system",
                 "ui.density": "comfortable",
                 "ui.text_scale": "system",
                 "ui.reduced_motion": "system",
@@ -1411,6 +1412,7 @@ class SpeakrApp:
             "compute_type": {"auto", "int8", "float16", "float32", "int8_float16"},
             "injection": {"paste", "type"},
             "ui.theme": {"system", "light", "dark", "high_contrast"},
+            "ui.visual_effects": {"system", "full", "reduced", "off"},
             "ui.density": {"comfortable", "compact"},
             "ui.text_scale": {"system", "110", "125", "150", "175", "200"},
             "ui.reduced_motion": {"system", "reduce"},

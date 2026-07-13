@@ -404,6 +404,38 @@ class AppLifecycleTests(unittest.TestCase):
             "busy_setting",
         )
 
+    def test_visual_effects_setting_is_validated_and_can_change_while_busy(self):
+        app = SpeakrApp.__new__(SpeakrApp)
+        app._recording = True
+        app._practice_recording = False
+        app.interface_state = InterfaceState({"availability": "ready"})
+        app.config = mock.Mock()
+        app._notify_settings = mock.Mock()
+        app._pipeline_busy = mock.Mock(return_value=False)
+
+        self.assertFalse(app.set_setting("ui.visual_effects", "sparkles"))
+        app.config.set.assert_not_called()
+
+        self.assertTrue(app.set_setting("ui.visual_effects", "reduced"))
+        app.config.set.assert_called_once_with(
+            "ui", "visual_effects", value="reduced"
+        )
+        app._notify_settings.assert_called_once()
+
+    def test_interface_reset_includes_visual_effects_default(self):
+        app = SpeakrApp.__new__(SpeakrApp)
+        app._recording = False
+        app._practice_recording = False
+        app.interface_state = InterfaceState({"availability": "ready"})
+        app.config = mock.Mock()
+        app._notify_settings = mock.Mock()
+        app._pipeline_busy = mock.Mock(return_value=False)
+
+        self.assertTrue(app.reset_settings_section("interface"))
+
+        updates = app.config.set_many.call_args.args[0]
+        self.assertEqual(updates["ui.visual_effects"], "system")
+
     def test_vocabulary_change_is_blocked_with_inline_issue_during_capture(self):
         app = SpeakrApp.__new__(SpeakrApp)
         app._practice_lock = threading.RLock()

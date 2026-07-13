@@ -138,6 +138,7 @@ DEFAULTS = {
         "onboarding_complete": False,
         "open_window_on_start": True,
         "theme": "system",          # system | light | dark | high_contrast
+        "visual_effects": "system",  # system | full | reduced | off
         "density": "comfortable",  # comfortable | compact
         "text_scale": "system",    # system | 110 | 125 | 150 | 175 | 200
         "reduced_motion": "system",  # system | reduce
