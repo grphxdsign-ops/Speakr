@@ -35,28 +35,34 @@ Rectangle {
 
     GridLayout {
         id: noticeLayout
+        objectName: "noticeLayout"
         anchors.fill: parent
         anchors.margins: root.tokens.space12
-        columns: width >= root.tokens.metric(420) ? 3 : 2
+        columns: 2
         columnSpacing: root.tokens.space12
         rowSpacing: root.tokens.space8
 
         Rectangle {
+            objectName: "noticeIcon"
             Layout.preferredWidth: root.tokens.metric(28)
             Layout.preferredHeight: Layout.preferredWidth
+            Layout.minimumWidth: Layout.preferredWidth
+            Layout.maximumWidth: Layout.preferredWidth
             Layout.alignment: Qt.AlignTop
             radius: width / 2
-            color: root.tokens.withAlpha(root.semanticColor,
-                                        root.tokens.highContrast ? 1.0 : 0.16)
+            color: root.tokens.highContrast
+                   ? root.tokens.accent
+                   : root.tokens.withAlpha(root.semanticColor, 0.16)
             border.width: 1
             border.color: root.semanticColor
 
             PlainText {
+                objectName: "noticeIconGlyph"
                 anchors.centerIn: parent
                 text: root.kind === "success" ? "\u2713"
                       : (root.kind === "danger" ? "\u00d7"
                          : (root.kind === "warning" ? "!" : "i"))
-                color: root.tokens.highContrast ? root.tokens.background
+                color: root.tokens.highContrast ? root.tokens.accentText
                                                 : root.semanticColor
                 font.family: root.tokens.fontFamily
                 font.pixelSize: root.tokens.body
@@ -66,11 +72,14 @@ Rectangle {
         }
 
         ColumnLayout {
+            objectName: "noticeTextColumn"
             Layout.fillWidth: true
+            Layout.minimumWidth: 0
             spacing: root.tokens.space4
 
             PlainText {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 visible: root.title.length > 0
                 text: root.title
                 color: root.tokens.text
@@ -83,6 +92,7 @@ Rectangle {
 
             PlainText {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 text: root.message
                 color: root.tokens.text
                 font.family: root.tokens.fontFamily
@@ -93,6 +103,7 @@ Rectangle {
 
             PlainText {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 visible: root.detail.length > 0
                 text: root.detail
                 color: root.tokens.mutedText
@@ -104,8 +115,12 @@ Rectangle {
         }
 
         QuietButton {
+            objectName: "noticeAction"
             visible: root.actionText.length > 0
-            Layout.columnSpan: noticeLayout.columns === 2 ? 2 : 1
+            Layout.columnSpan: 2
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.maximumWidth: noticeLayout.width
             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
             tokens: root.tokens
             text: root.actionText

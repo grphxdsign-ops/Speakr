@@ -61,11 +61,12 @@ Rectangle {
     }
 
     Rectangle {
+        objectName: "settingSeparator"
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
         height: 1
-        color: root.tokens.withAlpha(root.tokens.border, 0.72)
+        color: root.tokens.border
     }
 
     GridLayout {

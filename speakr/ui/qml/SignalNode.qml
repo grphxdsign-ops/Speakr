@@ -17,15 +17,14 @@ ColumnLayout {
     Accessible.description: accessibleDescription
 
     Rectangle {
+        objectName: "signalNodeSurface"
         Layout.alignment: Qt.AlignHCenter
         implicitWidth: root.tokens.metric(24)
         implicitHeight: implicitWidth
         Layout.preferredWidth: implicitWidth
         Layout.preferredHeight: implicitHeight
         radius: implicitWidth / 2
-        color: root.active
-               ? root.tokens.withAlpha(root.tokens.accent, 0.24)
-               : (root.reached ? root.tokens.accent : root.tokens.contentSurface)
+        color: root.reached ? root.tokens.accent : root.tokens.surface
         border.width: root.active ? 2 : root.tokens.borderWidth
         border.color: root.reached || root.active ? root.tokens.accent
                                                  : root.tokens.border

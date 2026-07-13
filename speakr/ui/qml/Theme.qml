@@ -47,6 +47,10 @@ QtObject {
                                                  : (dark ? "#A89AFB" : "#6657D8")
     readonly property color accentText: highContrast ? systemPalette.highlightedText
                                                      : (dark ? "#17182A" : "#F8FAFF")
+    readonly property color accentHoverSurface: highContrast ? systemPalette.highlight
+                                                             : (dark ? "#B5A9FF" : "#594AC7")
+    readonly property color accentPressedSurface: highContrast ? systemPalette.highlight
+                                                               : (dark ? "#9788E3" : "#4F41B3")
 
     // Compatibility aliases used throughout the existing pages. These stay
     // opaque; transparent material is opt-in through the role tokens below.
@@ -70,6 +74,12 @@ QtObject {
                                                  : (dark ? "#FFAAAA" : "#A52A2A")
     readonly property color dangerSurface: highContrast ? systemPalette.base
                                                         : (dark ? "#3D222E" : "#FDE9E9")
+    readonly property color dangerHoverSurface: highContrast ? systemPalette.highlight
+                                                             : danger
+    readonly property color dangerPressedSurface: highContrast ? systemPalette.highlight
+                                                               : (dark ? "#E7929E" : "#872020")
+    readonly property color dangerStrongText: highContrast ? systemPalette.highlightedText
+                                                           : accentText
     readonly property color info: highContrast ? systemPalette.highlight
                                                : (dark ? "#8FC9F5" : "#245F93")
     readonly property color infoSurface: highContrast ? systemPalette.base

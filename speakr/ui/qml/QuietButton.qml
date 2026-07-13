@@ -7,6 +7,26 @@ Button {
     required property var tokens
     property string kind: "secondary" // primary | secondary | quiet | danger
     property string accessibleDescription: ""
+    readonly property color resolvedContentColor: {
+        if (!enabled) return tokens.disabledText
+        if (kind === "primary") return tokens.accentText
+        if (kind === "danger")
+            return down || hovered ? tokens.dangerStrongText : tokens.danger
+        if (tokens.highContrast && (down || hovered)) return tokens.accentText
+        return tokens.text
+    }
+    readonly property color resolvedBackgroundColor: {
+        if (!enabled) return tokens.surfaceRaised
+        if (kind === "primary")
+            return down ? tokens.accentPressedSurface
+                 : (hovered ? tokens.accentHoverSurface : tokens.accent)
+        if (kind === "danger")
+            return down ? tokens.dangerPressedSurface
+                 : (hovered ? tokens.dangerHoverSurface : tokens.dangerSurface)
+        if (down) return tokens.pressed
+        if (hovered) return tokens.hover
+        return kind === "quiet" ? "transparent" : tokens.contentSurface
+    }
 
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
@@ -24,16 +44,9 @@ Button {
 
     contentItem: PlainText {
         id: contentLabel
+        objectName: "buttonLabel"
         text: control.text
-        color: !control.enabled
-               ? control.tokens.disabledText
-               : (control.tokens.highContrast
-                  && (control.down || control.hovered)
-                  ? control.tokens.accentText
-                  : (control.kind === "primary" ? control.tokens.accentText
-                                                 : (control.kind === "danger"
-                                                    ? control.tokens.danger
-                                                    : control.tokens.text)))
+        color: control.resolvedContentColor
         font.family: control.tokens.fontFamily
         font.pixelSize: control.tokens.label
         font.weight: control.kind === "primary" ? Font.DemiBold : Font.Medium
@@ -44,24 +57,10 @@ Button {
 
     background: Item {
         Rectangle {
+            objectName: "buttonBackground"
             anchors.fill: parent
             radius: control.tokens.radiusControl
-            color: {
-                if (!control.enabled)
-                    return control.tokens.surfaceRaised
-                if (control.kind === "primary")
-                    return control.down ? Qt.darker(control.tokens.accent, 1.10)
-                                        : control.tokens.accent
-                if (control.kind === "danger")
-                    return control.down ? control.tokens.pressed
-                                        : control.tokens.dangerSurface
-                if (control.down)
-                    return control.tokens.pressed
-                if (control.hovered)
-                    return control.tokens.hover
-                return control.kind === "quiet" ? "transparent"
-                                                : control.tokens.contentSurface
-            }
+            color: control.resolvedBackgroundColor
             border.width: control.kind === "quiet" && !control.hovered
                           ? 0 : control.tokens.borderWidth
             border.color: control.kind === "danger" ? control.tokens.danger

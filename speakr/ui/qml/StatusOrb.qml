@@ -25,19 +25,22 @@ RowLayout {
     Accessible.description: description.length > 0 ? description : statusKind
 
     Rectangle {
+        objectName: "statusOrbBadge"
         Layout.preferredWidth: root.tokens.metric(root.compact ? 24 : 30)
         Layout.preferredHeight: Layout.preferredWidth
         Layout.alignment: Qt.AlignVCenter
         radius: width / 2
-        color: root.tokens.withAlpha(root.stateColor,
-                                    root.tokens.highContrast ? 1.0 : 0.16)
+        color: root.tokens.highContrast
+               ? root.tokens.accent
+               : root.tokens.withAlpha(root.stateColor, 0.16)
         border.width: root.tokens.highContrast ? 2 : 1
         border.color: root.stateColor
 
         PlainText {
+            objectName: "statusOrbGlyph"
             anchors.centerIn: parent
             text: root.symbol
-            color: root.tokens.highContrast ? root.tokens.background : root.stateColor
+            color: root.tokens.highContrast ? root.tokens.accentText : root.stateColor
             font.family: root.tokens.fontFamily
             font.pixelSize: root.tokens.fontSize(root.compact ? 14 : 16)
             font.weight: Font.Bold
