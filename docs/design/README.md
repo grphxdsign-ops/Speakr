@@ -1,8 +1,22 @@
-# Quiet Signal reference boards
+# Luminous Orbit reference boards
 
 These generated boards are design references only. The shipped interface is
 implemented with local QML, local image assets, and operating-system fonts.
 None of these raster boards are loaded by the application.
+
+The current Luminous Orbit set is:
+
+- [`luminous-orbit-home-light-dark.png`](luminous-orbit-home-light-dark.png): adaptive light and dark Home shells with custom chrome.
+- [`luminous-orbit-compact-high-contrast.png`](luminous-orbit-compact-high-contrast.png): compact 640 by 520 navigation, 200% text intent, and the opaque High Contrast fallback.
+- [`luminous-orbit-onboarding-practice.png`](luminous-orbit-onboarding-practice.png): the untimed five-step setup flow with explicit arrows and optional Practice.
+- [`luminous-orbit-settings-vocabulary.png`](luminous-orbit-settings-vocabulary.png): searchable visual-effects settings and separated vocabulary collections.
+- [`luminous-orbit-hud-motion.png`](luminous-orbit-hud-motion.png): the fixed-size HUD state sequence, errors, and motion timings.
+
+Generated text and small details are illustrative. `DESIGN.md` and
+`luminous-orbit-spec.md` are authoritative whenever a raster board differs
+from the product copy or accessibility contract.
+
+## Archived Quiet Signal boards
 
 ## Main window
 
