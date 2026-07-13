@@ -151,14 +151,23 @@ jobs:
           print("Permitted one-time model seed is ready for offline artifact proof.")
           PY
 
+      - name: Configure non-distributable macOS proof identity
+        if: needs.release_context.outputs.publish != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "MAC_DISTRIBUTION_SIGNED=false" >> "$GITHUB_ENV"
+          echo "SPEAKR_SIGN_IDENTITY=-" >> "$GITHUB_ENV"
+          echo "Manual proof is forced to ad-hoc signing and cannot access distribution credentials."
+
       - name: Prepare Developer ID identity
+        if: needs.release_context.outputs.publish == 'true'
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          PUBLISH_RELEASE: ${{ needs.release_context.outputs.publish }}
         shell: bash
         run: |
           set -euo pipefail
@@ -169,20 +178,9 @@ jobs:
             fi
           done
 
-          if [ "$missing" -ne 0 ] && [ "$missing" -ne 5 ]; then
-            echo "::error::macOS release credentials are partially configured; provide all five signing/notarization secrets or none."
-            exit 1
-          fi
-          if [ "$PUBLISH_RELEASE" = "true" ] && [ "$missing" -ne 0 ]; then
+          if [ "$missing" -ne 0 ]; then
             echo "::error::Tag publication is blocked until Developer ID and notarization credentials are configured."
             exit 1
-          fi
-
-          if [ "$missing" -eq 5 ]; then
-            echo "MAC_DISTRIBUTION_SIGNED=false" >> "$GITHUB_ENV"
-            echo "SPEAKR_SIGN_IDENTITY=-" >> "$GITHUB_ENV"
-            echo "No distribution credentials: producing a nonpublishing ad-hoc proof."
-            exit 0
           fi
 
           python - <<'PY'
@@ -216,7 +214,7 @@ jobs:
         run: bash package_mac.sh
 
       - name: Notarize and staple distribution app
-        if: env.MAC_DISTRIBUTION_SIGNED == 'true'
+        if: needs.release_context.outputs.publish == 'true' && env.MAC_DISTRIBUTION_SIGNED == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -262,7 +260,7 @@ jobs:
           fi
 
       - name: Notarize and staple distribution DMG
-        if: env.MAC_DISTRIBUTION_SIGNED == 'true'
+        if: needs.release_context.outputs.publish == 'true' && env.MAC_DISTRIBUTION_SIGNED == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -473,6 +471,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Remove macOS signing material
+        if: always() && needs.release_context.outputs.publish == 'true'
+        shell: bash
+        run: |
+          rm -f cert.p12
+          security delete-keychain build.keychain >/dev/null 2>&1 || true
+
   windows_installer:
     name: Windows installed-artifact proof
     needs: release_context
@@ -522,11 +527,18 @@ jobs:
           '@ | python -
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Configure non-distributable Windows proof identity
+        if: needs.release_context.outputs.publish != 'true'
+        shell: pwsh
+        run: |
+          "WINDOWS_DISTRIBUTION_SIGNED=false" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Manual proof is forced to unsigned mode and cannot access distribution credentials."
+
       - name: Prepare Windows Authenticode identity
+        if: needs.release_context.outputs.publish == 'true'
         env:
           WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          PUBLISH_RELEASE: ${{ needs.release_context.outputs.publish }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -535,13 +547,8 @@ jobs:
           if ($hasPfx -ne $hasPassword) {
             throw "Windows release credentials are partially configured; provide both PFX and password or neither."
           }
-          if ($env:PUBLISH_RELEASE -eq "true" -and !$hasPfx) {
-            throw "Tag publication is blocked until the Windows Authenticode certificate is configured."
-          }
           if (!$hasPfx) {
-            "WINDOWS_DISTRIBUTION_SIGNED=false" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-            Write-Host "No Authenticode credentials: producing an unsigned, non-distributable proof."
-            exit 0
+            throw "Tag publication is blocked until the Windows Authenticode certificate is configured."
           }
 
           $pfxPath = Join-Path $env:RUNNER_TEMP "speakr-code-signing.pfx"
@@ -561,8 +568,6 @@ jobs:
           Write-Host "Windows Authenticode identity prepared."
 
       - name: Build and scan Windows onedir
-        env:
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -576,20 +581,24 @@ jobs:
           Speakr does not modify Qt source files.
           '@ | Set-Content -Encoding utf8 dist\Speakr\THIRD_PARTY_NOTICES.txt
           python scripts\scan_artifact_privacy.py dist\Speakr
-          if ($env:WINDOWS_DISTRIBUTION_SIGNED -eq "true") {
-            & $env:WINDOWS_SIGNTOOL sign /fd SHA256 /td SHA256 `
-              /tr http://timestamp.digicert.com `
-              /f $env:WINDOWS_SIGNING_PFX /p $env:WINDOWS_CERTIFICATE_PASSWORD `
-              dist\Speakr\Speakr.exe
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            & $env:WINDOWS_SIGNTOOL verify /pa /all /v dist\Speakr\Speakr.exe
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+
+      - name: Sign Windows application for distribution
+        if: needs.release_context.outputs.publish == 'true'
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          & $env:WINDOWS_SIGNTOOL sign /fd SHA256 /td SHA256 `
+            /tr http://timestamp.digicert.com `
+            /f $env:WINDOWS_SIGNING_PFX /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+            dist\Speakr\Speakr.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $env:WINDOWS_SIGNTOOL verify /pa /all /v dist\Speakr\Speakr.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Inno Setup installer
         env:
           APP_VERSION: ${{ needs.release_context.outputs.version }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
@@ -606,15 +615,27 @@ jobs:
           & $iscc "/DAppVersion=$env:APP_VERSION" scripts\installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path -LiteralPath Speakr-Setup.exe)) { throw "Installer output is missing" }
-          if ($env:WINDOWS_DISTRIBUTION_SIGNED -eq "true") {
-            & $env:WINDOWS_SIGNTOOL sign /fd SHA256 /td SHA256 `
-              /tr http://timestamp.digicert.com `
-              /f $env:WINDOWS_SIGNING_PFX /p $env:WINDOWS_CERTIFICATE_PASSWORD `
-              Speakr-Setup.exe
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            & $env:WINDOWS_SIGNTOOL verify /pa /all /v Speakr-Setup.exe
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+
+      - name: Sign Windows installer for distribution
+        if: needs.release_context.outputs.publish == 'true'
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          & $env:WINDOWS_SIGNTOOL sign /fd SHA256 /td SHA256 `
+            /tr http://timestamp.digicert.com `
+            /f $env:WINDOWS_SIGNING_PFX /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+            Speakr-Setup.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $env:WINDOWS_SIGNTOOL verify /pa /all /v Speakr-Setup.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Remove Windows signing material
+        if: always() && needs.release_context.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $fixedPfx = Join-Path $env:RUNNER_TEMP "speakr-code-signing.pfx"
+          Remove-Item -LiteralPath $fixedPfx -Force -ErrorAction SilentlyContinue
           if (![string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX)) {
             Remove-Item -LiteralPath $env:WINDOWS_SIGNING_PFX -Force -ErrorAction SilentlyContinue
           }

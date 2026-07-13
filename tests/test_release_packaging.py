@@ -75,6 +75,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
             encoding="utf-8"
         )
 
+    def _step(self, name):
+        marker = f"      - name: {name}\n"
+        start = self.workflow.index(marker)
+        end = self.workflow.find("\n      - name: ", start + len(marker))
+        return self.workflow[start:] if end == -1 else self.workflow[start:end]
+
     def test_manual_dispatch_cannot_publish_and_publisher_waits_for_both(self):
         self.assertIn("workflow_dispatch:", self.workflow)
         self.assertEqual(self.workflow.count('publish="true"'), 1)
@@ -113,6 +119,54 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("NON-DISTRIBUTABLE", self.workflow)
         self.assertNotIn("codesign --force --deep", self.workflow)
         self.assertNotIn("codesign --force --deep", self.mac_script)
+
+    def test_manual_proofs_cannot_receive_or_use_distribution_credentials(self):
+        mac_proof = self._step("Configure non-distributable macOS proof identity")
+        windows_proof = self._step(
+            "Configure non-distributable Windows proof identity"
+        )
+        self.assertIn(
+            "if: needs.release_context.outputs.publish != 'true'", mac_proof
+        )
+        self.assertIn(
+            "if: needs.release_context.outputs.publish != 'true'", windows_proof
+        )
+        self.assertNotIn("secrets.", mac_proof)
+        self.assertNotIn("secrets.", windows_proof)
+        self.assertIn("MAC_DISTRIBUTION_SIGNED=false", mac_proof)
+        self.assertIn("WINDOWS_DISTRIBUTION_SIGNED=false", windows_proof)
+
+        credential_steps = (
+            "Prepare Developer ID identity",
+            "Notarize and staple distribution app",
+            "Notarize and staple distribution DMG",
+            "Prepare Windows Authenticode identity",
+            "Sign Windows application for distribution",
+            "Sign Windows installer for distribution",
+        )
+        for name in credential_steps:
+            with self.subTest(name=name):
+                step = self._step(name)
+                self.assertIn("secrets.", step)
+                self.assertIn(
+                    "if: needs.release_context.outputs.publish == 'true'", step
+                )
+
+        self.assertNotIn("secrets.", self._step("Build and scan Windows onedir"))
+        self.assertNotIn("secrets.", self._step("Build Inno Setup installer"))
+        cleanup = self._step("Remove Windows signing material")
+        self.assertIn(
+            "if: always() && needs.release_context.outputs.publish == 'true'",
+            cleanup,
+        )
+        self.assertIn('Join-Path $env:RUNNER_TEMP "speakr-code-signing.pfx"', cleanup)
+        mac_cleanup = self._step("Remove macOS signing material")
+        self.assertIn(
+            "if: always() && needs.release_context.outputs.publish == 'true'",
+            mac_cleanup,
+        )
+        self.assertIn("rm -f cert.p12", mac_cleanup)
+        self.assertIn("security delete-keychain build.keychain", mac_cleanup)
 
     def test_pinned_build_tools_and_runtime_receipt_are_release_gates(self):
         self.assertIn("runs-on: macos-15", self.workflow)
