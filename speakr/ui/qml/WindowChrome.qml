@@ -102,11 +102,13 @@ Item {
                 Repeater {
                     model: 3
                     Rectangle {
+                        objectName: "chromeSignalNode"
                         required property int index
                         Layout.preferredWidth: root.tokens.metric(index === 1 ? 10 : 8)
                         Layout.preferredHeight: Layout.preferredWidth
                         radius: width / 2
-                        color: index === 1 ? root.tokens.accent : root.tokens.text
+                        color: index === 1 ? root.tokens.accentForeground
+                                           : root.tokens.text
                         Accessible.ignored: true
                     }
                 }

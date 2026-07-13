@@ -110,11 +110,11 @@ class HudQmlTests(unittest.TestCase):
         self.assertEqual(warnings, [])
 
     @staticmethod
-    def _system_accessibility(reduced_motion):
+    def _system_accessibility(reduced_motion, *, high_contrast=False):
         return mock.patch(
             "speakr.qt_ui._system_accessibility_preferences",
             return_value={
-                "system_high_contrast": False,
+                "system_high_contrast": bool(high_contrast),
                 "system_reduced_motion": bool(reduced_motion),
                 "system_reduce_transparency": False,
             },
@@ -525,23 +525,134 @@ class HudQmlTests(unittest.TestCase):
                     pipeline_job_id=501,
                     status_code=status_code,
                 )
-                QTest.qWait(190)
+                # The content crossfade swaps the state halfway through, then the
+                # panel edge runs its own bounded color transition.
+                QTest.qWait(300)
                 self._pump()
                 self.assertEqual(hud.property("displayedKind"), expected_kind)
                 self.assertEqual(
                     QColor(glyph.property("color")),
-                    QColor(theme.property("background")),
+                    QColor(theme.property("accentText")),
                 )
                 self.assertEqual(
                     QColor(badge.property("color")),
+                    QColor(theme.property("accent")),
+                )
+                self.assertEqual(
+                    QColor(badge.property("edgeColor")),
+                    QColor(theme.property("accentText")),
+                )
+                self.assertEqual(
+                    QColor(panel.property("edgeColor")),
                     QColor(theme.property(semantic_role)),
                 )
                 self.assertGreaterEqual(
                     self._contrast(
                         glyph.property("color"), badge.property("color")
                     ),
-                    4.5,
+                    7.0,
                 )
+                self.assertGreaterEqual(
+                    self._contrast(
+                        panel.property("edgeColor"), panel.property("fillColor")
+                    ),
+                    7.0,
+                )
+        finally:
+            self._close(bridge, engine)
+
+    def test_os_high_contrast_overrides_saved_hud_theme_and_full_effects(self):
+        with self._system_accessibility(False, high_contrast=True):
+            app, bridge, engine, hud = self._load_hud(
+                theme="light",
+                visual_effects="full",
+                hud_visibility="always",
+                reduced_motion="reduce",
+            )
+        try:
+            theme = hud.findChild(QObject, "hudTheme")
+            panel = hud.findChild(QObject, "hudPanel")
+            atmosphere = hud.findChild(QObject, "hudAtmosphere")
+            theme.setProperty(
+                "systemPaletteOverride",
+                {
+                    "window": "#000000",
+                    "windowText": "#FFFFFF",
+                    "base": "#FFFFFF",
+                    "text": "#000000",
+                    "button": "#000000",
+                    "buttonText": "#FFFFFF",
+                    "highlight": "#FFD400",
+                    "highlightedText": "#000000",
+                },
+            )
+            self._pump()
+            self.assertTrue(theme.property("systemHighContrastActive"))
+            self.assertTrue(theme.property("highContrast"))
+            self.assertFalse(theme.property("manualHighContrast"))
+            self.assertEqual(theme.property("effectTier"), "off")
+            self.assertAlmostEqual(
+                QColor(panel.property("fillColor")).alphaF(), 1.0, places=5
+            )
+            self.assertAlmostEqual(
+                QColor(theme.property("shadow")).alphaF(), 0.0, places=5
+            )
+            self.assertFalse(atmosphere.property("visible"))
+
+            app.interface_state.update(
+                capture="listening",
+                capture_job_id=701,
+                mic_level_band="good",
+            )
+            self._pump(5)
+            self.assertEqual(hud.property("displayedKind"), "listening")
+            self.assertEqual(
+                QColor(panel.property("edgeColor")),
+                QColor(theme.property("text")),
+            )
+            meter_segments = sorted(
+                (
+                    item
+                    for item in self._visual_items(hud.contentItem())
+                    if item.objectName() == "hudMeterSegment"
+                ),
+                key=lambda item: int(item.property("index")),
+            )
+            self.assertEqual(len(meter_segments), 5)
+            self.assertEqual(
+                [bool(item.property("filled")) for item in meter_segments],
+                [True, True, True, True, False],
+            )
+            for segment in meter_segments:
+                expected = theme.property(
+                    "text" if segment.property("filled") else "surface"
+                )
+                self.assertEqual(
+                    QColor(segment.property("color")), QColor(expected)
+                )
+                self.assertEqual(
+                    QColor(segment.property("edgeColor")),
+                    QColor(theme.property("text")),
+                )
+
+            hud.show()
+            self._pump(5)
+            image = hud.grabWindow()
+            self.assertFalse(image.isNull())
+            ratio = image.devicePixelRatio()
+            for segment in meter_segments:
+                center = segment.mapToScene(
+                    QPointF(segment.width() / 2, segment.height() / 2)
+                )
+                rendered = image.pixelColor(
+                    round(center.x() * ratio), round(center.y() * ratio)
+                )
+                expected = theme.property(
+                    "text" if segment.property("filled") else "surface"
+                )
+                self.assertEqual(QColor(rendered), QColor(expected))
+            center = image.pixelColor(image.width() // 2, image.height() // 2)
+            self.assertEqual(center.alpha(), 255)
         finally:
             self._close(bridge, engine)
 

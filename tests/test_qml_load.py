@@ -328,15 +328,16 @@ class QmlLoadTests(unittest.TestCase):
         left, right = cls._luminance(first), cls._luminance(second)
         return (max(left, right) + 0.05) / (min(left, right) + 0.05)
 
-    def test_light_and_dark_tokens_meet_contrast_contracts(self):
+    def test_light_dark_and_manual_high_contrast_tokens_meet_contrast_contracts(self):
         engine = QQmlApplicationEngine()
         qml = Path(__file__).resolve().parents[1] / "speakr" / "ui" / "qml"
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(qml / "Theme.qml")))
         theme = component.create()
         self.assertIsNotNone(theme, [error.toString() for error in component.errors()])
         try:
-            for mode in ("light", "dark"):
+            for mode in ("light", "dark", "high_contrast"):
                 theme.setProperty("mode", mode)
+                theme.setProperty("systemHighContrast", False)
                 self.qapp.processEvents()
                 surface = theme.property("surface")
                 self.assertGreaterEqual(
@@ -352,7 +353,7 @@ class QmlLoadTests(unittest.TestCase):
                     self._contrast(
                         theme.property("accent"), theme.property("accentText")
                     ),
-                    4.5,
+                    7.0 if mode == "high_contrast" else 4.5,
                     mode,
                 )
                 for foreground, background in (
@@ -364,8 +365,17 @@ class QmlLoadTests(unittest.TestCase):
                         self._contrast(
                             theme.property(foreground), theme.property(background)
                         ),
-                        4.5,
+                        7.0 if mode == "high_contrast" else 4.5,
                         f"{mode}:{foreground}",
+                    )
+                if mode == "high_contrast":
+                    self.assertTrue(theme.property("manualHighContrast"))
+                    self.assertEqual(theme.property("effectTier"), "off")
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            theme.property("focus"), theme.property("surface")
+                        ),
+                        3.0,
                     )
             theme.setProperty("reduceMotion", True)
             self.assertEqual(theme.property("motionFast"), 0)

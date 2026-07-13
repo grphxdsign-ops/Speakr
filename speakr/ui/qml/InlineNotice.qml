@@ -44,6 +44,9 @@ Rectangle {
 
         Rectangle {
             objectName: "noticeIcon"
+            readonly property color edgeColor: root.tokens.highContrast
+                                                  ? root.tokens.accentText
+                                                  : root.semanticColor
             Layout.preferredWidth: root.tokens.metric(28)
             Layout.preferredHeight: Layout.preferredWidth
             Layout.minimumWidth: Layout.preferredWidth
@@ -54,7 +57,7 @@ Rectangle {
                    ? root.tokens.accent
                    : root.tokens.withAlpha(root.semanticColor, 0.16)
             border.width: 1
-            border.color: root.semanticColor
+            border.color: edgeColor
 
             PlainText {
                 objectName: "noticeIconGlyph"

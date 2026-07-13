@@ -71,15 +71,20 @@ local-first trust rather than performing intelligence.
 
 ## Accessibility and inclusion
 
-Use system light, dark, and high-contrast palettes; 16 px-equivalent body
-text; 44 by 44 logical-pixel targets; visible 2 px focus treatment;
+Use system light and dark palettes, the OS palette whenever High Contrast or
+Increased Contrast is active, and deterministic local roles for the explicit
+in-app High contrast choice; 16 px-equivalent body text; 44 by 44
+logical-pixel targets; visible 2 px focus treatment;
 keyboard-complete navigation; accessible Qt roles and names; reduced-motion
 and reduced-transparency support; reflow at 200% scaling; icon, text, and
 shape redundancy for every state.
 
-High Contrast or Increased Contrast removes branded transparency and uses an
-opaque system palette. Reduce Transparency, RDP, software rendering, or native
-material failure selects a quieter local fallback without hiding the window.
+OS High Contrast or Increased Contrast overrides every saved theme/effects
+choice, removes branded transparency, and uses an opaque system palette. The
+manual High contrast theme uses audited black, white, cyan, yellow, and
+semantic role pairs rather than an arbitrary normal system palette. Reduce
+Transparency, RDP, software rendering, or native material failure selects a
+quieter local fallback without hiding the window.
 Practice is optional and never grades speech. Hotkey capture has no timeout
 and always offers Cancel and Escape.
 

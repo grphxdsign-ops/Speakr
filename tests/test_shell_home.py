@@ -5,6 +5,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
@@ -23,7 +24,7 @@ from PySide6.QtCore import (
     QUrl,
 )
 from PySide6.QtGui import QColor, QKeySequence
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlExpression
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 
@@ -444,6 +445,311 @@ class ShellHomeTests(unittest.TestCase):
             self.assertEqual(QColor(main.property("color")).alpha(), 0)
         finally:
             self._dispose_qml(bridge, engine, root=main)
+
+    def test_os_high_contrast_shell_screenshot_overrides_saved_light_full_at_100_and_200_percent(self):
+        class _SavedAppearanceApp(_App):
+            def settings_snapshot(inner_self):
+                settings = super().settings_snapshot()
+                settings["ui"]["theme"] = "light"
+                settings["ui"]["visual_effects"] = "full"
+                return settings
+
+        accessibility = {
+            "system_high_contrast": True,
+            "system_reduced_motion": False,
+            "system_reduce_transparency": False,
+        }
+        for text_scale in (100, 200):
+            with self.subTest(text_scale=text_scale):
+                palette_component = None
+                palette_probe = None
+                with mock.patch(
+                    "speakr.qt_ui._system_accessibility_preferences",
+                    return_value=accessibility,
+                ):
+                    _app, bridge, _controller, engine, main = self._load_main(
+                        app=_SavedAppearanceApp(text_scale=text_scale)
+                    )
+                try:
+                    main.setWidth(640)
+                    main.setHeight(520)
+                    main.show()
+                    for _ in range(20):
+                        self.qapp.processEvents()
+
+                    theme = main.findChild(QObject, "themeTokens")
+                    backdrop = main.findChild(QQuickItem, "cosmicBackdrop")
+                    quitting_overlay = main.findChild(QQuickItem, "quittingOverlay")
+                    self.assertIsNotNone(theme)
+                    self.assertIsNotNone(backdrop)
+                    self.assertIsNotNone(quitting_overlay)
+                    theme.setProperty(
+                        "systemPaletteOverride",
+                        {
+                            "window": "#000000",
+                            "windowText": "#FFFFFF",
+                            "base": "#FFFFFF",
+                            "text": "#000000",
+                            "button": "#000000",
+                            "buttonText": "#FFFFFF",
+                            "highlight": "#FFD400",
+                            "highlightedText": "#000000",
+                        },
+                    )
+                    self.qapp.processEvents()
+
+                    expected_root_palette = {
+                        "window": theme.property("background"),
+                        "windowText": theme.property("windowText"),
+                        "base": theme.property("surface"),
+                        "text": theme.property("text"),
+                        "button": theme.property("surfaceRaised"),
+                        "buttonText": theme.property("buttonText"),
+                        "highlight": theme.property("accent"),
+                        "highlightedText": theme.property("accentText"),
+                    }
+                    for role, expected in expected_root_palette.items():
+                        expression = QQmlExpression(
+                            engine.rootContext(), main, f"palette.{role}"
+                        )
+                        value, undefined = expression.evaluate()
+                        self.assertFalse(undefined, role)
+                        self.assertFalse(expression.hasError(), role)
+                        self.assertEqual(QColor(value), QColor(expected), role)
+
+                    palette_component = QQmlComponent(engine)
+                    palette_component.setData(
+                        b"""
+import QtQuick
+import QtQuick.Controls
+
+Control {
+    id: probe
+    required property Item host
+    parent: host
+    z: 1000
+    x: 8
+    y: 8
+    width: 224
+    height: 48
+
+    property color windowRole: palette.window
+    property color windowTextRole: palette.windowText
+    property color baseRole: palette.base
+    property color textRole: palette.text
+    property color buttonRole: palette.button
+    property color buttonTextRole: palette.buttonText
+    property color highlightRole: palette.highlight
+    property color highlightedTextRole: palette.highlightedText
+
+    contentItem: Row {
+        spacing: 8
+
+        Rectangle {
+            objectName: "windowPairSurface"
+            width: 48; height: 48; color: probe.windowRole
+            Rectangle {
+                objectName: "windowPairForeground"
+                anchors.centerIn: parent
+                width: 20; height: 20; color: probe.windowTextRole
+            }
+        }
+        Rectangle {
+            objectName: "basePairSurface"
+            width: 48; height: 48; color: probe.baseRole
+            Rectangle {
+                objectName: "basePairForeground"
+                anchors.centerIn: parent
+                width: 20; height: 20; color: probe.textRole
+            }
+        }
+        Rectangle {
+            objectName: "buttonPairSurface"
+            width: 48; height: 48; color: probe.buttonRole
+            Rectangle {
+                objectName: "buttonPairForeground"
+                anchors.centerIn: parent
+                width: 20; height: 20; color: probe.buttonTextRole
+            }
+        }
+        Rectangle {
+            objectName: "highlightPairSurface"
+            width: 48; height: 48; color: probe.highlightRole
+            Rectangle {
+                objectName: "highlightPairForeground"
+                anchors.centerIn: parent
+                width: 20; height: 20; color: probe.highlightedTextRole
+            }
+        }
+    }
+}
+""",
+                        QUrl.fromLocalFile(str(self.qml / "PaletteProbe.qml")),
+                    )
+                    palette_probe = palette_component.createWithInitialProperties(
+                        {"host": main.contentItem()}
+                    )
+                    self.assertIsNotNone(
+                        palette_probe,
+                        [
+                            error.toString()
+                            for error in palette_component.errors()
+                        ],
+                    )
+                    self.qapp.processEvents()
+                    rendered_pairs = main.grabWindow()
+                    self.assertFalse(rendered_pairs.isNull())
+                    ratio = rendered_pairs.devicePixelRatio()
+                    for pair, background_role, foreground_role in (
+                        ("windowPair", "window", "windowText"),
+                        ("basePair", "base", "text"),
+                        ("buttonPair", "button", "buttonText"),
+                        ("highlightPair", "highlight", "highlightedText"),
+                    ):
+                        surface = palette_probe.findChild(
+                            QQuickItem, f"{pair}Surface"
+                        )
+                        foreground = palette_probe.findChild(
+                            QQuickItem, f"{pair}Foreground"
+                        )
+                        self.assertIsNotNone(surface)
+                        self.assertIsNotNone(foreground)
+                        surface_point = surface.mapToScene(
+                            QPointF(4, surface.height() / 2)
+                        )
+                        foreground_point = foreground.mapToScene(
+                            QPointF(
+                                foreground.width() / 2,
+                                foreground.height() / 2,
+                            )
+                        )
+                        self.assertEqual(
+                            rendered_pairs.pixelColor(
+                                round(surface_point.x() * ratio),
+                                round(surface_point.y() * ratio),
+                            ),
+                            QColor(expected_root_palette[background_role]),
+                        )
+                        self.assertEqual(
+                            rendered_pairs.pixelColor(
+                                round(foreground_point.x() * ratio),
+                                round(foreground_point.y() * ratio),
+                            ),
+                            QColor(expected_root_palette[foreground_role]),
+                        )
+                    self.assertTrue(theme.property("systemHighContrastActive"))
+                    self.assertTrue(theme.property("highContrast"))
+                    self.assertFalse(theme.property("manualHighContrast"))
+                    self.assertEqual(theme.property("effectTier"), "off")
+                    self.assertEqual(QColor(main.property("color")).alpha(), 255)
+                    self.assertEqual(
+                        QColor(quitting_overlay.property("color")),
+                        QColor(theme.property("surface")),
+                    )
+                    self.assertEqual(
+                        QColor(quitting_overlay.property("color")).alpha(), 255
+                    )
+                    self.assertEqual(
+                        sum(item.isVisible() for item in backdrop.childItems()), 1
+                    )
+                    for role in (
+                        "shellSurface",
+                        "navigationSurface",
+                        "majorSurface",
+                        "noticeSurface",
+                        "contentSurface",
+                    ):
+                        self.assertAlmostEqual(
+                            QColor(theme.property(role)).alphaF(), 1.0, places=5
+                        )
+                    for role in (
+                        "atmosphereViolet",
+                        "atmosphereCyan",
+                        "atmosphereBlush",
+                        "orbitLine",
+                        "shadow",
+                    ):
+                        self.assertAlmostEqual(
+                            QColor(theme.property(role)).alphaF(), 0.0, places=5
+                        )
+
+                    visual_items = self._visual_items(main.contentItem())
+                    summary_surface = next(
+                        (
+                            item
+                            for item in visual_items
+                            if item.objectName() == "homeSummarySymbolSurface"
+                        ),
+                        None,
+                    )
+                    summary_glyph = next(
+                        (
+                            item
+                            for item in visual_items
+                            if item.objectName() == "homeSummarySymbolGlyph"
+                        ),
+                        None,
+                    )
+                    self.assertIsNotNone(summary_surface)
+                    self.assertIsNotNone(summary_glyph)
+                    self.assertEqual(
+                        QColor(summary_surface.property("color")),
+                        QColor(theme.property("accent")),
+                    )
+                    self.assertEqual(
+                        QColor(summary_surface.property("edgeColor")),
+                        QColor(theme.property("accentText")),
+                    )
+                    self.assertEqual(
+                        QColor(summary_glyph.property("color")),
+                        QColor(theme.property("accentText")),
+                    )
+                    chrome_nodes = [
+                        item
+                        for item in visual_items
+                        if item.objectName() == "chromeSignalNode"
+                    ]
+                    self.assertEqual(len(chrome_nodes), 3)
+                    for node in chrome_nodes:
+                        self.assertEqual(
+                            QColor(node.property("color")),
+                            QColor(theme.property("text")),
+                        )
+
+                    bridge._quitting = True
+                    bridge.quittingChanged.emit()
+                    self.qapp.processEvents()
+                    self.assertTrue(quitting_overlay.isVisible())
+                    overlay_copy = [
+                        item
+                        for item in self._visual_items(quitting_overlay)
+                        if item.property("text")
+                    ]
+                    self.assertGreaterEqual(len(overlay_copy), 2)
+                    for label in overlay_copy:
+                        self.assertEqual(
+                            QColor(label.property("color")),
+                            QColor(theme.property("text")),
+                        )
+
+                    image = main.grabWindow()
+                    self.assertFalse(image.isNull())
+                    self.assertGreaterEqual(image.width(), 640)
+                    self.assertGreaterEqual(image.height(), 520)
+                    self.assertEqual(image.pixelColor(0, 0).alpha(), 255)
+                    self.assertEqual(
+                        image.pixelColor(image.width() // 2, image.height() // 2).alpha(),
+                        255,
+                    )
+                finally:
+                    if palette_probe is not None:
+                        palette_probe.setParentItem(None)
+                        palette_probe.deleteLater()
+                    if palette_component is not None:
+                        palette_component.deleteLater()
+                    bridge._quitting = False
+                    bridge.quittingChanged.emit()
+                    self._dispose_qml(bridge, engine, root=main)
 
     def test_navigation_and_practice_cancel_untimed_hotkey_capture(self):
         app = _CaptureApp()

@@ -54,7 +54,9 @@ mica | vibrancy | scene_glass | solid
 
 Resolution order:
 
-1. High Contrast or Increased Contrast forces `off` and `solid`.
+1. OS High Contrast or Increased Contrast overrides every saved theme and
+   effects choice, delegates visible color roles to `SystemPalette`, and
+   forces `off` and `solid`.
 2. OS Reduce Transparency forces `reduced`.
 3. RDP, virtualized display, software rendering, or graphics failure forces
    `reduced`.
@@ -113,6 +115,35 @@ acknowledgement paths do not participate in this protocol.
 
 Do not nest glass within glass. A content well inside a glass surface is
 opaque enough to preserve reading contrast and a clear layer hierarchy.
+
+The explicit in-app `High contrast` theme is separate from the OS override.
+When OS High Contrast is off, this manual choice uses deterministic local
+roles instead of a normal-mode `SystemPalette`:
+
+| Manual High Contrast role | Value |
+|---|---|
+| Canvas / strong surface | `#000000` |
+| Essential / secondary text | `#FFFFFF` / `#E6E6E6` |
+| Meaningful border | `#00E5FF` |
+| Accent / accent text | `#FFD400` / `#000000` |
+| Success / warning / danger / info | `#00E676` / `#FFD400` / `#FF7294` / `#00D4FF` |
+| Disabled control surface / switch knob | `#303030` / `#D0D0D0` |
+| General disabled copy | `#B8B8B8` |
+
+Essential text targets 7:1, body and disabled copy remain at least 4.5:1,
+and controls, borders, and focus remain at least 3:1. Both high-contrast paths
+use opaque materials, remove atmosphere and shadow, retain a separate 2 px
+focus ring, and preserve icon/text/shape redundancy for semantic states.
+OS roles are paired by the surface that actually renders them: `Window` with
+`WindowText`, `Base` with `Text`, `Button` with `ButtonText`, and `Highlight`
+with `HighlightedText`.
+Focus and meaningful borders use the foreground role belonging to the surface
+they outline; `WindowText` is not substituted for content drawn on `Base`.
+The `accentForeground` token therefore resolves to `Text` when a meaningful
+accent mark is drawn directly on `Base`; `Highlight` remains a filled surface
+and is always paired with `HighlightedText`. High-contrast microphone meters
+use `Text`-filled active segments and hollow `Base` segments with a `Text`
+outline, so level state never depends on `Highlight` contrasting with `Base`.
 
 ## Typography
 

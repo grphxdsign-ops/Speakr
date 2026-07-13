@@ -132,12 +132,12 @@ ApplicationWindow {
     }
 
     palette.window: tokens.background
-    palette.windowText: tokens.text
+    palette.windowText: tokens.windowText
     palette.base: tokens.surface
     palette.alternateBase: tokens.surfaceRaised
     palette.text: tokens.text
-    palette.button: tokens.surface
-    palette.buttonText: tokens.text
+    palette.button: tokens.surfaceRaised
+    palette.buttonText: tokens.buttonText
     palette.highlight: tokens.accent
     palette.highlightedText: tokens.accentText
 
@@ -385,10 +385,12 @@ ApplicationWindow {
     }
 
     Rectangle {
+        objectName: "quittingOverlay"
         anchors.fill: parent
         visible: bridge.quitting
         z: 100
-        color: tokens.withAlpha(tokens.background, 0.96)
+        color: tokens.highContrast ? tokens.surface
+                                   : tokens.withAlpha(tokens.background, 0.96)
         Accessible.role: Accessible.AlertMessage
         Accessible.name: qsTr("Quitting Speakr")
 

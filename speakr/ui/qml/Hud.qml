@@ -219,7 +219,7 @@ Window {
         if (kind === "success")
             return tokens.success;
         if (kind === "active" || kind === "listening")
-            return tokens.accent;
+            return tokens.accentForeground;
         return tokens.border;
     }
 
@@ -387,21 +387,25 @@ Window {
 
                         Rectangle {
                             objectName: "hudStateBadge"
+                            readonly property color edgeColor:
+                                tokens.highContrast
+                                ? tokens.accentText
+                                : root.stateColor(root.displayedKind)
                             anchors.centerIn: parent
                             visible: root.displayedKind !== "listening"
                             width: tokens.metric(30)
                             height: width
                             radius: width / 2
-                            color: tokens.highContrast ? root.stateColor(root.displayedKind) : tokens.withAlpha(root.stateColor(root.displayedKind), 0.18)
+                            color: tokens.highContrast ? tokens.accent : tokens.withAlpha(root.stateColor(root.displayedKind), 0.18)
                             border.width: tokens.highContrast ? 2 : 1
-                            border.color: root.stateColor(root.displayedKind)
+                            border.color: edgeColor
 
                             PlainText {
                                 id: stateGlyph
                                 objectName: "hudStateGlyph"
                                 anchors.centerIn: parent
                                 text: root.displayedKind === "danger" ? "!" : (root.displayedKind === "warning" ? "!" : (root.displayedKind === "success" ? "\u2713" : "\u2022"))
-                                color: tokens.highContrast ? ((root.displayedKind === "active" || root.displayedKind === "success") ? tokens.accentText : tokens.background) : root.stateColor(root.displayedKind)
+                                color: tokens.highContrast ? tokens.accentText : root.stateColor(root.displayedKind)
                                 font.family: tokens.fontFamily
                                 font.pixelSize: tokens.statusHeading
                                 font.weight: Font.Bold
@@ -420,11 +424,19 @@ Window {
                                 model: 5
 
                                 Rectangle {
+                                    objectName: "hudMeterSegment"
                                     required property int index
-                                    width: tokens.metric(4)
+                                    readonly property bool filled: index < root.micSegments()
+                                    readonly property color edgeColor: tokens.text
+                                    width: tokens.metric(tokens.highContrast ? 6 : 4)
                                     height: tokens.metric(18)
                                     radius: width / 2
-                                    color: index < root.micSegments() ? tokens.accent : tokens.border
+                                    color: tokens.highContrast
+                                           ? (filled ? tokens.text : tokens.surface)
+                                           : (filled ? tokens.accent : tokens.border)
+                                    border.width: tokens.highContrast
+                                                  ? tokens.borderWidth : 0
+                                    border.color: edgeColor
                                 }
                             }
                         }

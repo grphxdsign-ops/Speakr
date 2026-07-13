@@ -28,20 +28,28 @@ Item {
         }
 
         Rectangle {
+            objectName: "signalConnector"
+            readonly property color edgeColor: root.tokens.text
             Layout.fillWidth: true
             Layout.minimumWidth: root.tokens.metric(8)
             Layout.preferredWidth: root.tokens.metric(root.compact ? 24 : 40)
             Layout.alignment: Qt.AlignVCenter
             implicitWidth: root.tokens.metric(32)
-            implicitHeight: root.tokens.metric(3)
+            implicitHeight: root.tokens.metric(root.tokens.highContrast ? 6 : 3)
             Layout.preferredHeight: implicitHeight
             radius: height / 2
-            color: root.tokens.border
+            color: root.tokens.highContrast ? root.tokens.surface
+                                            : root.tokens.border
+            border.width: root.tokens.highContrast ? root.tokens.borderWidth : 0
+            border.color: edgeColor
 
             Rectangle {
+                objectName: "signalConnectorFill"
                 anchors.fill: parent
+                anchors.margins: root.tokens.highContrast
+                                 ? root.tokens.borderWidth : 0
                 radius: height / 2
-                color: root.tokens.accent
+                color: root.tokens.accentForeground
                 transform: Scale {
                     origin.x: 0
                     origin.y: 0
@@ -67,20 +75,28 @@ Item {
         }
 
         Rectangle {
+            objectName: "signalConnector"
+            readonly property color edgeColor: root.tokens.text
             Layout.fillWidth: true
             Layout.minimumWidth: root.tokens.metric(8)
             Layout.preferredWidth: root.tokens.metric(root.compact ? 24 : 40)
             Layout.alignment: Qt.AlignVCenter
             implicitWidth: root.tokens.metric(32)
-            implicitHeight: root.tokens.metric(3)
+            implicitHeight: root.tokens.metric(root.tokens.highContrast ? 6 : 3)
             Layout.preferredHeight: implicitHeight
             radius: height / 2
-            color: root.tokens.border
+            color: root.tokens.highContrast ? root.tokens.surface
+                                            : root.tokens.border
+            border.width: root.tokens.highContrast ? root.tokens.borderWidth : 0
+            border.color: edgeColor
 
             Rectangle {
+                objectName: "signalConnectorFill"
                 anchors.fill: parent
+                anchors.margins: root.tokens.highContrast
+                                 ? root.tokens.borderWidth : 0
                 radius: height / 2
-                color: root.tokens.accent
+                color: root.tokens.accentForeground
                 transform: Scale {
                     origin.x: 0
                     origin.y: 0

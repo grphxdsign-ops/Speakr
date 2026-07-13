@@ -2,6 +2,7 @@ import QtQuick
 
 QtObject {
     id: theme
+    objectName: "themeTokens"
 
     // Public preferences. Keep these independent from native-window state so
     // the same theme can be used by the main window, HUD, and test harnesses.
@@ -15,11 +16,24 @@ QtObject {
     property bool softwareRenderer: false
 
     property SystemPalette systemPalette: SystemPalette {
+        objectName: "themeSystemPalette"
         colorGroup: SystemPalette.Active
     }
+    // A deterministic harness can inject a complete palette map. Production
+    // leaves this null and always uses the live operating-system palette.
+    property var systemPaletteOverride: null
 
-    readonly property bool highContrast: mode === "high_contrast"
-                                         || (mode === "system" && systemHighContrast)
+    // OS High Contrast is an accessibility override, not a theme choice. It
+    // wins over every saved theme/effects combination and delegates all
+    // visible roles to the operating-system palette. The explicit in-app
+    // High contrast choice remains useful when the OS override is off, but it
+    // uses deterministic local role pairs so contrast never depends on an
+    // arbitrary normal-mode SystemPalette.
+    readonly property bool systemHighContrastActive: systemHighContrast
+    readonly property bool manualHighContrast: !systemHighContrastActive
+                                               && mode === "high_contrast"
+    readonly property bool highContrast: systemHighContrastActive
+                                         || manualHighContrast
     readonly property bool systemDark: luminance(systemPalette.window) < 0.48
     readonly property bool dark: mode === "dark" || (mode === "system" && systemDark)
     readonly property string effectTier: {
@@ -31,69 +45,199 @@ QtObject {
         return "full"
     }
 
-    // Luminous Orbit source palette. High Contrast always delegates to the
-    // operating system and removes branded atmosphere and transparency.
-    readonly property color canvas: highContrast ? systemPalette.window
-                                                 : (dark ? "#090B18" : "#EDF1FA")
-    readonly property color surfaceStrong: highContrast ? systemPalette.base
-                                                        : (dark ? "#20243A" : "#F8FAFF")
-    readonly property color textPrimary: highContrast ? systemPalette.windowText
-                                                      : (dark ? "#F2F3FC" : "#17182A")
-    readonly property color textSecondary: highContrast ? systemPalette.text
-                                                        : (dark ? "#B4B7C9" : "#55596D")
-    readonly property color borderMeaningful: highContrast ? systemPalette.windowText
-                                                           : (dark ? "#737A99" : "#747A92")
-    readonly property color accent: highContrast ? systemPalette.highlight
-                                                 : (dark ? "#A89AFB" : "#6657D8")
-    readonly property color accentText: highContrast ? systemPalette.highlightedText
-                                                     : (dark ? "#17182A" : "#F8FAFF")
-    readonly property color accentHoverSurface: highContrast ? systemPalette.highlight
-                                                             : (dark ? "#B5A9FF" : "#594AC7")
-    readonly property color accentPressedSurface: highContrast ? systemPalette.highlight
-                                                               : (dark ? "#9788E3" : "#4F41B3")
+    // Deterministic manual High Contrast roles. Each text/surface pair clears
+    // 7:1 for essential copy where practical, secondary/disabled copy clears
+    // 4.5:1, and borders/focus/state colors clear 3:1 against their surfaces.
+    readonly property color manualHighContrastCanvas: "#000000"
+    readonly property color manualHighContrastSurface: "#000000"
+    readonly property color manualHighContrastRaised: "#303030"
+    readonly property color manualHighContrastText: "#FFFFFF"
+    readonly property color manualHighContrastSecondary: "#E6E6E6"
+    readonly property color manualHighContrastBorder: "#00E5FF"
+    readonly property color manualHighContrastAccent: "#FFD400"
+    readonly property color manualHighContrastAccentText: "#000000"
+    readonly property color manualHighContrastAccentHover: "#FFE466"
+    readonly property color manualHighContrastAccentPressed: "#E6B800"
+    readonly property color manualHighContrastSuccess: "#00E676"
+    readonly property color manualHighContrastWarning: "#FFD400"
+    readonly property color manualHighContrastDanger: "#FF7294"
+    readonly property color manualHighContrastDangerHover: "#FF9AB1"
+    readonly property color manualHighContrastInfo: "#00D4FF"
+    readonly property color manualHighContrastDisabledSurface: "#303030"
+    readonly property color manualHighContrastDisabledText: "#D0D0D0"
+    readonly property color manualHighContrastMutedDisabledText: "#B8B8B8"
+
+    // Luminous Orbit source palette. The system accessibility override uses
+    // SystemPalette; only the explicit manual mode uses the local roles above.
+    readonly property color canvas: systemHighContrastActive
+                                    ? systemColor("window", systemPalette.window)
+                                    : (manualHighContrast
+                                       ? manualHighContrastCanvas
+                                       : (dark ? "#090B18" : "#EDF1FA"))
+    readonly property color windowText: systemHighContrastActive
+                                        ? systemColor("windowText",
+                                                      systemPalette.windowText)
+                                        : textPrimary
+    readonly property color surfaceStrong: systemHighContrastActive
+                                           ? systemColor("base", systemPalette.base)
+                                           : (manualHighContrast
+                                              ? manualHighContrastSurface
+                                              : (dark ? "#20243A" : "#F8FAFF"))
+    readonly property color textPrimary: systemHighContrastActive
+                                         ? systemColor("text", systemPalette.text)
+                                         : (manualHighContrast
+                                            ? manualHighContrastText
+                                            : (dark ? "#F2F3FC" : "#17182A"))
+    readonly property color textSecondary: systemHighContrastActive
+                                           ? systemColor("text", systemPalette.text)
+                                           : (manualHighContrast
+                                              ? manualHighContrastSecondary
+                                              : (dark ? "#B4B7C9" : "#55596D"))
+    readonly property color borderMeaningful: systemHighContrastActive
+                                              ? systemColor("text", systemPalette.text)
+                                              : (manualHighContrast
+                                                 ? manualHighContrastBorder
+                                                 : (dark ? "#737A99" : "#747A92"))
+    readonly property color accent: systemHighContrastActive
+                                    ? systemColor("highlight", systemPalette.highlight)
+                                    : (manualHighContrast
+                                       ? manualHighContrastAccent
+                                       : (dark ? "#A89AFB" : "#6657D8"))
+    readonly property color accentText: systemHighContrastActive
+                                        ? systemColor("highlightedText",
+                                                      systemPalette.highlightedText)
+                                        : (manualHighContrast
+                                           ? manualHighContrastAccentText
+                                           : (dark ? "#17182A" : "#F8FAFF"))
+    // Accent is a Highlight surface in OS High Contrast. Use this role when
+    // the accent is instead drawn as meaningful foreground on a Base surface.
+    readonly property color accentForeground: systemHighContrastActive
+                                               ? systemColor("text",
+                                                             systemPalette.text)
+                                               : accent
+    readonly property color accentHoverSurface: systemHighContrastActive
+                                                ? systemColor("highlight",
+                                                              systemPalette.highlight)
+                                                : (manualHighContrast
+                                                   ? manualHighContrastAccentHover
+                                                   : (dark ? "#B5A9FF" : "#594AC7"))
+    readonly property color accentPressedSurface: systemHighContrastActive
+                                                  ? systemColor("highlight",
+                                                                systemPalette.highlight)
+                                                  : (manualHighContrast
+                                                     ? manualHighContrastAccentPressed
+                                                     : (dark ? "#9788E3" : "#4F41B3"))
 
     // Compatibility aliases used throughout the existing pages. These stay
     // opaque; transparent material is opt-in through the role tokens below.
     readonly property color background: canvas
     readonly property color surface: surfaceStrong
-    readonly property color surfaceRaised: highContrast ? systemPalette.button
-                                                        : (dark ? "#2A2F49" : "#E6EAF5")
+    readonly property color surfaceRaised: systemHighContrastActive
+                                           ? systemColor("button", systemPalette.button)
+                                           : (manualHighContrast
+                                              ? manualHighContrastRaised
+                                              : (dark ? "#2A2F49" : "#E6EAF5"))
+    readonly property color buttonText: systemHighContrastActive
+                                        ? systemColor("buttonText",
+                                                      systemPalette.buttonText)
+                                        : textPrimary
     readonly property color text: textPrimary
     readonly property color mutedText: textSecondary
     readonly property color border: borderMeaningful
 
-    readonly property color success: highContrast ? systemPalette.highlight
-                                                  : (dark ? "#83D8AA" : "#176D3B")
-    readonly property color successSurface: highContrast ? systemPalette.base
-                                                         : (dark ? "#17352A" : "#E4F4EA")
-    readonly property color warning: highContrast ? systemPalette.windowText
-                                                  : (dark ? "#F2CD7D" : "#795600")
-    readonly property color warningSurface: highContrast ? systemPalette.base
-                                                         : (dark ? "#3A301D" : "#FFF1C9")
-    readonly property color danger: highContrast ? systemPalette.windowText
-                                                 : (dark ? "#FFAAAA" : "#A52A2A")
-    readonly property color dangerSurface: highContrast ? systemPalette.base
-                                                        : (dark ? "#3D222E" : "#FDE9E9")
-    readonly property color dangerHoverSurface: highContrast ? systemPalette.highlight
-                                                             : danger
-    readonly property color dangerPressedSurface: highContrast ? systemPalette.highlight
-                                                               : (dark ? "#E7929E" : "#872020")
-    readonly property color dangerStrongText: highContrast ? systemPalette.highlightedText
-                                                           : accentText
-    readonly property color info: highContrast ? systemPalette.highlight
-                                               : (dark ? "#8FC9F5" : "#245F93")
-    readonly property color infoSurface: highContrast ? systemPalette.base
-                                                      : (dark ? "#173149" : "#E2F1FC")
-    readonly property color focus: highContrast ? systemPalette.highlight : accent
-    readonly property color disabledControlSurface: highContrast ? systemPalette.button
-                                                                 : surfaceRaised
-    readonly property color disabledControlText: highContrast ? systemPalette.buttonText
-                                                              : text
-    readonly property color disabledText: withAlpha(text, 0.52)
-    readonly property color hover: highContrast ? systemPalette.highlight
-                                                : withAlpha(accent, dark ? 0.20 : 0.12)
-    readonly property color pressed: highContrast ? systemPalette.highlight
-                                                  : withAlpha(accent, dark ? 0.30 : 0.20)
+    readonly property color success: systemHighContrastActive
+                                     ? systemColor("text", systemPalette.text)
+                                     : (manualHighContrast
+                                        ? manualHighContrastSuccess
+                                        : (dark ? "#83D8AA" : "#176D3B"))
+    readonly property color successSurface: systemHighContrastActive
+                                            ? systemColor("base", systemPalette.base)
+                                            : (manualHighContrast
+                                               ? manualHighContrastSurface
+                                               : (dark ? "#17352A" : "#E4F4EA"))
+    readonly property color warning: systemHighContrastActive
+                                     ? systemColor("text", systemPalette.text)
+                                     : (manualHighContrast
+                                        ? manualHighContrastWarning
+                                        : (dark ? "#F2CD7D" : "#795600"))
+    readonly property color warningSurface: systemHighContrastActive
+                                            ? systemColor("base", systemPalette.base)
+                                            : (manualHighContrast
+                                               ? manualHighContrastSurface
+                                               : (dark ? "#3A301D" : "#FFF1C9"))
+    readonly property color danger: systemHighContrastActive
+                                    ? systemColor("text", systemPalette.text)
+                                    : (manualHighContrast
+                                       ? manualHighContrastDanger
+                                       : (dark ? "#FFAAAA" : "#A52A2A"))
+    readonly property color dangerSurface: systemHighContrastActive
+                                           ? systemColor("base", systemPalette.base)
+                                           : (manualHighContrast
+                                              ? manualHighContrastSurface
+                                              : (dark ? "#3D222E" : "#FDE9E9"))
+    readonly property color dangerHoverSurface: systemHighContrastActive
+                                                ? systemColor("highlight",
+                                                              systemPalette.highlight)
+                                                : (manualHighContrast
+                                                   ? manualHighContrastDangerHover
+                                                   : danger)
+    readonly property color dangerPressedSurface: systemHighContrastActive
+                                                  ? systemColor("highlight",
+                                                                systemPalette.highlight)
+                                                  : (manualHighContrast
+                                                     ? manualHighContrastDanger
+                                                     : (dark ? "#E7929E" : "#872020"))
+    readonly property color dangerStrongText: systemHighContrastActive
+                                              ? systemColor("highlightedText",
+                                                            systemPalette.highlightedText)
+                                              : (manualHighContrast
+                                                 ? manualHighContrastAccentText
+                                                 : accentText)
+    readonly property color info: systemHighContrastActive
+                                  ? systemColor("text", systemPalette.text)
+                                  : (manualHighContrast
+                                     ? manualHighContrastInfo
+                                     : (dark ? "#8FC9F5" : "#245F93"))
+    readonly property color infoSurface: systemHighContrastActive
+                                         ? systemColor("base", systemPalette.base)
+                                         : (manualHighContrast
+                                            ? manualHighContrastSurface
+                                            : (dark ? "#173149" : "#E2F1FC"))
+    readonly property color focus: systemHighContrastActive
+                                   ? systemColor("text", systemPalette.text) : accent
+    readonly property color disabledControlSurface: systemHighContrastActive
+                                                    ? systemColor("button",
+                                                                  systemPalette.button)
+                                                    : (manualHighContrast
+                                                       ? manualHighContrastDisabledSurface
+                                                       : surfaceRaised)
+    readonly property color disabledControlText: systemHighContrastActive
+                                                 ? systemColor("buttonText",
+                                                               systemPalette.buttonText)
+                                                 : (manualHighContrast
+                                                    ? manualHighContrastDisabledText
+                                                    : text)
+    readonly property color disabledButtonText: systemHighContrastActive
+                                                ? systemColor("buttonText",
+                                                              systemPalette.buttonText)
+                                                : (manualHighContrast
+                                                   ? manualHighContrastMutedDisabledText
+                                                   : withAlpha(text, 0.52))
+    readonly property color disabledText: systemHighContrastActive
+                                          ? systemColor("text", systemPalette.text)
+                                          : (manualHighContrast
+                                             ? manualHighContrastMutedDisabledText
+                                             : withAlpha(text, 0.52))
+    readonly property color hover: systemHighContrastActive
+                                   ? systemColor("highlight", systemPalette.highlight)
+                                   : (manualHighContrast
+                                      ? manualHighContrastAccent
+                                      : withAlpha(accent, dark ? 0.20 : 0.12))
+    readonly property color pressed: systemHighContrastActive
+                                     ? systemColor("highlight", systemPalette.highlight)
+                                     : (manualHighContrast
+                                        ? manualHighContrastAccentPressed
+                                        : withAlpha(accent, dark ? 0.30 : 0.20))
 
     // Local, static atmosphere. All fields stay below the 18% contract and
     // disappear when effects are off or High Contrast is active.
@@ -195,6 +339,14 @@ QtObject {
         return Qt.rgba(colorValue.r, colorValue.g, colorValue.b, alphaValue)
     }
 
+    function systemColor(role, fallbackValue) {
+        var override = systemPaletteOverride
+        if (override !== null && override !== undefined
+                && override[role] !== null && override[role] !== undefined)
+            return override[role]
+        return fallbackValue
+    }
+
     function materialOpacity(role) {
         if (highContrast || effectTier === "off")
             return 1.0
@@ -212,7 +364,7 @@ QtObject {
     }
 
     function materialColor(role) {
-        var base = highContrast ? systemPalette.base : surfaceStrong
+        var base = surfaceStrong
         return withAlpha(base, materialOpacity(role))
     }
 }

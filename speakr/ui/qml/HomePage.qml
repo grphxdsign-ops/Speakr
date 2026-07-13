@@ -498,16 +498,22 @@ Item {
                                 spacing: root.tokens.space12
 
                                 Rectangle {
+                                    objectName: "homeSummarySymbolSurface"
+                                    readonly property color edgeColor:
+                                        root.tokens.highContrast
+                                        ? root.tokens.accentText
+                                        : root.tokens.accent
                                     Layout.preferredWidth: root.tokens.controlHeight
                                     Layout.preferredHeight: Layout.preferredWidth
                                     radius: root.tokens.radiusControl
                                     color: root.tokens.highContrast
                                            ? root.tokens.accent : root.tokens.hover
                                     border.width: root.tokens.borderWidth
-                                    border.color: root.tokens.accent
+                                    border.color: edgeColor
                                     Accessible.ignored: true
 
                                     PlainText {
+                                        objectName: "homeSummarySymbolGlyph"
                                         anchors.centerIn: parent
                                         text: summaryCard.modelData.symbol
                                         color: root.tokens.highContrast
