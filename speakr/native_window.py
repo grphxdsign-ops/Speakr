@@ -242,6 +242,19 @@ class _WindowsAdapter(_NullAdapter):
     _DWMWCP_ROUND = 2
     _DWMSBT_NONE = 1
     _DWMSBT_MAINWINDOW = 2
+    _GWL_STYLE = -16
+    _WS_MAXIMIZEBOX = 0x00010000
+    _WS_MINIMIZEBOX = 0x00020000
+    _WS_THICKFRAME = 0x00040000
+    _WS_SYSMENU = 0x00080000
+    _CUSTOM_CHROME_STYLES = (
+        _WS_SYSMENU | _WS_MAXIMIZEBOX | _WS_MINIMIZEBOX | _WS_THICKFRAME
+    )
+    _SWP_NOSIZE = 0x0001
+    _SWP_NOMOVE = 0x0002
+    _SWP_NOZORDER = 0x0004
+    _SWP_NOACTIVATE = 0x0010
+    _SWP_FRAMECHANGED = 0x0020
 
     def __init__(self, *, build: int | None = None, dwmapi: Any = None, user32: Any = None):
         self._build = _windows_build() if build is None else int(build)
@@ -276,9 +289,29 @@ class _WindowsAdapter(_NullAdapter):
                     wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
                 ]
                 self._user32.PostMessageW.restype = wintypes.BOOL
+                self._user32.GetWindowLongPtrW.argtypes = [
+                    wintypes.HWND, ctypes.c_int
+                ]
+                self._user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+                self._user32.SetWindowLongPtrW.argtypes = [
+                    wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t
+                ]
+                self._user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+                self._user32.SetWindowPos.argtypes = [
+                    wintypes.HWND,
+                    wintypes.HWND,
+                    ctypes.c_int,
+                    ctypes.c_int,
+                    ctypes.c_int,
+                    ctypes.c_int,
+                    wintypes.UINT,
+                ]
+                self._user32.SetWindowPos.restype = wintypes.BOOL
             except (AttributeError, TypeError):
                 log.debug("Could not declare Windows system-menu prototypes", exc_info=True)
         self._hwnd = 0
+        self._chrome_hwnd = 0
+        self._original_style = None
 
     def native_available(self) -> bool:
         return self._build >= 22621 and callable(
@@ -344,16 +377,97 @@ class _WindowsAdapter(_NullAdapter):
                 0,
             )
 
-    def detach(self) -> None:
+    def _window_style(self, hwnd: int) -> int | None:
+        reader = getattr(self._user32, "GetWindowLongPtrW", None)
+        if not hwnd or not callable(reader):
+            return None
+        try:
+            value = reader(ctypes.c_void_p(hwnd), self._GWL_STYLE)
+            return int(getattr(value, "value", value)) & 0xFFFFFFFF
+        except Exception:
+            log.debug("Could not read the Windows window style", exc_info=True)
+            return None
+
+    def _write_window_style(self, hwnd: int, style: int) -> bool:
+        setter = getattr(self._user32, "SetWindowLongPtrW", None)
+        if not hwnd or not callable(setter):
+            return False
+        try:
+            setter(
+                ctypes.c_void_p(hwnd),
+                self._GWL_STYLE,
+                ctypes.c_ssize_t(int(style) & 0xFFFFFFFF),
+            )
+        except Exception:
+            log.debug("Could not write the Windows window style", exc_info=True)
+            return False
+        return self._window_style(hwnd) == (int(style) & 0xFFFFFFFF)
+
+    def _refresh_nonclient_frame(self, hwnd: int) -> bool:
+        refresh = getattr(self._user32, "SetWindowPos", None)
+        if not hwnd or not callable(refresh):
+            return False
+        flags = (
+            self._SWP_NOSIZE
+            | self._SWP_NOMOVE
+            | self._SWP_NOZORDER
+            | self._SWP_NOACTIVATE
+            | self._SWP_FRAMECHANGED
+        )
+        try:
+            return bool(
+                refresh(
+                    ctypes.c_void_p(hwnd), None, 0, 0, 0, 0, ctypes.c_uint(flags)
+                )
+            )
+        except Exception:
+            log.debug("Could not refresh the Windows non-client frame", exc_info=True)
+            return False
+
+    def enable_custom_chrome(self, window: Any) -> bool:
+        """Keep native system capabilities after Qt removes its frame."""
+
+        if self._original_style is not None and not self.restore_custom_chrome(None):
+            return False
+        try:
+            hwnd = int(window.winId())
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return False
+        style = self._window_style(hwnd)
+        if style is None:
+            return False
+        required_style = style | self._CUSTOM_CHROME_STYLES
+        if required_style == style:
+            return True
+
+        self._chrome_hwnd = hwnd
+        self._original_style = style
+        if self._write_window_style(hwnd, required_style) and self._refresh_nonclient_frame(hwnd):
+            return True
+
+        # A partially-applied style must not outlive failed initialization.
+        self.restore_custom_chrome(None)
+        return False
+
+    def restore_custom_chrome(self, _window: Any) -> bool:
+        if self._original_style is None:
+            return True
+        hwnd = self._chrome_hwnd
+        restored = self._write_window_style(hwnd, self._original_style)
+        if restored:
+            restored = self._refresh_nonclient_frame(hwnd)
+        if restored:
+            self._original_style = None
+            self._chrome_hwnd = 0
+        return restored
+
+    def detach(self) -> bool:
+        chrome_restored = self.restore_custom_chrome(None)
         try:
             self.restore_material()
         finally:
             self._hwnd = 0
-
-    def enable_custom_chrome(self, _window: Any) -> bool:
-        # Qt owns the frameless flag; this adapter supplies DWM behavior and
-        # the controller installs the native non-client hit-test filter.
-        return True
+        return chrome_restored
 
     def show_system_menu(self, window: Any, x: float, y: float) -> bool:
         if self._user32 is None:
@@ -391,14 +505,43 @@ class _MacAdapter(_NullAdapter):
 
     material_name = "vibrancy"
 
-    def __init__(self, *, appkit: Any = None, objc_module: Any = None):
+    def __init__(
+        self,
+        *,
+        appkit: Any = None,
+        objc_module: Any = None,
+        qpa_name: str | Callable[[], object] | None = None,
+    ):
         self._appkit = appkit
         self._objc = objc_module
+        self._qpa_name = qpa_name
         self._effect_view = None
         self._native_window = None
         self._was_opaque = None
         self._background_color = None
         self._chrome_state = None
+
+    def _active_qpa_name(self) -> str:
+        """Return the running Qt platform plugin without eager Qt imports."""
+
+        try:
+            if callable(self._qpa_name):
+                value = self._qpa_name()
+            elif self._qpa_name is not None:
+                value = self._qpa_name
+            else:
+                # This import is deliberately inside the native call path.
+                # Browser fallback and import-only probes must stay Qt-free.
+                from PySide6.QtGui import QGuiApplication
+
+                application = QGuiApplication.instance()
+                value = "" if application is None else application.platformName()
+        except (ImportError, OSError, AttributeError, RuntimeError):
+            return ""
+        return str(value or "").strip().lower()
+
+    def _cocoa_qpa_active(self) -> bool:
+        return self._active_qpa_name() == "cocoa"
 
     def _load(self) -> bool:
         if self._appkit is not None and self._objc is not None:
@@ -414,9 +557,18 @@ class _MacAdapter(_NullAdapter):
         return True
 
     def native_available(self) -> bool:
-        return self._load() and hasattr(self._appkit, "NSVisualEffectView")
+        return (
+            self._cocoa_qpa_active()
+            and self._load()
+            and hasattr(self._appkit, "NSVisualEffectView")
+        )
 
     def _view_for(self, window: Any):
+        # QWindow::winId() is an NSView pointer only under the Cocoa QPA.
+        # Offscreen/minimal plugins return opaque platform-specific handles;
+        # passing one to PyObjC can segfault before Python can catch anything.
+        if not self._cocoa_qpa_active() or not self._load():
+            return None
         pointer = int(window.winId())
         return self._objc.objc_object(c_void_p=pointer)
 
@@ -425,6 +577,8 @@ class _MacAdapter(_NullAdapter):
             return False
         try:
             qt_view = self._view_for(window)
+            if qt_view is None:
+                return False
             native_window = qt_view.window()
             if self._effect_view is not None and self._native_window is native_window:
                 return True
@@ -493,10 +647,13 @@ class _MacAdapter(_NullAdapter):
         return restored
 
     def enable_custom_chrome(self, window: Any) -> bool:
-        if not self._load():
+        if not self._cocoa_qpa_active() or not self._load():
             return False
         try:
-            native_window = self._view_for(window).window()
+            qt_view = self._view_for(window)
+            if qt_view is None:
+                return False
+            native_window = qt_view.window()
             style = native_window.styleMask()
             button_states = []
             for kind in (
@@ -849,9 +1006,9 @@ def create_native_window_controller_type(qt: Any) -> type:
             except (AttributeError, RuntimeError):
                 self._original_flags = None
 
-            # A shell must opt in only after it supplies accessible custom
-            # controls and hit regions.  The current Main.qml intentionally
-            # has no customChromeReady property, so its system frame remains.
+            # A shell opts in only after it supplies accessible custom
+            # controls and hit regions. Missing or failed opt-in always keeps
+            # (or restores) the visible system frame.
             try:
                 custom_ready = bool(window.property("customChromeReady"))
             except (AttributeError, RuntimeError):

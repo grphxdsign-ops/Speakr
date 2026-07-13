@@ -169,6 +169,29 @@ class WindowsAdapterTests(unittest.TestCase):
         def winId():
             return 1234
 
+    class _User32:
+        def __init__(self, style=0x86000000):
+            self.style = style
+            self.style_writes = []
+            self.frame_refreshes = []
+
+        @staticmethod
+        def _value(value):
+            return int(getattr(value, "value", value) or 0)
+
+        def GetWindowLongPtrW(self, _hwnd, _index):
+            return self.style
+
+        def SetWindowLongPtrW(self, _hwnd, _index, style):
+            previous = self.style
+            self.style = self._value(style) & 0xFFFFFFFF
+            self.style_writes.append(self.style)
+            return previous
+
+        def SetWindowPos(self, _hwnd, _after, _x, _y, _width, _height, flags):
+            self.frame_refreshes.append(self._value(flags))
+            return 1
+
     def test_supported_build_applies_dark_mode_corners_and_mica(self):
         dwm = self._Dwm()
         adapter = native_window._WindowsAdapter(build=22621, dwmapi=dwm)
@@ -204,20 +227,168 @@ class WindowsAdapterTests(unittest.TestCase):
         )
         self.assertFalse(failed.apply_material(self._Window(), "light"))
 
+    def test_custom_chrome_readds_native_system_styles_and_restores_them(self):
+        original_style = 0x86000000
+        user32 = self._User32(original_style)
+        adapter = native_window._WindowsAdapter(build=0, user32=user32)
+
+        self.assertTrue(adapter.enable_custom_chrome(self._Window()))
+        self.assertEqual(
+            user32.style & adapter._CUSTOM_CHROME_STYLES,
+            adapter._CUSTOM_CHROME_STYLES,
+        )
+        self.assertTrue(
+            user32.frame_refreshes[-1] & adapter._SWP_FRAMECHANGED
+        )
+
+        self.assertTrue(adapter.restore_custom_chrome(self._Window()))
+        self.assertEqual(user32.style, original_style)
+        self.assertIsNone(adapter._original_style)
+        self.assertEqual(adapter._chrome_hwnd, 0)
+
+    @unittest.skipUnless(sys.platform == "win32", "requires a real Win32 HWND")
+    def test_real_qt_window_keeps_native_styles_and_restores_system_frame(self):
+        repo = Path(__file__).resolve().parents[1]
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(repo)
+        environment["QT_QPA_PLATFORM"] = "windows"
+        environment["QT_QUICK_BACKEND"] = "software"
+        code = r'''
+import ctypes
+from unittest import mock
+from PySide6.QtQuick import QQuickWindow
+from PySide6.QtWidgets import QApplication
+from speakr.native_window import NativeWindowController, _WindowsAdapter
+
+application = QApplication([])
+window = QQuickWindow()
+window.setProperty("customChromeReady", True)
+original_flags = window.flags()
+original_hwnd = int(window.winId())
+user32 = ctypes.windll.user32
+user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+original_style = int(user32.GetWindowLongPtrW(ctypes.c_void_p(original_hwnd), -16)) & 0xFFFFFFFF
+
+adapter = _WindowsAdapter(build=0)
+controller = NativeWindowController(
+    visual_effects="off", platform_name="win32", adapter=adapter
+)
+assert controller.attach(window)
+assert controller.customChromeEnabled
+active_hwnd = int(window.winId())
+active_style = int(user32.GetWindowLongPtrW(ctypes.c_void_p(active_hwnd), -16)) & 0xFFFFFFFF
+required = 0x00080000 | 0x00040000 | 0x00020000 | 0x00010000
+assert active_style & required == required, hex(active_style)
+
+controller.detach()
+restored_hwnd = int(window.winId())
+restored_style = int(user32.GetWindowLongPtrW(ctypes.c_void_p(restored_hwnd), -16)) & 0xFFFFFFFF
+assert window.flags() == original_flags
+assert restored_style & required == original_style & required, (
+    hex(original_style), hex(restored_style)
+)
+
+fallback_adapter = _WindowsAdapter(build=0)
+fallback = NativeWindowController(
+    visual_effects="off", platform_name="win32", adapter=fallback_adapter
+)
+with mock.patch.object(
+    type(fallback), "_install_windows_hit_filter", return_value=False
+):
+    assert fallback.attach(window)
+assert not fallback.customChromeEnabled
+fallback_hwnd = int(window.winId())
+fallback_style = int(user32.GetWindowLongPtrW(ctypes.c_void_p(fallback_hwnd), -16)) & 0xFFFFFFFF
+assert window.flags() == original_flags
+assert fallback_style & required == original_style & required, (
+    hex(original_style), hex(fallback_style)
+)
+fallback.detach()
+window.deleteLater()
+application.processEvents()
+'''
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=repo,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
 
 class MacAdapterTests(unittest.TestCase):
     def test_capability_is_lazy_and_requires_visual_effect_view(self):
         available = native_window._MacAdapter(
             appkit=SimpleNamespace(NSVisualEffectView=object()),
             objc_module=object(),
+            qpa_name="cocoa",
         )
         missing = native_window._MacAdapter(
             appkit=SimpleNamespace(),
             objc_module=object(),
+            qpa_name="cocoa",
         )
 
         self.assertTrue(available.native_available())
         self.assertFalse(missing.native_available())
+
+    def test_non_cocoa_qpa_refuses_before_objc_pointer_conversion(self):
+        class Objc:
+            def __init__(self):
+                self.calls = 0
+
+            def objc_object(self, **_kwargs):
+                self.calls += 1
+                raise AssertionError("non-Cocoa handles are not NSView pointers")
+
+        class Window:
+            def __init__(self):
+                self.win_id_calls = 0
+
+            def winId(self):
+                self.win_id_calls += 1
+                return 123
+
+        for qpa_name in ("offscreen", "minimal", ""):
+            with self.subTest(qpa_name=qpa_name):
+                objc_module = Objc()
+                window = Window()
+                adapter = native_window._MacAdapter(
+                    appkit=SimpleNamespace(NSVisualEffectView=object()),
+                    objc_module=objc_module,
+                    qpa_name=qpa_name,
+                )
+
+                self.assertFalse(adapter.native_available())
+                self.assertIsNone(adapter._view_for(window))
+                self.assertFalse(adapter.apply_material(window, "dark"))
+                self.assertFalse(adapter.enable_custom_chrome(window))
+                self.assertEqual(window.win_id_calls, 0)
+                self.assertEqual(objc_module.calls, 0)
+
+    def test_cocoa_qpa_allows_objc_pointer_conversion(self):
+        converted = []
+        expected_view = object()
+
+        def convert(**values):
+            converted.append(values)
+            return expected_view
+
+        adapter = native_window._MacAdapter(
+            appkit=SimpleNamespace(NSVisualEffectView=object()),
+            objc_module=SimpleNamespace(objc_object=convert),
+            qpa_name=lambda: " Cocoa ",
+        )
+
+        self.assertTrue(adapter.native_available())
+        self.assertIs(
+            adapter._view_for(SimpleNamespace(winId=lambda: 456)), expected_view
+        )
+        self.assertEqual(len(converted), 1)
+        self.assertEqual(converted[0]["c_void_p"], 456)
 
     def test_reapplying_vibrancy_does_not_stack_effect_views(self):
         class Effect:
@@ -262,7 +433,7 @@ class MacAdapterTests(unittest.TestCase):
             NSColor=SimpleNamespace(clearColor=lambda: "clear"),
         )
         adapter = native_window._MacAdapter(
-            appkit=appkit, objc_module=objc_module
+            appkit=appkit, objc_module=objc_module, qpa_name="cocoa"
         )
         window = SimpleNamespace(winId=lambda: 123)
 
@@ -289,6 +460,7 @@ class MacAdapterTests(unittest.TestCase):
         adapter = native_window._MacAdapter(
             appkit=SimpleNamespace(NSVisualEffectView=object()),
             objc_module=object(),
+            qpa_name="cocoa",
         )
         effect = Effect()
         native = Native()
@@ -326,6 +498,7 @@ class MacAdapterTests(unittest.TestCase):
         adapter = native_window._MacAdapter(
             appkit=SimpleNamespace(NSVisualEffectView=object()),
             objc_module=object(),
+            qpa_name="cocoa",
         )
         native = Native()
         state = (15, False, 0, [(1, False)])
@@ -638,6 +811,33 @@ QtObject {
             controller.detach()
             window.deleteLater()
 
+    def test_windows_hit_filter_failure_restores_native_style_and_qt_frame(self):
+        original_style = 0x86000000
+        user32 = WindowsAdapterTests._User32(original_style)
+        adapter = native_window._WindowsAdapter(build=0, user32=user32)
+        controller = native_window.NativeWindowController(
+            qt=self.qt,
+            visual_effects="off",
+            platform_name="win32",
+            adapter=adapter,
+        )
+        window = QQuickWindow()
+        window.setProperty("customChromeReady", True)
+        original_flags = window.flags()
+        try:
+            with mock.patch.object(
+                type(controller), "_install_windows_hit_filter", return_value=False
+            ):
+                self.assertTrue(controller.attach(window))
+            self.assertFalse(controller.customChromeEnabled)
+            self.assertEqual(window.flags(), original_flags)
+            self.assertEqual(user32.style, original_style)
+            self.assertIsNone(adapter._original_style)
+            self.assertEqual(adapter._chrome_hwnd, 0)
+        finally:
+            controller.detach()
+            window.deleteLater()
+
     def test_unsupported_platform_never_claims_custom_chrome(self):
         controller = native_window.NativeWindowController(
             qt=self.qt,
@@ -804,6 +1004,114 @@ Window {
             self.qapp.processEvents()
 
             self.assertEqual(preferences.call_count, calls_after_failed_startup)
+
+    def test_run_native_ui_custom_chrome_fails_closed_under_offscreen_qpa(self):
+        if self.qapp.platformName().lower() != "offscreen":
+            self.skipTest("the regression targets the offscreen QPA")
+
+        class Objc:
+            def __init__(self):
+                self.calls = 0
+
+            def objc_object(self, **_kwargs):
+                self.calls += 1
+                raise AssertionError("offscreen winId must never reach PyObjC")
+
+        class App:
+            def __init__(self):
+                self.interface_state = InterfaceState(
+                    {"availability": "ready", "enabled": True}
+                )
+                self.enabled = True
+                self._qt_frontend = None
+
+            @staticmethod
+            def settings_snapshot():
+                return {
+                    "ui": {
+                        "onboarding_complete": True,
+                        "open_window_on_start": False,
+                        "theme": "system",
+                        "visual_effects": "full",
+                        "density": "comfortable",
+                        "text_scale": "system",
+                        "reduced_motion": "reduce",
+                        "hud_visibility": "off",
+                        "hud_size": "standard",
+                        "hud_edge": "bottom",
+                        "hud_scale": 100,
+                        "background_announcements": False,
+                    },
+                    "hotkey": "right ctrl",
+                    "toggle_mode": False,
+                    "app_tones": {},
+                    "hotkey_exclude_apps": [],
+                }
+
+            @staticmethod
+            def practice_snapshot(): return {}
+            @staticmethod
+            def list_manual_words(): return []
+            @staticmethod
+            def list_learned_words(): return []
+            @staticmethod
+            def subscribe_settings(_callback): return lambda: None
+            @staticmethod
+            def subscribe_practice(_callback): return lambda: None
+
+            def _start_core(self):
+                QApplication.instance().quit()
+
+        objc_module = Objc()
+        adapter = native_window._MacAdapter(
+            appkit=SimpleNamespace(NSVisualEffectView=object()),
+            objc_module=objc_module,
+        )
+        controllers = []
+        roots = []
+        real_factory = native_window.NativeWindowController
+        real_create = qt_ui._create_qml_root
+
+        def controller_factory(**kwargs):
+            kwargs.update(platform_name="darwin", adapter=adapter)
+            controller = real_factory(**kwargs)
+            controllers.append(controller)
+            return controller
+
+        def create_root(qt, engine, path, before_complete=None):
+            if Path(path).name != "Main.qml":
+                return real_create(qt, engine, path, before_complete=before_complete)
+            root = QQuickWindow()
+            root.setObjectName("mainWindow")
+            root.setProperty("customChromeReady", True)
+            original_flags = root.flags()
+            if before_complete is not None:
+                before_complete(root)
+            roots.append((root, original_flags))
+            return root, qt.QObject()
+
+        accessibility = {
+            "system_high_contrast": False,
+            "system_reduced_motion": False,
+            "system_reduce_transparency": False,
+        }
+        with mock.patch.object(
+            qt_ui, "NativeWindowController", side_effect=controller_factory
+        ), mock.patch.object(
+            qt_ui, "_create_qml_root", side_effect=create_root
+        ), mock.patch.object(
+            qt_ui,
+            "_system_accessibility_preferences",
+            return_value=accessibility,
+        ):
+            self.assertEqual(qt_ui.run_native_ui(App()), 0)
+
+        self.assertEqual(len(controllers), 1)
+        self.assertFalse(controllers[0].customChromeEnabled)
+        self.assertEqual(controllers[0].material, "scene_glass")
+        self.assertEqual(objc_module.calls, 0)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0][0].flags(), roots[0][1])
 
 
 if __name__ == "__main__":
