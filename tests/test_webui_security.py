@@ -123,6 +123,43 @@ class WebUISecurityTests(unittest.TestCase):
         self.assertNotIn(b"speakr.cloud", body)
         self.assertNotIn(b"https://", body)
 
+    def test_recovery_page_uses_local_luminous_orbit_fallbacks(self):
+        status, _headers, body = self.request("GET", f"/?token={self.ui.token}")
+
+        self.assertEqual(status, 200)
+        page = body.decode("utf-8")
+        for token in (
+            "--canvas:#EDF1FA",
+            "--surface:#F8FAFF",
+            "--ink:#17182A",
+            "--muted:#55596D",
+            "--line:#747A92",
+            "--accent:#6657D8",
+            "--canvas:#090B18",
+            "--surface:#20243A",
+            "--ink:#F2F3FC",
+            "--muted:#B4B7C9",
+            "--line:#737A99",
+            "--accent:#A89AFB",
+        ):
+            self.assertIn(token, page)
+        self.assertIn("radial-gradient", page)
+        self.assertIn("min-height:44px", page)
+        self.assertIn("border-radius:28px", page)
+        self.assertIn("@media(prefers-color-scheme:dark)", page)
+        self.assertIn("@media(prefers-contrast:more)", page)
+        self.assertIn("@media(prefers-reduced-motion:reduce)", page)
+        self.assertIn("@media(forced-colors:active)", page)
+        self.assertIn('tabindex="-1"', page)
+        self.assertIn(".textContent", page)
+        self.assertIn('api("/api/wait?after="+after)', page)
+        self.assertIn("setTimeout(wait,1200)", page)
+        self.assertNotIn("@keyframes", page)
+        self.assertNotIn(".innerHTML", page)
+        self.assertNotIn("url(", page)
+        self.assertNotIn("<link", page)
+        self.assertNotIn("<img", page)
+
     def test_every_api_read_and_mutation_requires_header_token(self):
         status, _headers, _body = self.request("GET", "/api/state")
         self.assertEqual(status, 403)

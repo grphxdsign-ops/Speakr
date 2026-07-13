@@ -286,26 +286,84 @@ PAGE = r"""<!doctype html>
 <meta name="color-scheme" content="light dark">
 <title>Speakr recovery panel</title>
 <style>
-:root{color-scheme:light dark;--bg:#f4f6fa;--surface:#fbfcfe;--surface2:#e9edf5;--ink:#202531;--muted:#596274;--line:#c7cedb;--accent:#315fd4;--accentText:#f7f9ff;--good:#247a52;--warn:#8a5a00;--bad:#a93546;--focus:#174ebd;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:16px}
-@media(prefers-color-scheme:dark){:root{--bg:#161a22;--surface:#1d222c;--surface2:#272e3a;--ink:#f0f3fa;--muted:#b5bdcb;--line:#4a5364;--accent:#7ea3ff;--accentText:#101723;--good:#73d5a4;--warn:#efbd63;--bad:#ff929c;--focus:#a9c1ff}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);min-height:100vh}.shell{max-width:980px;margin:auto;padding:28px}.top{display:flex;gap:20px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:20px}.brand{font-size:1.75rem;font-weight:700}.local{display:flex;align-items:center;gap:8px;color:var(--muted)}.local i{width:11px;height:11px;border-radius:50%;background:var(--good)}nav{display:flex;gap:8px;margin:20px 0}button,.navbtn{font:inherit;min-height:44px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);padding:10px 16px;cursor:pointer}button:hover,.navbtn:hover{background:var(--surface2)}button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-offset:2px}.navbtn[aria-current=page],button.primary{background:var(--accent);color:var(--accentText);border-color:var(--accent)}main{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:clamp(20px,4vw,40px)}section[hidden]{display:none}.status{display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:24px}.stateicon{display:grid;place-items:center;width:48px;height:48px;border:2px solid var(--line);border-radius:50%;font-size:1.4rem}.status h1{font-size:1.75rem;margin:0 0 5px}.status p,h2+p{color:var(--muted);margin:0;line-height:1.5}.setting{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:center;padding:18px 0;border-bottom:1px solid var(--line)}.setting:last-child{border-bottom:0}.setting strong{display:block;margin-bottom:4px}.setting small{color:var(--muted);line-height:1.45;display:block;max-width:62ch}.switch{display:flex;gap:10px;align-items:center}.switch input{width:24px;height:24px}.issue{margin-top:20px;padding:18px;border:1px solid var(--bad);border-radius:10px}.issue strong{color:var(--bad)}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.privacylist{padding:0;list-style:none}.privacylist li{padding:16px 0;border-bottom:1px solid var(--line)}.privacylist b{display:block;margin-bottom:5px}.privacylist span{color:var(--muted);line-height:1.5}.hotkey{font-variant-numeric:tabular-nums;font-weight:650}.warning{color:var(--warn);margin-top:8px}.fine{color:var(--muted);font-size:.94rem;line-height:1.55;max-width:70ch}@media(max-width:680px){.shell{padding:16px}.top{align-items:flex-start}.local{max-width:180px}nav{overflow:auto}main{padding:20px}.status,.setting{grid-template-columns:1fr}.stateicon{display:none}}
-@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
-@media(forced-colors:active){*{forced-color-adjust:auto}.local i{background:CanvasText}.issue{border:2px solid CanvasText}}
+:root{color-scheme:light dark;--canvas:#EDF1FA;--surface:#F8FAFF;--surface-glass:rgba(248,250,255,.94);--surface-soft:rgba(248,250,255,.82);--well:rgba(248,250,255,.97);--ink:#17182A;--muted:#55596D;--line:#747A92;--line-soft:rgba(116,122,146,.4);--accent:#6657D8;--accent-hover:#5749C4;--accent-text:#F8FAFF;--good:#24694D;--good-soft:rgba(36,105,77,.1);--warn:#765000;--bad:#9A3044;--bad-soft:rgba(154,48,68,.08);--focus:#6657D8;--shadow:0 24px 70px rgba(42,45,79,.16),0 3px 14px rgba(42,45,79,.08);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:16px}
+@media(prefers-color-scheme:dark){:root{--canvas:#090B18;--surface:#20243A;--surface-glass:rgba(32,36,58,.94);--surface-soft:rgba(32,36,58,.82);--well:rgba(32,36,58,.97);--ink:#F2F3FC;--muted:#B4B7C9;--line:#737A99;--line-soft:rgba(115,122,153,.42);--accent:#A89AFB;--accent-hover:#B9AEFC;--accent-text:#17182A;--good:#7DD7B0;--good-soft:rgba(125,215,176,.11);--warn:#F0C56A;--bad:#FF9CAA;--bad-soft:rgba(255,156,170,.09);--focus:#C3BBFF;--shadow:0 30px 80px rgba(1,2,10,.42),0 3px 16px rgba(1,2,10,.3)}}
+*{box-sizing:border-box}
+html{min-width:320px;background:var(--canvas)}
+body{isolation:isolate;margin:0;min-height:100vh;color:var(--ink);background:radial-gradient(circle at 12% 8%,rgba(102,87,216,.19) 0,rgba(102,87,216,0) 34%),radial-gradient(circle at 88% 18%,rgba(74,174,201,.14) 0,rgba(74,174,201,0) 31%),radial-gradient(circle at 72% 94%,rgba(205,119,156,.12) 0,rgba(205,119,156,0) 34%),var(--canvas);overflow-x:hidden}
+body::before,body::after{content:"";position:fixed;z-index:0;pointer-events:none;border:1px solid var(--line-soft);border-radius:50%;opacity:.48}
+body::before{width:min(76vw,880px);height:min(76vw,880px);left:-31vw;top:18vh;transform:rotate(-18deg)}
+body::after{width:min(58vw,680px);height:min(34vw,400px);right:-18vw;top:8vh;transform:rotate(24deg)}
+button,input{font:inherit}
+button{min-height:44px;border:1px solid var(--line-soft);border-radius:14px;background:var(--well);color:var(--ink);padding:10px 16px;font-weight:600;cursor:pointer;box-shadow:0 1px 0 rgba(255,255,255,.08);transition:background-color 100ms cubic-bezier(.22,1,.36,1),border-color 100ms cubic-bezier(.22,1,.36,1),color 100ms cubic-bezier(.22,1,.36,1),transform 100ms cubic-bezier(.22,1,.36,1)}
+button:hover{border-color:var(--line);background:var(--surface)}
+button:active{transform:scale(.99)}
+button:focus-visible,input:focus-visible,[tabindex="-1"]:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+button.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.shell{position:relative;z-index:1;width:min(100%,1080px);margin:0 auto;padding:clamp(18px,4vw,46px)}
+.top{display:flex;gap:24px;align-items:center;justify-content:space-between;margin-bottom:18px;padding:12px 4px}
+.brandgroup{display:flex;align-items:center;gap:13px;min-height:44px}
+.brand{font-size:1.75rem;font-weight:720;letter-spacing:-.035em}
+.signal{display:flex;align-items:center;gap:5px;color:var(--accent)}
+.signal i{display:block;width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:none}
+.signal i:nth-of-type(2){width:9px;height:9px}
+.signal span{display:block;width:14px;height:1px;background:currentColor;opacity:.65}
+.local{display:flex;align-items:center;gap:9px;min-height:44px;padding:9px 14px;border:1px solid var(--line-soft);border-radius:999px;background:var(--surface-soft);color:var(--muted);font-size:.94rem;font-weight:550;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.local i{flex:0 0 auto;width:10px;height:10px;border-radius:50%;background:var(--good);box-shadow:0 0 0 4px var(--good-soft)}
+nav{display:flex;align-items:center;gap:6px;width:max-content;max-width:100%;margin:0 0 14px;padding:6px;border:1px solid var(--line-soft);border-radius:20px;background:var(--surface-soft);box-shadow:0 6px 24px rgba(23,24,42,.07);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+.navbtn{border-color:transparent;background:transparent;color:var(--muted);box-shadow:none;white-space:nowrap}
+.navbtn:hover{border-color:transparent;background:var(--well);color:var(--ink)}
+.navbtn[aria-current=page]{background:var(--well);border-color:var(--line-soft);color:var(--ink);box-shadow:0 5px 14px rgba(23,24,42,.09)}
+main{position:relative;overflow:hidden;min-height:520px;padding:clamp(24px,4vw,44px);border:1px solid var(--line-soft);border-radius:28px;background:var(--surface-glass);box-shadow:var(--shadow);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+main::before{content:"";position:absolute;inset:0 0 auto;height:1px;background:rgba(255,255,255,.34);pointer-events:none}
+section{position:relative}
+section[hidden]{display:none}
+section>h1{margin:0 0 8px;font-size:1.75rem;line-height:1.2;letter-spacing:-.025em}
+section>h1+p{max-width:62ch;margin:0 0 24px;color:var(--muted);line-height:1.55}
+.status{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:18px;align-items:center;margin-bottom:10px;padding:20px;border:1px solid var(--line-soft);border-radius:20px;background:var(--well)}
+.stateicon{display:grid;place-items:center;width:52px;height:52px;border:1px solid var(--line);border-radius:18px;background:var(--good-soft);color:var(--good);font-size:1.35rem;font-weight:700}
+.status h1{margin:0 0 5px;font-size:1.75rem;line-height:1.2;letter-spacing:-.025em}
+.status p,h2+p{max-width:65ch;margin:0;color:var(--muted);line-height:1.5}
+.setting{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:center;padding:20px 4px;border-bottom:1px solid var(--line-soft)}
+.setting:last-child{border-bottom:0}
+.setting strong{display:block;margin-bottom:5px;font-size:1rem}
+.setting small{display:block;max-width:62ch;color:var(--muted);font-size:.94rem;line-height:1.5}
+.setting>div:last-child{min-width:150px;text-align:right}
+.switch{display:flex;gap:10px;align-items:center;min-height:44px;color:var(--muted);font-weight:550}
+.switch input{width:24px;height:24px;margin:0;accent-color:var(--accent)}
+.issue{margin-top:18px;padding:18px 20px;border:1px solid var(--bad);border-radius:20px;background:var(--bad-soft)}
+.issue strong{color:var(--bad)}
+.issue p{margin-top:8px}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+.privacylist{margin:8px 0 0;padding:0;list-style:none;border-top:1px solid var(--line-soft)}
+.privacylist li{padding:18px 4px;border-bottom:1px solid var(--line-soft)}
+.privacylist b{display:block;margin-bottom:5px}
+.privacylist span{display:block;max-width:68ch;color:var(--muted);line-height:1.55}
+.hotkey{display:inline-block;min-height:34px;padding:7px 11px;border:1px solid var(--line-soft);border-radius:10px;background:var(--surface);font-variant-numeric:tabular-nums;font-weight:700;line-height:1.2}
+.warning{margin-top:8px;color:var(--warn)}
+.fine{max-width:70ch;color:var(--muted);font-size:.94rem;line-height:1.6}
+h2{margin:30px 0 7px;font-size:1.15rem;letter-spacing:-.01em}
+@media(max-width:760px){.shell{padding:18px}.top{align-items:flex-start}.local{max-width:330px}nav{width:100%;overflow-x:auto}.navbtn{flex:1 0 auto}main{min-height:0;padding:26px}.status{grid-template-columns:auto minmax(0,1fr)}.status .primary{grid-column:1/-1;width:100%}}
+@media(max-width:540px){.shell{padding:12px}.top{display:grid;gap:8px;padding:5px 2px 8px}.local{justify-content:flex-start;width:100%;max-width:none;border-radius:14px}nav{display:grid;grid-template-columns:1fr;padding:5px;border-radius:18px;overflow:visible}.navbtn{width:100%;text-align:left}main{padding:20px;border-radius:22px}.status,.setting{grid-template-columns:1fr;gap:14px}.stateicon{width:46px;height:46px;border-radius:14px}.setting>div:last-child{min-width:0;text-align:left}.setting .actions{margin-top:10px}.switch{justify-content:flex-start}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:0s!important;animation-duration:0s!important;animation-iteration-count:1!important}}
+@media(prefers-contrast:more){:root{--surface-glass:var(--surface);--surface-soft:var(--surface);--well:var(--surface);--line-soft:var(--line);--shadow:none}body{background:var(--canvas)}body::before,body::after{display:none}.local,nav,main{backdrop-filter:none;-webkit-backdrop-filter:none}.local,.navbtn[aria-current=page],main,.status,.issue{border-width:2px}}
+@media(forced-colors:active){:root{--shadow:none}body{background:Canvas}body::before,body::after,main::before{display:none}.local,nav,main{background:Canvas;border-color:CanvasText;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}.navbtn[aria-current=page],button.primary,.status,.hotkey,.issue{background:Canvas;border:2px solid CanvasText;color:CanvasText;box-shadow:none}.local i{background:CanvasText;box-shadow:none}.stateicon{border:2px solid CanvasText;background:Canvas;color:CanvasText}.issue strong{color:CanvasText}}
 </style>
 </head>
 <body>
 <div class="shell">
-  <header class="top"><div class="brand">Speakr</div><div class="local"><i aria-hidden="true"></i><span>Everything stays on this device</span></div></header>
+  <header class="top"><div class="brandgroup"><div class="brand">Speakr</div><div class="signal" aria-hidden="true"><i></i><span></span><i></i><span></span><i></i></div></div><div class="local"><i aria-hidden="true"></i><span>Everything stays on this device</span></div></header>
   <nav aria-label="Recovery panel"><button class="navbtn" data-page="home" aria-current="page">Home</button><button class="navbtn" data-page="privacy">Privacy &amp; local data</button><button class="navbtn" data-page="help">Help</button></nav>
   <main>
     <section id="home">
-      <div class="status" role="status" aria-live="polite" aria-atomic="true"><div class="stateicon" id="stateicon" aria-hidden="true">✓</div><div><h1 id="primary">Getting Speakr ready</h1><p id="secondary">Preparing the local speech model.</p></div><button class="primary" id="toggle">Turn dictation off</button></div>
+      <div class="status" role="status" aria-live="polite" aria-atomic="true"><div class="stateicon" id="stateicon" aria-hidden="true">✓</div><div><h1 id="primary" tabindex="-1">Getting Speakr ready</h1><p id="secondary">Preparing the local speech model.</p></div><button class="primary" id="toggle">Turn dictation off</button></div>
       <div id="issue" class="issue" hidden role="alert"><strong id="issueTitle"></strong><p id="issueDetail" class="fine"></p><div class="actions"><button id="issueAction">Open system settings</button><button id="dismissIssue">Dismiss</button></div></div>
       <div class="setting"><div><strong>Activation shortcut</strong><small>Use Hold to talk or Tap to start and stop. Shortcut capture has no hidden background access.</small></div><div><span class="hotkey" id="hotkey">...</span><div class="actions"><button id="captureKey">Change</button><button id="cancelKey" hidden>Cancel</button><button id="confirmKey" hidden class="primary">Confirm</button></div></div></div>
       <div class="actions"><button id="openSettings">Open system privacy settings</button><button id="openConfig">Open local config</button><button id="openLog">Open local log</button></div>
     </section>
     <section id="privacy" hidden>
-      <h1>Privacy &amp; local data</h1><p>These controls describe exactly what Speakr keeps while it runs.</p>
+      <h1 tabindex="-1">Privacy &amp; local data</h1><p>These controls describe exactly what Speakr keeps while it runs.</p>
       <ul class="privacylist">
         <li><b>Microphone readiness</b><span id="micDisclosure">When enabled, a short rolling audio buffer is held only in RAM and continuously replaced.</span></li>
         <li><b>Screen context</b><span>Reads nearby focused-control text locally for spelling hints. It is not placed in this panel or stored.</span></li>
@@ -319,7 +377,7 @@ PAGE = r"""<!doctype html>
       <div class="setting"><div><strong>Write transcripts to the local log</strong><small id="logWarning">Off is recommended. Enabling writes dictated text to speakr.log on this device.</small></div><label class="switch"><input type="checkbox" id="logTranscripts"><span>Enabled</span></label></div>
     </section>
     <section id="help" hidden>
-      <h1>Help</h1><p>This recovery panel is a local fallback. The normal interface is the native Speakr window.</p>
+      <h1 tabindex="-1">Help</h1><p>This recovery panel is a local fallback. The normal interface is the native Speakr window.</p>
       <h2>Dictate</h2><p class="fine">Hold your shortcut, speak, then release. In Tap mode, press once to start and again to stop.</p>
       <h2>Nothing was inserted</h2><p class="fine">Check microphone access, make sure the target field still has focus, then try again. Speakr never displays dictated content in this recovery panel.</p>
       <h2>Local cleanup</h2><p class="fine">If Ollama is not available, Speakr continues with its built-in rule-based cleanup.</p>
