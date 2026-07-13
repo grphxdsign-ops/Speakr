@@ -241,6 +241,8 @@ Privacy --> Permissions --> Speech model --> Shortcut --> optional Practice --> 
 - One primary action per frame; Back and Skip remain visible and labeled.
 - Permission and model failures explain what happened and provide one specific
   next action.
+- Required first-run copy uses plain language; protocol, hardware, Ollama, and
+  diagnostic detail remains in Help or Advanced.
 - Hotkey capture has no timeout, exposes Cancel, and accepts Escape.
 - Practice never gates completion.
 - Directional movement is 180 ms only when Reduced Motion is not active.
@@ -319,6 +321,8 @@ Privacy --> Permissions --> Speech model --> Shortcut --> optional Practice --> 
 - Preserve loopback-only behavior, token authentication, Host and Origin
   rejection, CSP, no CORS, `Cache-Control: no-store`, sanitized events, and
   Practice exclusion.
+- Microphone repair, speech-model retry, and setup recheck remain visible and
+  use the same narrow token-authenticated action allowlist.
 
 ## Motion and state flow
 

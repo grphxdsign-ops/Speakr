@@ -255,6 +255,10 @@ def _make_handler(ui: WebUI):
                     ok = ui.app.dismiss_issue()
                 elif action == "open_system_settings":
                     ok = ui.app.open_system_settings()
+                elif action == "retry_model":
+                    ok = ui.app.retry_model()
+                elif action == "retry_setup":
+                    ok = ui.app.retry_setup()
                 elif action == "open_local" and body.get("kind") in {"config", "log"}:
                     ok = ui.app.open_local(body["kind"])
                 else:
@@ -358,7 +362,7 @@ h2{margin:30px 0 7px;font-size:1.15rem;letter-spacing:-.01em}
   <main>
     <section id="home">
       <div class="status" role="status" aria-live="polite" aria-atomic="true"><div class="stateicon" id="stateicon" aria-hidden="true">✓</div><div><h1 id="primary" tabindex="-1">Getting Speakr ready</h1><p id="secondary">Preparing the local speech model.</p></div><button class="primary" id="toggle">Turn dictation off</button></div>
-      <div id="issue" class="issue" hidden role="alert"><strong id="issueTitle"></strong><p id="issueDetail" class="fine"></p><div class="actions"><button id="issueAction">Open system settings</button><button id="dismissIssue">Dismiss</button></div></div>
+      <div id="issue" class="issue" hidden role="alert"><strong id="issueTitle"></strong><p id="issueDetail" class="fine"></p><div class="actions"><button id="issueAction" hidden>Open system settings</button><button id="recheckIssue" hidden>Recheck setup</button><button id="dismissIssue">Dismiss</button></div></div>
       <div class="setting"><div><strong>Activation shortcut</strong><small>Use Hold to talk or Tap to start and stop. Shortcut capture has no hidden background access.</small></div><div><span class="hotkey" id="hotkey">...</span><div class="actions"><button id="captureKey">Change</button><button id="cancelKey" hidden>Cancel</button><button id="confirmKey" hidden class="primary">Confirm</button></div></div></div>
       <div class="actions"><button id="openSettings">Open system privacy settings</button><button id="openConfig">Open local config</button><button id="openLog">Open local log</button></div>
     </section>
@@ -387,7 +391,7 @@ h2{margin:30px 0 7px;font-size:1.15rem;letter-spacing:-.01em}
 <script nonce="__NONCE__">
 (function(){
 "use strict";
-var TOKEN="__TOKEN__", state={}, settings={}, stopped=false;
+var TOKEN="__TOKEN__", state={}, settings={}, stopped=false, issueCommand="";
 history.replaceState(null,"","/");
 function api(path, options){options=options||{};options.headers=Object.assign({"X-Speakr-Token":TOKEN,"Content-Type":"application/json"},options.headers||{});return fetch(path,options).then(function(r){if(!r.ok)throw new Error("request failed");return r.json();});}
 function action(name, extra){return api("/api/action",{method:"POST",body:JSON.stringify(Object.assign({action:name},extra||{}))}).then(function(v){if(v.state)state=v.state;if(v.settings)settings=v.settings;render();return v;});}
@@ -400,14 +404,19 @@ function render(){
  $("toggle").textContent=enabled?"Turn dictation off":"Turn dictation on";$("stateicon").textContent=capture==="listening"?"●":pipeline==="error"?"!":enabled?"✓":"Ⅱ";
  $("hotkey").textContent=(settings.pending_hotkey||settings.hotkey||state.hotkey||"Not set");
  $("captureKey").hidden=!!settings.capturing_hotkey;$("cancelKey").hidden=!settings.capturing_hotkey;$("confirmKey").hidden=!settings.pending_hotkey;
- var issue=state.last_issue||state.lastIssue;$("issue").hidden=!issue;if(issue){$("issueTitle").textContent=issue.message||"Speakr needs attention";$("issueDetail").textContent=issue.detail||"";$("issueAction").hidden=issue.action!=="open_system_settings";}
+ var issue=state.last_issue||state.lastIssue, issueAction=issue&&String(issue.action||""), issueChoice=null;
+ if(issueAction==="open_system_settings")issueChoice={command:"open_system_settings",label:"Open system settings"};
+ else if(issueAction==="retry_model")issueChoice={command:"retry_model",label:"Retry speech model"};
+ else if(issueAction==="retry_setup")issueChoice={command:"retry_setup",label:"Recheck setup"};
+ issueCommand=issueChoice?issueChoice.command:"";$("issue").hidden=!issue;$("issueAction").hidden=!issueChoice;$("recheckIssue").hidden=!(issue&&issueAction==="open_system_settings");
+ if(issue){$("issueTitle").textContent=issue.message||"Speakr needs attention";$("issueDetail").textContent=issue.detail||"";if(issueChoice)$("issueAction").textContent=issueChoice.label;}
  $("keepMic").checked=!!settings.keep_mic_stream_open;$("screenContext").checked=!!settings.screen_context;$("editMode").checked=!!settings.edit_mode;$("recentContext").checked=!!settings.recent_context;$("logTranscripts").checked=!!settings.log_transcripts;
  var seconds=Number(settings.preroll_seconds||0).toFixed(1);$("prerollText").textContent="Keeps "+seconds+" seconds of rolling audio in RAM and continuously replaces it.";$("micDisclosure").textContent=settings.keep_mic_stream_open?"The microphone connection stays open while Ready. Only "+seconds+" seconds are held in RAM and continuously replaced.":"The microphone opens only when recording starts.";
 }
 function refresh(){return Promise.all([api("/api/state"),api("/api/settings")]).then(function(v){state=v[0];settings=v[1];render();});}
  function wait(){if(stopped)return;var after=Number(state.version||0);api("/api/wait?after="+after).then(function(v){if(v)state=v;render();return api("/api/settings");}).then(function(v){if(v)settings=v;render();wait();}).catch(function(){setTimeout(wait,1200);});}
 document.querySelectorAll(".navbtn").forEach(function(btn){btn.addEventListener("click",function(){document.querySelectorAll(".navbtn").forEach(function(n){n.removeAttribute("aria-current");});btn.setAttribute("aria-current","page");document.querySelectorAll("main section").forEach(function(s){s.hidden=s.id!==btn.dataset.page;});document.querySelector("#"+btn.dataset.page+" h1, #"+btn.dataset.page+" .status h1").focus&&document.querySelector("#"+btn.dataset.page+" h1, #"+btn.dataset.page+" .status h1").focus();});});
-$("toggle").onclick=function(){action("toggle_dictation");};$("captureKey").onclick=function(){action("begin_hotkey_capture");};$("cancelKey").onclick=function(){action("cancel_hotkey_capture");};$("confirmKey").onclick=function(){action("confirm_hotkey");};$("dismissIssue").onclick=function(){action("dismiss_issue");};$("issueAction").onclick=function(){action("open_system_settings");};$("openSettings").onclick=function(){action("open_system_settings");};$("openConfig").onclick=function(){action("open_local",{kind:"config"});};$("openLog").onclick=function(){action("open_local",{kind:"log"});};
+$("toggle").onclick=function(){action("toggle_dictation");};$("captureKey").onclick=function(){action("begin_hotkey_capture");};$("cancelKey").onclick=function(){action("cancel_hotkey_capture");};$("confirmKey").onclick=function(){action("confirm_hotkey");};$("dismissIssue").onclick=function(){action("dismiss_issue");};$("issueAction").onclick=function(){if(issueCommand)action(issueCommand);};$("recheckIssue").onclick=function(){action("retry_setup");};$("openSettings").onclick=function(){action("open_system_settings");};$("openConfig").onclick=function(){action("open_local",{kind:"config"});};$("openLog").onclick=function(){action("open_local",{kind:"log"});};
 [["keepMic","keep_mic_stream_open"],["screenContext","screen_context.enabled"],["editMode","edit_mode.enabled"],["recentContext","formatting.include_recent_context"],["logTranscripts","log_transcripts"]].forEach(function(pair){$(pair[0]).onchange=function(){if(pair[1]==="log_transcripts"&&this.checked&&!confirm("Dictated text will be written to the local file:\n"+(settings.log_path||"speakr.log")+"\n\nContinue?")){this.checked=false;return;}setSetting(pair[1],this.checked);};});
 refresh().then(wait).catch(wait);window.addEventListener("beforeunload",function(){stopped=true;});
 })();
