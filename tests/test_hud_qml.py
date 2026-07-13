@@ -93,6 +93,17 @@ class HudQmlTests(unittest.TestCase):
         for _ in range(count):
             cls.qapp.processEvents()
 
+    @classmethod
+    def _wait_until(cls, predicate, *, timeout_ms, poll_ms=5):
+        deadline = time.monotonic() + (timeout_ms / 1000.0)
+        while time.monotonic() < deadline:
+            cls.qapp.processEvents()
+            if predicate():
+                return True
+            QTest.qWait(poll_ms)
+        cls.qapp.processEvents()
+        return bool(predicate())
+
     def _close(self, bridge, engine):
         warnings = engine._hud_test_warnings
         dispose_qml_fixture(
@@ -595,8 +606,10 @@ class HudQmlTests(unittest.TestCase):
         try:
             ring = hud.findChild(QObject, "hudSuccessRing")
             bloom = hud.findChild(QObject, "hudSuccessBloom")
+            theme = hud.findChild(QObject, "hudTheme")
             self.assertIsNotNone(ring)
             self.assertIsNotNone(bloom)
+            self.assertIsNotNone(theme)
 
             app.interface_state.update(
                 pipeline="formatting", pipeline_job_id=601
@@ -612,7 +625,19 @@ class HudQmlTests(unittest.TestCase):
             self.assertFalse(bool(bloom.property("running")))
             self.assertAlmostEqual(float(ring.property("opacity")), 0.0, places=3)
 
-            QTest.qWait(65)
+            self.assertTrue(
+                self._wait_until(
+                    lambda: (
+                        hud.property("displayedKind") == "success"
+                        and bool(ring.property("visible"))
+                        and bool(bloom.property("running"))
+                    ),
+                    timeout_ms=max(
+                        250, int(theme.property("motionStandard")) * 3
+                    ),
+                ),
+                "success bloom did not start after the bounded crossfade",
+            )
             self.assertTrue(bool(ring.property("visible")))
             self.assertTrue(bool(bloom.property("running")))
             self.assertEqual(hud.property("displayedKind"), "success")
