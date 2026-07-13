@@ -1,23 +1,84 @@
-# Speakr Design System
+# Speakr design system
 
 ## Overview
 
-Quiet Signal is a restrained desktop product interface. A three-node signal path represents Transcribe, Clean up, and Insert. The interface follows the operating system by default and remains legible during a quick glance while another application has focus.
+Luminous Orbit is Speakr's adaptive desktop interface. It combines a deep
+orbital observatory in dark mode with luminous lunar mist in light mode. The
+experience is rounded, layered, and atmospheric while remaining quiet enough
+for a person to understand at a glance from another application.
+
+The earlier Quiet Signal visual prohibition on glass, glow, and atmospheric
+color is superseded. Its privacy, focus-retention, accessibility, truthful
+state, temporary Practice, and local-only constraints remain binding.
+
+The complete screen, component, native-chrome, effects, and acceptance
+contract lives in [`docs/design/luminous-orbit-spec.md`](docs/design/luminous-orbit-spec.md).
 
 ## Color
 
-Source tokens are authored in OKLCH and converted to checked sRGB values for QML.
+These sRGB tokens are the runtime source of truth.
 
-| Role | Light source | Dark source |
+| Role | Light | Dark |
 |---|---|---|
-| Background | `oklch(97% .010 255)` | `oklch(18% .016 255)` |
-| Surface | `oklch(99% .006 255)` | `oklch(23% .018 255)` |
-| Text | `oklch(24% .025 255)` | `oklch(93% .010 255)` |
-| Muted text | `oklch(44% .020 255)` | `oklch(72% .018 255)` |
-| Border | `oklch(82% .020 255)` | `oklch(40% .020 255)` |
-| Accent | `oklch(55% .18 255)` | `oklch(72% .13 255)` |
+| Canvas | `#EDF1FA` | `#090B18` |
+| Strong content surface | `#F8FAFF` | `#20243A` |
+| Primary text | `#17182A` | `#F2F3FC` |
+| Secondary text | `#55596D` | `#B4B7C9` |
+| Meaningful border | `#747A92` | `#737A99` |
+| Accent | `#6657D8` | `#A89AFB` |
 
-Success, warning, and danger use restrained semantic colors. Meaning always includes an icon, label, and shape. Essential text targets 7:1 where practical and never falls below 4.5:1. Control boundaries target at least 3:1. Windows High Contrast and macOS Increased Contrast override branded tokens with the system palette.
+Atmosphere uses low-opacity violet, cyan, and blush fields. It never carries
+meaning by itself and is removed in High Contrast. Essential text targets
+7:1 where practical and never falls below 4.5:1 after compositing. Secondary
+text, placeholder text, borders, focus, and controls are tested against the
+final composited surface rather than their nominal source color. Meaningful
+controls and boundaries remain at least 3:1.
+
+Semantic success, warning, and danger colors remain distinguishable through
+icon, label, and shape. Windows High Contrast and macOS Increased Contrast
+replace branded colors with the system palette.
+
+## Material and effects
+
+Speakr persists one preference:
+
+```text
+ui.visual_effects: system | full | reduced | off
+```
+
+The default is `system`. The resolved material is one of:
+
+```text
+mica | vibrancy | scene_glass | solid
+```
+
+Resolution order:
+
+1. High Contrast or Increased Contrast forces `off` and `solid`.
+2. OS Reduce Transparency forces `reduced`.
+3. RDP, virtualized display, software rendering, or graphics failure forces
+   `reduced`.
+4. Explicit `off` or `reduced` is honored.
+5. Otherwise use `full`.
+6. If native material is unavailable, `full` resolves to `scene_glass` rather
+   than blocking launch.
+
+Windows 11 build 22621 or newer uses Mica for the long-lived main window.
+macOS uses Vibrancy behind the main QML scene. The HUD never uses native
+desktop-backed blur. `scene_glass` is drawn from local QML colors and shapes;
+it never samples the screen.
+
+| Surface | Full opacity | Reduced opacity | Off |
+|---|---:|---:|---|
+| Outer shell veil | 72% dark / 78% light | 94% | Solid canvas |
+| Navigation material | 76% dark / 82% light | 96% | Strong surface |
+| Major surface | 84% dark / 88% light | 96% | Strong surface |
+| Contextual notice | 88% dark / 92% light | 96% | Strong surface |
+| Text-heavy content well | 94% dark / 96% light | 100% | Strong surface |
+| HUD | 96% minimum | 100% | 100% |
+
+Do not nest glass within glass. A content well inside a glass surface is
+opaque enough to preserve reading contrast and a clear layer hierarchy.
 
 ## Typography
 
@@ -30,25 +91,66 @@ Success, warning, and danger use restrained semantic colors. Meaning always incl
 - Labels and controls: 16 px, medium.
 - Prose line length: at most 70 characters.
 
-## Spacing and Layout
+Text remains flat and opaque. Do not use gradient, outlined, blurred, or
+glowing type.
+
+## Spacing, shape, and layout
 
 - Spacing tokens: 4, 8, 12, 16, 24, and 32 logical pixels.
+- Radius tokens: 14 px controls, 20 px major panels, and 28 px shell.
+- Pills are limited to compact status and metadata.
 - Minimum interactive target: 44 by 44 logical pixels.
 - Main window: 960 by 700 default, 640 by 520 minimum.
-- At narrow widths, labeled navigation moves above content. It never collapses to unlabeled icons.
-- Use solid surfaces, full borders, and whitespace. Avoid nested cards and uniform card grids.
+- At 860 logical pixels and wider, labeled navigation sits beside content.
+- Below 860, labeled navigation moves above content. At 640 by 520 and 200%
+  text, all five labels remain visible in a two-column, three-row grid.
+- Content reflows before it truncates. No primary action becomes icon-only.
+- Use one shell layer and one content hierarchy; avoid nested-card grids.
+
+## Custom chrome
+
+The main window uses a custom visual title bar. The operating system continues
+to own movement, resizing, snapping, maximization, fullscreen, system menus,
+and window lifecycle.
+
+- Windows provides DWM corners and shadow, eight resize regions, mixed-DPI
+  work-area bounds, `HTMAXBUTTON` Snap Layouts, Win+Z, Alt+Space, and
+  double-click maximize/restore.
+- macOS retains titled, closable, miniaturizable, and resizable window masks
+  with full-size content, hidden standard controls, and native
+  close/minimize/zoom/fullscreen actions.
+- Minimize, Maximize or Restore, and Close each have accessible roles, names,
+  44 px targets, and visible focus.
+- Close hides Speakr to the tray. Quit remains an explicit separate action.
+- Chrome initialization failure restores the normal system frame before the
+  window becomes visible.
+
+The custom title bar contains no application setting or page action. Drag and
+control regions never overlap.
 
 ## Components
 
-- Native title bar and native Qt Quick Controls.
-- Status banner with icon, title, explanatory text, and an optional action.
-- Signal path: three text-labeled nodes with directional connectors.
-- Setting row: visible label, description, control, save state, and inline validation.
-- Focus treatment: 2 px accent outline with 2 px clearance.
-- Error treatment: persistent inline summary with one recommended action and optional technical detail.
-- HUD: two reserved text lines, coarse five-segment input meter, no interactive controls.
+- `CosmicBackdrop`: static local violet, cyan, and blush fields with abstract
+  orbital curves; no image download, particle system, or idle animation.
+- `GlassSurface`: one material boundary with resolved opacity, 1 px meaningful
+  edge, and optional restrained shadow. It becomes opaque in `off`.
+- `StatusOrb`: icon-and-label state marker; it never uses color alone.
+- `SectionHeading`: heading, optional description, and one contextual action.
+- `InlineNotice`: persistent recovery or saved-state message with a specific
+  next action.
+- `FocusRing`: independent 2 px accent or system-highlight outline with 2 px
+  clearance; it is never clipped by a rounded parent.
+- `ChromeButton`: accessible window control mapped to native behavior.
+- Signal path: three labeled nodes for Transcribe, Clean up, and Insert with
+  state-driven connectors only.
+- Setting row: visible label, description, control, save state, and inline
+  validation.
+- HUD: two reserved text lines, coarse five-segment input meter, and no
+  interactive controls or transcript content.
 
-Every interactive component implements default, hover, focus, pressed, disabled, loading, and error states.
+Every interactive component implements default, hover, focus, pressed,
+disabled, loading, and error states in light, dark, High Contrast, full,
+reduced, and off effects modes.
 
 ## Motion
 
@@ -57,29 +159,34 @@ Every interactive component implements default, hover, focus, pressed, disabled,
 - Emphasis: 220 ms.
 - Ease out: `cubic-bezier(.22, 1, .36, 1)`.
 - Ease in: `cubic-bezier(.4, 0, 1, 1)`.
-- Animate opacity and transforms only.
-- No bounce, elastic motion, perpetual pulse, ambient drift, fake progress, or delayed stage completion.
-- Reduced Motion removes translation, drawing, sweeps, and connector fills while preserving reading time.
+- Page change: opacity plus 8 px settle, 160 ms.
+- Hover: color plus optional 1 px lift, 100 ms.
+- Press: scale no lower than `.99`, 100 ms.
+- Pipeline stage: connector fill and crossfade, 160 ms.
+- Success: one check draw or restrained bloom, 220 ms; retain a 1.2-second
+  reading window.
+- Error: icon, border, and label crossfade only.
 
-### Motion flow
+Motion explains a state transition. There is no bounce, elastic easing,
+shake, parallax, idle drift, breathing glow, fake progress, or delayed stage
+completion. Reduced Motion makes transformations and drawing instant while
+preserving success and error reading time.
+
+### Runtime motion flow
 
 ```text
 HUD hidden --160 ms opacity + 8 px settle--> Listening
 Listening --120 ms crossfade--> Transcribing locally
 Transcribing --160 ms connector fill--> Cleaning up locally
 Cleaning up --160 ms connector fill--> Inserting text
-Inserting --180 ms check draw--> Inserted --1.2 s reading time--> hidden
+Inserting --220 ms check draw--> Inserted --1.2 s reading time--> hidden
 
 Any state --160 ms icon/border/label crossfade--> recoverable error
 Page A --160 ms fade + 8 px settle--> Page B (focus moves to heading)
 Onboarding step A --180 ms directional fade--> step B
 ```
 
-With Reduced Motion, every arrow changes state instantly; the 1.2-second
-success and five-second error HUD reading windows remain unchanged. Error
-recovery stays persistent on Home and in the tray after the HUD retires.
-
-## Product flows
+## Product flows and content
 
 ```text
 Privacy --> Microphone permissions --> Speech model --> Shortcut --> optional Practice --> Home
@@ -93,16 +200,42 @@ Processing job A + hotkey for job B
   --> completion A cannot hide or replace B
 ```
 
+Use short, literal state copy: Ready, Listening, Transcribing locally,
+Cleaning up locally, Inserting text, Inserted. Ollama unavailability is
+presented as Basic cleanup active, not as a blocking error. Practice uses the
+label "Not stored by Speakr; clears when you leave Practice." Never ask a
+user to speak more clearly and never assign a speech or confidence score.
+
 ## Reference boards
 
-- `docs/design/quiet-signal-main-window.png` — light/dark Home.
-- `docs/design/quiet-signal-onboarding-practice.png` — connected setup and Practice frames.
-- `docs/design/quiet-signal-hud-motion.png` — timed runtime and recovery storyboard.
+The Luminous Orbit board set is specified but not generated in this contract
+change. Planned local references are:
 
-## Content
+- `docs/design/luminous-orbit-home-light-dark.png` -- light and dark Home at
+  960 by 700 with custom chrome.
+- `docs/design/luminous-orbit-responsive-accessibility.png` -- 640 by 520,
+  200% text, High Contrast, and reduced-effects states.
+- `docs/design/luminous-orbit-onboarding-practice.png` -- connected setup and
+  Practice frames with explicit arrows.
+- `docs/design/luminous-orbit-settings-vocabulary-help.png` -- settings,
+  vocabulary, Help, empty, validation, and recovery states.
+- `docs/design/luminous-orbit-hud-motion.png` -- timed runtime, concurrency,
+  success, and error storyboard.
 
-Use short, literal state copy: Ready, Listening, Transcribing locally, Cleaning up locally, Inserting text, Inserted. Ollama failure is presented as Basic cleanup active, not as a blocking error. Practice uses the label “Not stored by Speakr; clears when you leave Practice.” Never ask a user to speak more clearly and never assign a speech or confidence score.
+Boards are design references only. The shipped interface uses local QML,
+local assets, and operating-system fonts.
 
-## Privacy Constraints
+## Privacy constraints
 
-No remote assets, fonts, telemetry, WebView, QtWebEngine, app-level QtNetwork API use, update checks, or crash uploads. QtQml in PySide6 6.11.1 requires the `PySide6.QtNetwork` binding to import, so release tests retain that transitive runtime binding while rejecting any Speakr import of its APIs. Runtime state never includes transcript text, selected text, screen content, clipboard content, or audio. Practice text is isolated in memory and clears on navigation, window hide/minimize/close, OS lock, explicit Clear, and app exit.
+No remote assets, fonts, telemetry, WebView, QtWebEngine, cloud service,
+update check, or crash upload. QtQml in PySide6 6.11.1 requires the
+`PySide6.QtNetwork` binding to import, so release tests retain that transitive
+runtime binding while rejecting every Speakr import of its APIs. Runtime
+state never includes transcript text, selected text, screen content,
+clipboard content, audio, or foreground-window titles. Practice text remains
+isolated in memory and clears on navigation, window hide, minimize, close, OS
+lock, explicit Clear, and app exit.
+
+Native material is presentation-only. The compositor may sample pixels behind
+the window, but Speakr never receives those pixels in Python, QML state, logs,
+screenshots, telemetry, or network traffic.
