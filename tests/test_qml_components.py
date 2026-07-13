@@ -41,6 +41,23 @@ class QmlComponentContractTests(unittest.TestCase):
     def _hex(value):
         return QColor(value).name(QColor.NameFormat.HexRgb).upper()
 
+    @staticmethod
+    def _luminance(value):
+        color = QColor(value)
+        channels = (color.redF(), color.greenF(), color.blueF())
+        linear = [
+            channel / 12.92
+            if channel <= 0.04045
+            else ((channel + 0.055) / 1.055) ** 2.4
+            for channel in channels
+        ]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    @classmethod
+    def _contrast(cls, first, second):
+        left, right = cls._luminance(first), cls._luminance(second)
+        return (max(left, right) + 0.05) / (min(left, right) + 0.05)
+
     def test_luminous_orbit_palette_and_compatibility_aliases_are_exact(self):
         engine = QQmlApplicationEngine()
         theme = self._theme(engine)
@@ -299,10 +316,12 @@ class QmlComponentContractTests(unittest.TestCase):
                 layout = notice.findChild(QObject, "noticeLayout")
                 text_column = notice.findChild(QObject, "noticeTextColumn")
                 action = notice.findChild(QObject, "noticeAction")
+                action_label = notice.findChild(QObject, "noticeActionLabel")
                 icon = notice.findChild(QObject, "noticeIcon")
                 self.assertIsNotNone(layout)
                 self.assertIsNotNone(text_column)
                 self.assertIsNotNone(action)
+                self.assertIsNotNone(action_label)
                 self.assertIsNotNone(icon)
 
                 epsilon = 0.5
@@ -321,6 +340,22 @@ class QmlComponentContractTests(unittest.TestCase):
                 )
                 self.assertGreaterEqual(
                     notice.height(), layout.y() + layout.height(), scale
+                )
+                self.assertEqual(
+                    action_label.property("text"),
+                    "Open microphone privacy settings",
+                    scale,
+                )
+                self.assertFalse(action_label.property("truncated"), scale)
+                self.assertLessEqual(
+                    action_label.property("contentWidth"),
+                    action_label.width() + epsilon,
+                    scale,
+                )
+                self.assertLessEqual(
+                    action_label.property("contentHeight"),
+                    action_label.height() + epsilon,
+                    scale,
                 )
             finally:
                 if notice is not None:
@@ -442,6 +477,7 @@ class QmlComponentContractTests(unittest.TestCase):
         )
         try:
             track = switch.findChild(QObject, "switchTrack")
+            knob = switch.findChild(QObject, "switchKnob")
             field_background = field.findChild(QObject, "textFieldBackground")
 
             switch.setProperty("checked", True)
@@ -469,6 +505,30 @@ class QmlComponentContractTests(unittest.TestCase):
                 QColor(field.property("resolvedBorderColor")),
                 QColor(theme.property("danger")),
             )
+
+            switch.setProperty("checked", True)
+            switch.setProperty("down", False)
+            switch.setProperty("enabled", False)
+            for mode in ("light", "dark", "high_contrast"):
+                theme.setProperty("mode", mode)
+                self.qapp.processEvents()
+                self.assertEqual(
+                    QColor(track.property("color")),
+                    QColor(theme.property("disabledControlSurface")),
+                    mode,
+                )
+                self.assertEqual(
+                    QColor(knob.property("color")),
+                    QColor(theme.property("disabledControlText")),
+                    mode,
+                )
+                self.assertGreaterEqual(
+                    self._contrast(
+                        track.property("color"), knob.property("color")
+                    ),
+                    3.0,
+                    mode,
+                )
 
             switch_source = (self.qml / "QuietSwitch.qml").read_text(
                 encoding="utf-8"

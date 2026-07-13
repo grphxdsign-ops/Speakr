@@ -85,6 +85,10 @@ QtObject {
     readonly property color infoSurface: highContrast ? systemPalette.base
                                                       : (dark ? "#173149" : "#E2F1FC")
     readonly property color focus: highContrast ? systemPalette.highlight : accent
+    readonly property color disabledControlSurface: highContrast ? systemPalette.button
+                                                                 : surfaceRaised
+    readonly property color disabledControlText: highContrast ? systemPalette.buttonText
+                                                              : text
     readonly property color disabledText: withAlpha(text, 0.52)
     readonly property color hover: highContrast ? systemPalette.highlight
                                                 : withAlpha(accent, dark ? 0.20 : 0.12)

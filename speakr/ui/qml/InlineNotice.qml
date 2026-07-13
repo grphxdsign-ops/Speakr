@@ -115,6 +115,7 @@ Rectangle {
         }
 
         QuietButton {
+            id: noticeActionButton
             objectName: "noticeAction"
             visible: root.actionText.length > 0
             Layout.columnSpan: 2
@@ -125,8 +126,26 @@ Rectangle {
             tokens: root.tokens
             text: root.actionText
             kind: "secondary"
+            implicitHeight: Math.max(root.tokens.controlHeight,
+                                     noticeActionLabel.implicitHeight
+                                     + root.tokens.space16)
             accessibleDescription: root.actionDescription
             onClicked: root.actionRequested()
+
+            contentItem: PlainText {
+                id: noticeActionLabel
+                objectName: "noticeActionLabel"
+                text: noticeActionButton.text
+                color: noticeActionButton.resolvedContentColor
+                font.family: noticeActionButton.tokens.fontFamily
+                font.pixelSize: noticeActionButton.tokens.label
+                font.weight: Font.Medium
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                wrapMode: Text.Wrap
+                elide: Text.ElideNone
+                Accessible.ignored: true
+            }
         }
     }
 }

@@ -8,7 +8,7 @@ Switch {
     property string accessibleName: text
     property string accessibleDescription: ""
     readonly property color resolvedTrackColor: {
-        if (!enabled) return tokens.surfaceRaised
+        if (!enabled) return tokens.disabledControlSurface
         if (checked)
             return down ? tokens.accentPressedSurface
                  : (hovered ? tokens.accentHoverSurface : tokens.accent)
@@ -16,10 +16,12 @@ Switch {
         if (hovered) return tokens.hover
         return tokens.surfaceRaised
     }
-    readonly property color resolvedKnobColor: checked
-                                                || (tokens.highContrast
-                                                    && (hovered || down))
-                                                ? tokens.accentText : tokens.text
+    readonly property color resolvedKnobColor: !enabled
+                                                ? tokens.disabledControlText
+                                                : ((checked
+                                                    || (tokens.highContrast
+                                                        && (hovered || down)))
+                                                   ? tokens.accentText : tokens.text)
 
     text: checked ? qsTr("On") : qsTr("Off")
     hoverEnabled: true
@@ -59,6 +61,7 @@ Switch {
 
         Rectangle {
             id: knob
+            objectName: "switchKnob"
             width: parent.height - control.tokens.metric(6)
             height: width
             radius: width / 2
