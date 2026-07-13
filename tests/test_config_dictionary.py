@@ -23,6 +23,7 @@ class ConfigTests(unittest.TestCase):
 
             self.assertEqual(config.get("hotkey"), "space")
             self.assertEqual(config.get("ui", "theme"), "dark")
+            self.assertEqual(config.get("ui", "visual_effects"), "system")
             self.assertEqual(config.get("ui", "text_scale"), "system")
             self.assertEqual(config.get("ui", "reduced_motion"), "system")
             self.assertEqual(config.get("ui", "hud_visibility"), "while_dictating")
