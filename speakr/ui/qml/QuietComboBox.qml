@@ -9,19 +9,32 @@ ComboBox {
     required property var tokens
     property string accessibleName: "Choice"
     property string accessibleDescription: ""
+    readonly property string selectedValueDescription: displayText.length === 0
+                                                       ? ""
+                                                       : qsTr("Selected: %1").arg(displayText)
 
-    implicitHeight: tokens.controlHeight
+    implicitHeight: Math.max(tokens.controlHeight,
+                             selectedLabel.implicitHeight
+                             + topPadding + bottomPadding)
     implicitWidth: tokens.metric(190)
     leftPadding: tokens.space12
     rightPadding: indicator.width + tokens.space16
+    topPadding: tokens.space8
+    bottomPadding: tokens.space8
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
 
     Accessible.role: Accessible.ComboBox
     Accessible.name: accessibleName
-    Accessible.description: accessibleDescription
+    Accessible.description: selectedValueDescription.length === 0
+                            ? accessibleDescription
+                            : (accessibleDescription.length > 0
+                               ? accessibleDescription + " " + selectedValueDescription
+                               : selectedValueDescription)
 
     contentItem: PlainText {
+        id: selectedLabel
+        objectName: "comboSelectedLabel"
         leftPadding: 0
         rightPadding: control.tokens.space8
         text: control.displayText
@@ -31,10 +44,13 @@ ComboBox {
         font.family: control.tokens.fontFamily
         font.pixelSize: control.tokens.body
         verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
+        wrapMode: Text.Wrap
+        elide: Text.ElideNone
+        Accessible.ignored: true
     }
 
     indicator: PlainText {
+        objectName: "comboIndicator"
         x: control.width - width - control.tokens.space12
         y: (control.height - height) / 2
         text: "\u2304"
@@ -71,16 +87,25 @@ ComboBox {
 
     delegate: ItemDelegate {
         id: option
+        objectName: "comboOptionDelegate"
         required property int index
         required property var modelData
         width: control.popup.width
-        height: Math.max(control.tokens.controlHeight, implicitHeight)
+        height: Math.max(control.tokens.controlHeight,
+                         optionLabel.implicitHeight
+                         + topPadding + bottomPadding)
+        leftPadding: control.tokens.space12
+        rightPadding: control.tokens.space12
+        topPadding: control.tokens.space8
+        bottomPadding: control.tokens.space8
         highlighted: control.highlightedIndex === index
         focusPolicy: Qt.StrongFocus
         Accessible.role: Accessible.ListItem
         Accessible.name: modelData
 
         contentItem: PlainText {
+            id: optionLabel
+            objectName: "comboOptionLabel"
             text: option.modelData
             color: !option.enabled ? control.tokens.disabledText
                    : (control.tokens.highContrast && option.highlighted
@@ -88,7 +113,9 @@ ComboBox {
             font.family: control.tokens.fontFamily
             font.pixelSize: control.tokens.body
             verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
+            wrapMode: Text.Wrap
+            elide: Text.ElideNone
+            Accessible.ignored: true
         }
 
         background: Rectangle {
@@ -99,6 +126,7 @@ ComboBox {
     }
 
     popup: Popup {
+        objectName: "comboPopup"
         y: control.height + control.tokens.space4
         width: control.width
         implicitHeight: Math.min(contentItem.implicitHeight + padding * 2,

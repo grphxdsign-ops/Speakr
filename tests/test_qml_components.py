@@ -7,8 +7,8 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import QObject, QUrl
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QMetaObject, QObject, QUrl
+from PySide6.QtGui import QAccessible, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -270,6 +270,182 @@ class QmlComponentContractTests(unittest.TestCase):
         finally:
             for item in objects:
                 item.deleteLater()
+            theme.deleteLater()
+            engine.deleteLater()
+            self.qapp.processEvents()
+
+    def test_combo_selected_values_reflow_at_supported_text_scales(self):
+        values = ("Hold to speak", "Comfortable", "While dictating")
+        for scale in (1.0, 1.5, 2.0):
+            for selected_value in values:
+                engine = QQmlApplicationEngine()
+                window = QQuickWindow()
+                window.setWidth(280)
+                window.setHeight(400)
+                window.show()
+                theme = self._theme(engine)
+                component = self._component(engine, "QuietComboBox.qml")
+                combo = None
+                try:
+                    theme.setProperty("textScale", scale)
+                    combo = component.createWithInitialProperties(
+                        {
+                            "tokens": theme,
+                            "model": [selected_value],
+                            "currentIndex": 0,
+                            "accessibleName": "Setting choice",
+                        }
+                    )
+                    self.assertIsNotNone(
+                        combo,
+                        [error.toString() for error in component.errors()],
+                    )
+                    combo.setParentItem(window.contentItem())
+                    combo.setWidth(combo.implicitWidth())
+                    combo.setHeight(300)
+                    for _ in range(4):
+                        self.qapp.processEvents()
+                        combo.ensurePolished()
+                    combo.setHeight(combo.implicitHeight())
+                    for _ in range(4):
+                        self.qapp.processEvents()
+                        combo.ensurePolished()
+
+                    selected_label = combo.findChild(
+                        QObject, "comboSelectedLabel"
+                    )
+                    indicator = combo.findChild(QObject, "comboIndicator")
+                    self.assertIsNotNone(selected_label)
+                    self.assertIsNotNone(indicator)
+
+                    epsilon = 0.5
+                    self.assertGreaterEqual(
+                        combo.height(), 44, (scale, selected_value)
+                    )
+                    self.assertEqual(combo.property("displayText"), selected_value)
+                    self.assertEqual(selected_label.property("text"), selected_value)
+                    self.assertFalse(
+                        selected_label.property("truncated"),
+                        (scale, selected_value),
+                    )
+                    self.assertLessEqual(
+                        selected_label.property("contentWidth"),
+                        selected_label.width() + epsilon,
+                        (scale, selected_value),
+                    )
+                    self.assertLessEqual(
+                        selected_label.property("contentHeight"),
+                        selected_label.height() + epsilon,
+                        (scale, selected_value),
+                    )
+                    self.assertLessEqual(
+                        selected_label.x() + selected_label.width(),
+                        indicator.x() + epsilon,
+                        (scale, selected_value),
+                    )
+
+                    accessible = QAccessible.queryAccessibleInterface(combo)
+                    self.assertIsNotNone(accessible)
+                    self.assertIn(
+                        selected_value,
+                        accessible.text(QAccessible.Text.Description),
+                        (scale, selected_value),
+                    )
+                finally:
+                    if combo is not None:
+                        combo.setParentItem(None)
+                        combo.deleteLater()
+                    window.close()
+                    theme.deleteLater()
+                    engine.deleteLater()
+                    self.qapp.processEvents()
+
+    def test_combo_popup_options_wrap_and_remain_scrollable(self):
+        engine = QQmlApplicationEngine()
+        window = QQuickWindow()
+        window.setWidth(280)
+        window.setHeight(520)
+        window.show()
+        theme = self._theme(engine)
+        theme.setProperty("textScale", 2.0)
+        harness_source = b"""
+import QtQuick
+
+Item {
+    required property var tokens
+    required property Item host
+    parent: host
+    width: 280
+    height: 520
+    property Item popupList: combo.popup.contentItem
+    function openPopup() { combo.popup.open() }
+    function closePopup() { combo.popup.close() }
+
+    QuietComboBox {
+        id: combo
+        tokens: parent.tokens
+        width: implicitWidth
+        model: [
+            "Hold to speak", "Comfortable", "While dictating",
+            "Press to start and stop", "Always", "Off"
+        ]
+    }
+}
+"""
+        component = QQmlComponent(engine)
+        component.setData(
+            harness_source,
+            QUrl.fromLocalFile(str(self.qml / "ComboPopupHarness.qml")),
+        )
+        harness = component.createWithInitialProperties(
+            {"tokens": theme, "host": window.contentItem()}
+        )
+        self.assertIsNotNone(
+            harness, [error.toString() for error in component.errors()]
+        )
+        try:
+            self.assertTrue(QMetaObject.invokeMethod(harness, "openPopup"))
+            for _ in range(8):
+                self.qapp.processEvents()
+                harness.ensurePolished()
+
+            popup_list = harness.property("popupList")
+            self.assertIsNotNone(popup_list)
+            self.assertEqual(popup_list.property("count"), 6)
+            self.assertGreater(
+                popup_list.property("contentHeight"), popup_list.height()
+            )
+
+            def descendants(item):
+                result = []
+                for child in item.childItems():
+                    result.append(child)
+                    result.extend(descendants(child))
+                return result
+
+            option_labels = [
+                item
+                for item in descendants(popup_list)
+                if item.objectName() == "comboOptionLabel"
+            ]
+            self.assertGreaterEqual(len(option_labels), 1)
+            for label in option_labels:
+                self.assertFalse(label.property("truncated"), label.property("text"))
+                self.assertLessEqual(
+                    label.property("contentWidth"), label.width() + 0.5
+                )
+                self.assertLessEqual(
+                    label.property("contentHeight"), label.height() + 0.5
+                )
+
+            self.assertLessEqual(
+                popup_list.height(), theme.property("space32") * 10
+            )
+            self.assertTrue(QMetaObject.invokeMethod(harness, "closePopup"))
+        finally:
+            harness.setParentItem(None)
+            harness.deleteLater()
+            window.close()
             theme.deleteLater()
             engine.deleteLater()
             self.qapp.processEvents()
