@@ -16,11 +16,14 @@ python scripts/verify_luminous_interface.py
 The command fails at the first broken gate and writes evidence below
 `build/ui-verification/`:
 
-- `verification-report.json` records every command and the exact tests that
-  satisfy each audit area.
-- Numbered logs retain complete stdout and stderr.
+- `verification-report.json` records every command, the exact tests that
+  satisfy each automated audit area, and a separate `manual_platform_status`
+  that remains `required` after the automated run passes. Machine-local roots
+  are represented as `<repo>`, `<output>`, and `<home>` in shareable evidence.
+- Numbered logs retain complete diagnostic stdout and stderr with only
+  machine-local root paths redacted.
 - `screenshots/manifest.json` records the OS, QPA, Qt version, renderer,
-  dimensions, and SHA-256 for every PNG.
+  dimensions, SHA-256, and the explicit limits of what every PNG proves.
 - Screenshot PNGs are platform review artifacts, not golden comparison files.
 
 The audit runs, in order:
@@ -30,23 +33,38 @@ python -m compileall -q speakr tests scripts
 python -m unittest discover -s tests -v
 python scripts/check_qt_build_environment.py
 pyside6-qmllint -I speakr/ui/qml speakr/ui/qml/*.qml
+git diff --check <merge-base>...HEAD
 git diff --check
 python scripts/capture_ui_verification.py
 ```
 
+The committed-diff check uses `SPEAKR_VERIFY_BASE`, then the pull request's
+`GITHUB_BASE_REF`, then `origin/main` when one of those bases resolves. If no
+base is discoverable, the report labels the remaining command as a working-tree
+fallback instead of claiming that committed changes were checked.
+
 The runner sets the unit-test process to Qt offscreen/software mode and forces
 Hugging Face and Transformers offline. The screenshot process keeps the host's
-native QPA by default so platform fonts and compositor behavior are visible.
+native QPA by default so platform typography and window geometry are visible,
+while software Qt Quick rendering keeps repeated captures stable. PNGs do not
+prove Mica, Vibrancy, an active operating-system High Contrast palette, focus
+retention, or assistive-technology behavior; those remain explicit manual
+platform gates.
 
 ## Runtime warning gate
 
-A zero unittest exit is not sufficient evidence. The runner also rejects QML
-runtime diagnostics in the test-process output, including:
+A zero exit from either the unittest or screenshot process is not sufficient
+evidence. The runner rejects every source-located
+`.qml:<line>[:<column>]:` diagnostic in those runtime-process outputs, plus
+unsourced binding-loop, missing-font/alias, and ignored scenegraph-backend
+messages. This includes:
 
 - QML `TypeError`, `ReferenceError`, `RangeError`, and runtime `Error` lines;
 - binding loops;
 - deprecated QML handler syntax;
-- null-property access, failed assignment, and missing QML types.
+- null-property access, failed assignment, and missing QML types;
+- anchor, connection, nonexistent-property, and failed local-asset warnings;
+- missing Qt font-family aliases and ignored renderer-backend selection.
 
 This gate is separate from `qmllint`. Static lint findings remain in their own
 log for review; runtime warnings during component creation, rendering, or
@@ -74,15 +92,16 @@ $env:QT_QUICK_BACKEND = "software"
 python scripts/capture_ui_verification.py --output build/ui-verification/offscreen
 ```
 
-For native platform review, leave `QT_QPA_PLATFORM` unset. Run once on Windows
+For platform layout review, leave `QT_QPA_PLATFORM` unset. Run once on Windows
 and once on macOS, preserving each output directory as a CI or PR artifact.
+Review native material and focus behavior separately through the manual gates.
 
 ## Automated coverage
 
 | Area | Automated proof |
 |---|---|
 | QML health | Main, HUD, and shared components load warning-free; every QML file is reachable from Main or HUD. |
-| Effects and contrast | Full/reduced/off, light/dark/High Contrast, software rendering, Reduce Transparency, and composited contrast. |
+| Effects and contrast | Full/reduced/off, software rendering, Reduce Transparency, light/dark composited contrast, and opaque High Contrast system-role mapping. |
 | Motion | Reduced-motion zero-duration tokens; no infinite, idle, or unconditional running animation mechanism. |
 | Geometry | Every primary page at 960×700 and 640×520 with 100%, 150%, and 200% text; Large HUD at 150% and 200%. |
 | Chrome | Logical hit regions, accessible 44 px controls, custom-chrome fallback, visible system frame, and Windows 10 scene glass. |

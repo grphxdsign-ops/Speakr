@@ -14,15 +14,20 @@ import hashlib
 import json
 import os
 import platform
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 
+_QPA_WAS_EXPLICIT = "QT_QPA_PLATFORM" in os.environ
+_REQUESTED_QPA = os.environ.get("QT_QPA_PLATFORM")
+
 # Keep the native QPA by default so Windows/macOS captures include their real
-# font and compositor behavior. CI can opt into ``QT_QPA_PLATFORM=offscreen``;
-# the harness exercises and labels that deterministic path as well.
+# platform typography and window geometry. Software Qt Quick rendering makes
+# repeated layout captures stable; native compositor material remains a
+# separate manual platform gate and is never inferred from these PNGs.
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 os.environ.setdefault("SPEAKR_QT_SOFTWARE", "1")
@@ -32,22 +37,24 @@ QML_DIR = ROOT / "speakr" / "ui" / "qml"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import (  # noqa: E402
-    QCoreApplication,
-    QEvent,
-    QMetaObject,
-    QObject,
-    QUrl,
-    qVersion,
-)
+from PySide6.QtCore import QMetaObject, QObject, QUrl, qVersion  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 from PySide6.QtQuickControls2 import QQuickStyle  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from speakr.qt_ui import Bridge  # noqa: E402
+from tests.qml_lifecycle import dispose_qml_fixture  # noqa: E402
 from tests.test_hud_qml import _NativeWindow  # noqa: E402
 from tests.test_qml_load import _App  # noqa: E402
 from tests.test_shell_home import _WindowController  # noqa: E402
+
+# Test fixtures default themselves to offscreen at import time. Preserve the
+# caller's actual QPA request so a native screenshot run remains native; unit
+# tests that explicitly requested offscreen keep that deterministic backend.
+if _QPA_WAS_EXPLICIT:
+    os.environ["QT_QPA_PLATFORM"] = _REQUESTED_QPA or ""
+else:
+    os.environ.pop("QT_QPA_PLATFORM", None)
 
 
 @dataclass(frozen=True)
@@ -209,16 +216,13 @@ def _close(
     application: QApplication,
     bridge: Bridge,
     engine: QQmlApplicationEngine,
+    native_window: QObject,
 ) -> None:
-    for root in engine.rootObjects():
-        root.hide()
-        root.deleteLater()
-    engine.collectGarbage()
-    engine.deleteLater()
-    bridge.close()
-    bridge.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    _pump(application, 4)
+    dispose_qml_fixture(
+        application,
+        engine,
+        context_objects=(bridge, native_window),
+    )
 
 
 def _save_window(window: QObject, destination: Path) -> tuple[int, int]:
@@ -263,7 +267,7 @@ def _capture_main(
         _pump(application, 12)
         captured = _save_window(window, destination)
     finally:
-        _close(application, bridge, engine)
+        _close(application, bridge, engine, native_window)
     if warnings:
         raise RuntimeError(
             "Main.qml emitted warnings during rendering or teardown: "
@@ -341,7 +345,7 @@ def _capture_hud(
             raise RuntimeError(f"HUD scenario did not become visible: {scenario.name}")
         captured = _save_window(window, destination)
     finally:
-        _close(application, bridge, engine)
+        _close(application, bridge, engine, native_window)
     if warnings:
         raise RuntimeError(
             "Hud.qml emitted warnings during rendering or teardown: "
@@ -358,6 +362,39 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _clear_managed_artifacts(output: Path) -> None:
+    """Remove only files this tool owns before starting a fresh capture."""
+
+    manifest_path = output / "manifest.json"
+    managed = {output / f"{scenario.name}.png" for scenario in SCENARIOS}
+    try:
+        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeError):
+        previous = {}
+    if isinstance(previous, dict) and previous.get("schema_version") == 1:
+        artifacts = previous.get("scenarios", [])
+        if not isinstance(artifacts, list):
+            artifacts = []
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            name = artifact.get("name")
+            filename = artifact.get("file")
+            if not isinstance(name, str) or not isinstance(filename, str):
+                continue
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+                continue
+            if filename != f"{name}.png":
+                continue
+            managed.add(output / filename)
+
+    manifest_path.unlink(missing_ok=True)
+    for destination in managed:
+        if destination.parent != output or destination.suffix.casefold() != ".png":
+            continue
+        destination.unlink(missing_ok=True)
+
+
 def capture_scenarios(
     output: Path,
     names: Iterable[str] | None = None,
@@ -371,6 +408,7 @@ def capture_scenarios(
 
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
+    _clear_managed_artifacts(output)
     application = _application()
     artifacts = []
     for name in requested:
@@ -401,7 +439,16 @@ def capture_scenarios(
 
     manifest: dict[str, object] = {
         "schema_version": 1,
-        "purpose": "platform screenshot evidence; not a pixel-perfect golden",
+        "purpose": "platform layout evidence; not a pixel-perfect golden",
+        "capture_scope": {
+            "proves": (
+                "QML layout, platform typography, and labelled renderer output"
+            ),
+            "does_not_prove": (
+                "native Mica/Vibrancy, an active OS High Contrast palette, "
+                "focus retention, or accessibility technology behavior"
+            ),
+        },
         "platform": {
             "system": platform.system(),
             "release": platform.release(),

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import json
 import os
 import re
 import subprocess
@@ -8,13 +10,14 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 
-from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QUrl
+from PySide6.QtCore import QMetaObject, QObject, QUrl
 from PySide6.QtGui import QColor, QIcon, QWindow
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -25,10 +28,16 @@ from scripts.verify_luminous_interface import (
     REQUIRED_EVIDENCE_TESTS,
     detect_missing_interactive_windows_proof,
     detect_qml_runtime_warnings,
+    diff_check_commands,
+    invalid_evidence_test_ids,
+    native_rect_matches_work_area,
+    run_verification,
+    sanitize_evidence_text,
 )
 from speakr import qt_ui
 from speakr.interface_state import InterfaceState
 from speakr.qt_ui import Bridge
+from tests.qml_lifecycle import dispose_qml_fixture
 from tests.test_qml_load import _App
 from tests.test_shell_home import _WindowController
 
@@ -108,15 +117,11 @@ class VerificationHarnessTests(unittest.TestCase):
         if tray is not None:
             tray.hide()
             tray.deleteLater()
-        for root in engine.rootObjects():
-            root.hide()
-            root.deleteLater()
-        engine.collectGarbage()
-        engine.deleteLater()
-        bridge.close()
-        bridge.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        self._pump()
+        dispose_qml_fixture(
+            self.qapp,
+            engine,
+            context_objects=(bridge,),
+        )
         self.assertEqual(warnings, [], "QML warnings were emitted during teardown")
 
     @staticmethod
@@ -139,17 +144,15 @@ class VerificationHarnessTests(unittest.TestCase):
         )
 
     def test_required_evidence_map_resolves_to_real_tests(self):
-        loader = unittest.defaultTestLoader
-        for area, test_ids in REQUIRED_EVIDENCE_TESTS.items():
-            with self.subTest(area=area):
-                self.assertGreater(len(test_ids), 0)
-                for test_id in test_ids:
-                    suite = loader.loadTestsFromName(test_id)
-                    self.assertEqual(
-                        suite.countTestCases(),
-                        1,
-                        f"missing evidence test: {test_id}",
-                    )
+        self.assertEqual(invalid_evidence_test_ids(), [])
+        misspelled = (
+            "tests.test_qml_load.QmlLoadTests."
+            "test_main_and_hud_load_without_qml_warningz"
+        )
+        self.assertEqual(
+            invalid_evidence_test_ids({"misspelled": (misspelled,)}),
+            [misspelled],
+        )
 
     def test_every_qml_component_is_reachable_and_has_no_unbounded_effect(self):
         sources = {
@@ -196,10 +199,16 @@ class VerificationHarnessTests(unittest.TestCase):
                 "file:///tmp/Main.qml:71: TypeError: Cannot read property 'x' of null",
                 "file:///tmp/Hud.qml:99:5: Binding loop detected for property width",
                 "file:///tmp/Page.qml:17:9: onFoo is deprecated. Use function syntax",
+                "file:///tmp/Card.qml:20:5: QML Rectangle: Cannot anchor to an item that is not a parent or sibling",
+                "file:///tmp/Flow.qml:30: QML Connections: Detected function onMissing with no matching signal",
+                "file:///tmp/Field.qml:40:7: Cannot assign to non-existent property missing",
+                "file:///tmp/Icon.qml:50: QML Image: Cannot open: file:///tmp/missing.svg",
+                "qt.qpa.fonts: Populating font family aliases took 68 ms. Replace uses of missing font family 'SF Pro Text'",
+                "Scenegraph already initialized, setBackend() request ignored",
             )
         )
         matches = detect_qml_runtime_warnings(clean + diagnostics)
-        self.assertEqual(len(matches), 3)
+        self.assertEqual(len(matches), 9)
         skipped_focus = (
             "test_windows_native_probe_preserves_foreground_focus_and_caret "
             "(test_hud_qml.HudQmlTests.test_windows_native_probe_preserves_"
@@ -209,6 +218,139 @@ class VerificationHarnessTests(unittest.TestCase):
         self.assertEqual(
             len(detect_missing_interactive_windows_proof(skipped_focus)), expected
         )
+
+    def test_review_evidence_redacts_machine_local_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory).resolve()
+            source = " | ".join(
+                (
+                    str(self.root / "speakr" / "ui" / "qml" / "Main.qml"),
+                    (self.root / "speakr" / "ui" / "qml" / "Main.qml").as_uri(),
+                    str(Path.home() / "private" / "fixture.log"),
+                    str(output / "screenshots"),
+                )
+            )
+            sanitized = sanitize_evidence_text(source, output)
+            self.assertNotIn(str(self.root), sanitized)
+            self.assertNotIn(self.root.as_uri(), sanitized)
+            self.assertNotIn(str(Path.home()), sanitized)
+            self.assertNotIn(str(output), sanitized)
+            self.assertIn("<repo>", sanitized)
+            self.assertIn("<home>", sanitized)
+            self.assertIn("<output>", sanitized)
+
+    def test_native_work_area_match_requires_every_edge(self):
+        work = (0, 0, 1920, 1080)
+        self.assertTrue(native_rect_matches_work_area(work, work, 8, 8))
+        self.assertTrue(
+            native_rect_matches_work_area((-8, -8, 1928, 1088), work, 8, 8)
+        )
+        self.assertFalse(
+            native_rect_matches_work_area((100, 100, 1820, 980), work, 8, 8)
+        )
+        self.assertFalse(native_rect_matches_work_area((0, 0, 1920), work, 8, 8))
+
+    def test_diff_checks_cover_committed_and_working_changes(self):
+        expected_base = subprocess.run(
+            ["git", "merge-base", "HEAD", "origin/main"],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        commands = diff_check_commands(
+            self.root,
+            {"SPEAKR_VERIFY_BASE": "origin/main"},
+        )
+        self.assertEqual(
+            [name for name, _command, _environment in commands],
+            ["committed_diff_check", "working_tree_diff_check"],
+        )
+        self.assertEqual(
+            tuple(commands[0][1]),
+            ("git", "diff", "--check", f"{expected_base}...HEAD"),
+        )
+        self.assertEqual(
+            tuple(commands[1][1]),
+            ("git", "diff", "--check"),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            fallback = diff_check_commands(
+                Path(directory),
+                {"SPEAKR_VERIFY_BASE": "missing-base"},
+            )
+        self.assertEqual(
+            fallback,
+            [("working_tree_diff_check", ("git", "diff", "--check"), {})],
+        )
+
+    def test_missing_qmllint_records_a_failed_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            with mock.patch(
+                "scripts.verify_luminous_interface._qmllint_executable",
+                side_effect=FileNotFoundError("qmllint unavailable"),
+            ), mock.patch("sys.stderr", new=io.StringIO()) as stderr:
+                self.assertEqual(run_verification(output), 1)
+            self.assertIn("FAILED: qmllint_discovery", stderr.getvalue())
+            report = json.loads(
+                (output / "verification-report.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["automated_status"], "failed")
+            self.assertEqual(report["failed_step"], "qmllint_discovery")
+            self.assertEqual(report["steps"][0]["name"], "qmllint_discovery")
+            self.assertEqual(report["steps"][0]["exit_code"], None)
+            self.assertIn("qmllint unavailable", report["steps"][0]["error"])
+
+    def test_platform_screenshot_runtime_diagnostics_fail_report(self):
+        diagnostics = "\n".join(
+            (
+                "qt.qpa.fonts: Populating font family aliases took 68 ms. "
+                "Replace uses of missing font family 'SF Pro Text'",
+                "Scenegraph already initialized, setBackend() request ignored",
+            )
+        )
+        completed = subprocess.CompletedProcess(
+            args=["fake-screenshot-capture"],
+            returncode=0,
+            stdout="captured all scenarios\n",
+            stderr=diagnostics,
+        )
+        commands = [
+            (
+                "platform_screenshots",
+                ("fake-screenshot-capture",),
+                {},
+            )
+        ]
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            with mock.patch(
+                "scripts.verify_luminous_interface._qmllint_executable",
+                return_value="qmllint",
+            ), mock.patch(
+                "scripts.verify_luminous_interface.verification_commands",
+                return_value=commands,
+            ), mock.patch(
+                "scripts.verify_luminous_interface.subprocess.run",
+                return_value=completed,
+            ), mock.patch("sys.stderr", new=io.StringIO()) as stderr:
+                self.assertEqual(run_verification(output), 1)
+
+            self.assertIn("FAILED: platform_screenshots", stderr.getvalue())
+            report = json.loads(
+                (output / "verification-report.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["automated_status"], "failed")
+            self.assertEqual(report["failed_step"], "platform_screenshots")
+            self.assertEqual(
+                report["steps"][0]["runtime_qml_warnings"],
+                diagnostics.splitlines(),
+            )
 
     def test_effect_tier_theme_and_contrast_matrix(self):
         engine = QQmlApplicationEngine()
@@ -278,9 +420,12 @@ class VerificationHarnessTests(unittest.TestCase):
             self._pump(2)
             self.assertEqual(theme.property("effectTier"), "reduced")
         finally:
-            theme.deleteLater()
-            engine.deleteLater()
-            self._pump()
+            dispose_qml_fixture(
+                self.qapp,
+                engine,
+                roots=(theme,),
+                components=(component,),
+            )
 
     def test_all_pages_reflow_and_focus_heading_across_size_scale_matrix(self):
         pages = {
@@ -393,18 +538,83 @@ class VerificationHarnessTests(unittest.TestCase):
             "hud-error-high-contrast-large-200",
         )
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory)
+            output = Path(directory) / "capture"
+            output.mkdir()
+            stale_managed = output / "home-dark-full-960x700-100.png"
+            retired_managed = output / "retired-scenario.png"
+            unrelated = output / "review-notes.txt"
+            outside = output.parent / "outside.png"
+            stale_managed.write_bytes(b"stale")
+            retired_managed.write_bytes(b"retired")
+            unrelated.write_text("keep", encoding="utf-8")
+            outside.write_bytes(b"outside")
+            (output / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "scenarios": [
+                            {
+                                "name": "retired-scenario",
+                                "file": "retired-scenario.png",
+                            },
+                            {"name": "outside", "file": "../outside.png"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
             first = capture_scenarios(output, names)
             second = capture_scenarios(output, names)
             self.assertEqual(first, second)
             self.assertEqual(len(first["scenarios"]), len(names))
             self.assertIn(first["platform"]["qpa"], {"offscreen", "windows", "cocoa"})
+            self.assertFalse(stale_managed.exists())
+            self.assertFalse(retired_managed.exists())
+            self.assertEqual(unrelated.read_text(encoding="utf-8"), "keep")
+            self.assertEqual(outside.read_bytes(), b"outside")
+            self.assertEqual(
+                {path.name for path in output.glob("*.png")},
+                {artifact["file"] for artifact in first["scenarios"]},
+            )
+            self.assertIn("does_not_prove", first["capture_scope"])
             for artifact in first["scenarios"]:
                 self.assertEqual(artifact["qml_warnings"], [])
                 self.assertEqual(len(artifact["sha256"]), 64)
                 self.assertGreater(artifact["width"], 0)
                 self.assertGreater(artifact["height"], 0)
                 self.assertGreater((output / artifact["file"]).stat().st_size, 100)
+
+    def test_capture_tool_preserves_the_callers_qpa_choice(self):
+        probe = (
+            "import os; import scripts.capture_ui_verification; "
+            "print(os.environ.get('QT_QPA_PLATFORM', '<unset>'))"
+        )
+        environment = os.environ.copy()
+        environment.pop("QT_QPA_PLATFORM", None)
+        native = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        self.assertEqual(native.returncode, 0, native.stderr)
+        self.assertEqual(native.stdout.strip(), "<unset>")
+
+        environment["QT_QPA_PLATFORM"] = "offscreen"
+        offscreen = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        self.assertEqual(offscreen.returncode, 0, offscreen.stderr)
+        self.assertEqual(offscreen.stdout.strip(), "offscreen")
 
     def test_verification_tools_add_no_network_surface(self):
         for path in (
@@ -450,6 +660,7 @@ class VerificationHarnessTests(unittest.TestCase):
 
             from speakr import native_window, qt_ui
             from speakr.qt_ui import Bridge
+            from tests.qml_lifecycle import dispose_qml_fixture
             from tests.test_qml_load import _App
 
             class Windows10FrameAdapter(native_window._WindowsAdapter):
@@ -475,6 +686,10 @@ class VerificationHarnessTests(unittest.TestCase):
             engine = QQmlApplicationEngine()
             engine.rootContext().setContextProperty("bridge", bridge)
             engine.rootContext().setContextProperty("nativeWindow", controller)
+            warnings = []
+            engine.warnings.connect(
+                lambda values: warnings.extend(error.toString() for error in values)
+            )
             original = {{}}
 
             def attach(root):
@@ -487,34 +702,39 @@ class VerificationHarnessTests(unittest.TestCase):
                 Path({str(self.qml / 'Main.qml')!r}),
                 before_complete=attach,
             )
-            main.show()
-            for _ in range(8):
-                application.processEvents()
+            ok = False
+            try:
+                main.show()
+                for _ in range(8):
+                    application.processEvents()
 
-            chrome = main.findChild(QObject, "windowChrome")
-            backdrop = main.findChild(QObject, "cosmicBackdrop")
-            ok = (
-                controller.material == "scene_glass"
-                and controller.effectTier == "full"
-                and not controller.nativeMaterialAvailable
-                and not controller.customChromeEnabled
-                and not main.property("nativeMaterialActive")
-                and QColor(main.property("color")).alphaF() == 1.0
-                and main.flags() == original["flags"]
-                and main.isVisible()
-                and chrome is not None
-                and not chrome.property("visible")
-                and backdrop is not None
-                and backdrop.property("paintCanvas")
-            )
-            controller.detach()
-            bridge.close()
-            main.hide()
-            main.deleteLater()
-            component.deleteLater()
-            engine.deleteLater()
-            application.processEvents()
-            sys.exit(0 if ok else 3)
+                chrome = main.findChild(QObject, "windowChrome")
+                backdrop = main.findChild(QObject, "cosmicBackdrop")
+                ok = (
+                    controller.material == "scene_glass"
+                    and controller.effectTier == "full"
+                    and not controller.nativeMaterialAvailable
+                    and not controller.customChromeEnabled
+                    and not main.property("nativeMaterialActive")
+                    and QColor(main.property("color")).alphaF() == 1.0
+                    and main.flags() == original["flags"]
+                    and main.isVisible()
+                    and chrome is not None
+                    and not chrome.property("visible")
+                    and backdrop is not None
+                    and backdrop.property("paintCanvas")
+                )
+            finally:
+                controller.detach()
+                dispose_qml_fixture(
+                    application,
+                    engine,
+                    components=(component,),
+                    context_objects=(bridge, controller),
+                )
+            if warnings:
+                print("QML warnings: " + "; ".join(warnings), file=sys.stderr)
+            sys.exit(0 if ok and not warnings else 3)
             """
         )
         environment = os.environ.copy()
@@ -535,12 +755,18 @@ class VerificationHarnessTests(unittest.TestCase):
             0,
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
+        self.assertEqual(
+            detect_qml_runtime_warnings(result.stdout + "\n" + result.stderr),
+            [],
+            "The Windows fallback child emitted a swallowed QML diagnostic",
+        )
 
     @unittest.skipUnless(sys.platform == "win32", "Windows QPA maximize proof")
     def test_windows_real_qpa_custom_maximize_changes_hwnd_and_restores(self):
         script = textwrap.dedent(
             f"""
             import ctypes
+            from ctypes import wintypes
             import os
             import sys
             from pathlib import Path
@@ -549,8 +775,7 @@ class VerificationHarnessTests(unittest.TestCase):
             os.environ["QT_QUICK_BACKEND"] = "software"
             os.environ["QSG_RHI_BACKEND"] = "software"
 
-            from PySide6.QtCore import QMetaObject, QObject
-            from PySide6.QtGui import QWindow
+            from PySide6.QtCore import QMetaObject, QObject, Qt
             from PySide6.QtQml import QQmlApplicationEngine
             from PySide6.QtQuickControls2 import QQuickStyle
             from PySide6.QtTest import QTest
@@ -558,12 +783,61 @@ class VerificationHarnessTests(unittest.TestCase):
 
             from speakr import native_window, qt_ui
             from speakr.qt_ui import Bridge
+            from scripts.verify_luminous_interface import native_rect_matches_work_area
+            from tests.qml_lifecycle import dispose_qml_fixture
             from tests.test_qml_load import _App
+
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.DWORD),
+                    ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT),
+                    ("dwFlags", wintypes.DWORD),
+                ]
+
+            def fail(code, message):
+                print(f"Win32 maximize proof {{code}}: {{message}}", file=sys.stderr)
+                raise SystemExit(code)
+
+            def native_rect(hwnd):
+                value = wintypes.RECT()
+                if not user32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(value)):
+                    fail(10, "GetWindowRect failed")
+                return (value.left, value.top, value.right, value.bottom)
+
+            def work_rect(hwnd):
+                monitor = user32.MonitorFromWindow(ctypes.c_void_p(hwnd), 2)
+                if not monitor:
+                    fail(11, "MonitorFromWindow failed")
+                value = MONITORINFO()
+                value.cbSize = ctypes.sizeof(value)
+                if not user32.GetMonitorInfoW(monitor, ctypes.byref(value)):
+                    fail(12, "GetMonitorInfoW failed")
+                return (
+                    value.rcWork.left,
+                    value.rcWork.top,
+                    value.rcWork.right,
+                    value.rcWork.bottom,
+                )
+
+            def metric(index, hwnd):
+                get_dpi = getattr(user32, "GetDpiForWindow", None)
+                get_metric_for_dpi = getattr(user32, "GetSystemMetricsForDpi", None)
+                if callable(get_dpi) and callable(get_metric_for_dpi):
+                    try:
+                        dpi = int(get_dpi(ctypes.c_void_p(hwnd)) or 96)
+                        return int(get_metric_for_dpi(index, dpi))
+                    except (OSError, TypeError, ValueError):
+                        pass
+                return int(user32.GetSystemMetrics(index))
 
             QQuickStyle.setStyle("Basic")
             application = QApplication([])
             if application.platformName() != "windows":
                 sys.exit(2)
+            user32 = ctypes.windll.user32
+            user32.IsZoomed.restype = wintypes.BOOL
+            user32.MonitorFromWindow.restype = wintypes.HANDLE
             qt = qt_ui._load_qt()
             app = _App()
             bridge = Bridge(app)
@@ -579,73 +853,104 @@ class VerificationHarnessTests(unittest.TestCase):
             engine = QQmlApplicationEngine()
             engine.rootContext().setContextProperty("bridge", bridge)
             engine.rootContext().setContextProperty("nativeWindow", controller)
+            warnings = []
+            engine.warnings.connect(
+                lambda values: warnings.extend(error.toString() for error in values)
+            )
             main, component = qt_ui._create_qml_root(
                 qt,
                 engine,
                 Path({str(self.qml / 'Main.qml')!r}),
                 before_complete=controller.attach,
             )
-            screen = application.primaryScreen()
-            if screen is None:
-                sys.exit(3)
-            work = screen.availableGeometry()
-            width = min(800, max(640, work.width() - 160))
-            height = min(600, max(520, work.height() - 160))
-            x = work.x() + max(0, (work.width() - width) // 2)
-            y = work.y() + max(0, (work.height() - height) // 2)
-            main.setGeometry(x, y, width, height)
-            main.show()
-            QTest.qWait(180)
+            try:
+                screen = application.primaryScreen()
+                if screen is None:
+                    fail(3, "no primary screen")
+                available = screen.availableGeometry()
+                width = min(800, max(640, available.width() - 160))
+                height = min(600, max(520, available.height() - 160))
+                x = available.x() + max(0, (available.width() - width) // 2)
+                y = available.y() + max(0, (available.height() - height) // 2)
+                main.setGeometry(x, y, width, height)
+                main.show()
+                QTest.qWait(180)
 
-            button = main.findChild(QObject, "maximizeWindowButton")
-            if button is None or not controller.customChromeEnabled:
-                sys.exit(4)
-            original = main.geometry()
-            hwnd = int(main.winId())
-            if not hwnd or ctypes.windll.user32.IsZoomed(hwnd):
-                sys.exit(5)
+                button = main.findChild(QObject, "maximizeWindowButton")
+                if button is None or not controller.customChromeEnabled:
+                    fail(4, "custom maximize button was unavailable")
+                original_logical = tuple(main.geometry().getRect())
+                hwnd = int(main.winId())
+                if not hwnd or user32.IsZoomed(ctypes.c_void_p(hwnd)):
+                    fail(5, "window did not begin in a normal Win32 state")
+                original_native = native_rect(hwnd)
 
-            if not QMetaObject.invokeMethod(button, "click"):
-                sys.exit(6)
-            QTest.qWait(260)
-            maximized = main.geometry()
-            tolerance = 16
-            maximize_ok = (
-                bool(ctypes.windll.user32.IsZoomed(hwnd))
-                and controller.maximized
-                and main.visibility() == QWindow.Visibility.Maximized
-                and main.visibility() != QWindow.Visibility.FullScreen
-                and maximized != original
-                and maximized.left() >= work.left() - tolerance
-                and maximized.top() >= work.top() - tolerance
-                and maximized.right() <= work.right() + tolerance
-                and maximized.bottom() <= work.bottom() + tolerance
-            )
-            if not maximize_ok:
-                sys.exit(7)
+                if not QMetaObject.invokeMethod(button, "click"):
+                    fail(6, "maximize button invocation failed")
+                QTest.qWait(260)
+                maximized_logical = tuple(main.geometry().getRect())
+                maximized_native = native_rect(hwnd)
+                work = work_rect(hwnd)
+                horizontal_frame = (
+                    metric(32, hwnd) + metric(92, hwnd) + 2
+                )
+                vertical_frame = (
+                    metric(33, hwnd) + metric(92, hwnd) + 2
+                )
+                state = main.windowStates()
+                maximize_ok = (
+                    bool(user32.IsZoomed(ctypes.c_void_p(hwnd)))
+                    and controller.maximized
+                    and bool(state & Qt.WindowState.WindowMaximized)
+                    and button.property("windowAction") == "restore"
+                    and maximized_logical != original_logical
+                    and maximized_native != original_native
+                    and native_rect_matches_work_area(
+                        maximized_native,
+                        work,
+                        horizontal_frame,
+                        vertical_frame,
+                    )
+                )
+                if not maximize_ok:
+                    fail(
+                        7,
+                        f"unexpected maximize state: state={{int(state.value)}}, "
+                        f"visibility={{main.visibility()}}, native={{maximized_native}}, "
+                        f"work={{work}}",
+                    )
 
-            if not QMetaObject.invokeMethod(button, "click"):
-                sys.exit(8)
-            QTest.qWait(260)
-            restored = main.geometry()
-            restore_ok = (
-                not bool(ctypes.windll.user32.IsZoomed(hwnd))
-                and not controller.maximized
-                and main.visibility() == QWindow.Visibility.Windowed
-                and main.visibility() != QWindow.Visibility.FullScreen
-                and abs(restored.x() - original.x()) <= tolerance
-                and abs(restored.y() - original.y()) <= tolerance
-                and abs(restored.width() - original.width()) <= tolerance
-                and abs(restored.height() - original.height()) <= tolerance
-            )
-            controller.detach()
-            bridge.close()
-            main.hide()
-            main.deleteLater()
-            component.deleteLater()
-            engine.deleteLater()
-            application.processEvents()
-            sys.exit(0 if restore_ok else 9)
+                if not QMetaObject.invokeMethod(button, "click"):
+                    fail(8, "restore button invocation failed")
+                QTest.qWait(260)
+                restored_state = main.windowStates()
+                restore_ok = (
+                    not bool(user32.IsZoomed(ctypes.c_void_p(hwnd)))
+                    and not controller.maximized
+                    and not bool(restored_state & Qt.WindowState.WindowMaximized)
+                    and not bool(restored_state & Qt.WindowState.WindowFullScreen)
+                    and button.property("windowAction") == "maximize"
+                    and tuple(main.geometry().getRect()) == original_logical
+                    and native_rect(hwnd) == original_native
+                )
+                if not restore_ok:
+                    fail(
+                        9,
+                        f"restore was not exact: state={{int(restored_state.value)}}, "
+                        f"logical={{tuple(main.geometry().getRect())}}, "
+                        f"native={{native_rect(hwnd)}}",
+                    )
+            finally:
+                controller.detach()
+                dispose_qml_fixture(
+                    application,
+                    engine,
+                    components=(component,),
+                    context_objects=(bridge, controller),
+                )
+                if warnings:
+                    print("QML warnings: " + "; ".join(warnings), file=sys.stderr)
+                    raise SystemExit(13)
             """
         )
         environment = os.environ.copy()
@@ -667,6 +972,11 @@ class VerificationHarnessTests(unittest.TestCase):
             "Production custom maximize/restore failed. "
             f"Child exit {result.returncode}.\nstdout:\n{result.stdout}"
             f"\nstderr:\n{result.stderr}",
+        )
+        self.assertEqual(
+            detect_qml_runtime_warnings(result.stdout + "\n" + result.stderr),
+            [],
+            "The Win32 maximize child emitted a swallowed QML diagnostic",
         )
 
 
