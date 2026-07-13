@@ -996,7 +996,12 @@ def create_native_window_controller_type(qt: Any) -> type:
                 log.debug("Could not show the platform system menu", exc_info=True)
                 return False
 
-        @Slot(object, object, object, object, object)
+        # QVariant is intentional here. PySide's ``object`` signature is not
+        # callable from QML for Qt.rect/QRectF values; it raises a JavaScript
+        # TypeError before this method runs. QVariant preserves the frozen
+        # five-input contract while allowing QML value types through as their
+        # native QRectF/number representations.
+        @Slot("QVariant", "QVariant", "QVariant", "QVariant", "QVariant")
         def setHitRegions(self, titlebar, minimize, maximize, close, resize_border):
             self._hit_regions = normalize_hit_regions(
                 titlebar, minimize, maximize, close, resize_border
