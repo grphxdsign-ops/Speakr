@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 Item {
     id: root
+    objectName: "settingsPage"
 
     required property var tokens
     property var settings: ({})
@@ -12,6 +13,7 @@ Item {
     property var lastChange: null
     property var pendingSensitiveChange: null
     property string saveError: ""
+    readonly property int visibleResultCount: resultCount()
 
     function focusHeading() {
         pageHeading.forceActiveFocus(Qt.OtherFocusReason)
@@ -61,6 +63,8 @@ Item {
         { category: qsTr("Privacy"), label: qsTr("Restore clipboard"), description: qsTr("Restore clipboard contents after paste-based insertion."), keywords: "paste", path: "restore_clipboard", type: "switch", fallback: true },
 
         { category: qsTr("Accessibility"), label: qsTr("Theme"), description: qsTr("Follow the operating system or choose a fixed interface theme."), keywords: "light dark contrast", path: "ui.theme", type: "combo", options: [qsTr("System"), qsTr("Light"), qsTr("Dark"), qsTr("High contrast")], values: ["system", "light", "dark", "high_contrast"], fallback: "system" },
+        { category: qsTr("Accessibility"), label: qsTr("Visual effects"), description: qsTr("System follows accessibility and graphics conditions. Full uses native material when available; Reduced limits transparency; Off uses solid surfaces."), keywords: "appearance material mica vibrancy glass transparency effects rendering", path: "ui.visual_effects", type: "combo", options: [qsTr("System"), qsTr("Full"), qsTr("Reduced"), qsTr("Off")], values: ["system", "full", "reduced", "off"], fallback: "system" },
+        { category: qsTr("Accessibility"), label: qsTr("Effective appearance"), description: "", keywords: "active effective material mica vibrancy scene glass solid effect tier renderer", path: "__effective_appearance", type: "readonly", fallback: "" },
         { category: qsTr("Accessibility"), label: qsTr("Control spacing"), description: qsTr("Comfortable is recommended. Compact reduces unused space while preserving 44-pixel targets."), keywords: "density compact comfortable", path: "ui.density", type: "combo", options: [qsTr("Comfortable"), qsTr("Compact")], values: ["comfortable", "compact"], fallback: "comfortable" },
         { category: qsTr("Accessibility"), label: qsTr("Text size"), description: qsTr("System follows operating-system scaling. Larger choices reflow controls without hiding labels."), keywords: "font zoom vision", path: "ui.text_scale", type: "combo", options: [qsTr("System"), "110%", "125%", "150%", "175%", "200%"], values: ["system", 110, 125, 150, 175, 200], fallback: "system" },
         { category: qsTr("Accessibility"), label: qsTr("Motion"), description: qsTr("Reduced motion removes translation, drawing, and connector animations while preserving reading time."), keywords: "animation reduce", path: "ui.reduced_motion", type: "combo", options: [qsTr("System"), qsTr("Reduced")], values: ["system", "reduce"], fallback: "system" },
@@ -112,6 +116,57 @@ Item {
         return count
     }
 
+    function requestedEffectLabel() {
+        var value = String(setting("ui.visual_effects", "system"))
+        if (value === "full") return qsTr("Full")
+        if (value === "reduced") return qsTr("Reduced")
+        if (value === "off") return qsTr("Off")
+        return qsTr("System")
+    }
+
+    function effectTierLabel() {
+        var value = root.tokens.effectTier
+        try {
+            if (nativeWindow !== null && nativeWindow !== undefined)
+                value = nativeWindow.effectTier
+        } catch (error) {
+            // Standalone QML tests intentionally run without native chrome.
+        }
+        value = String(value)
+        if (value === "full") return qsTr("Full effects")
+        if (value === "reduced") return qsTr("Reduced effects")
+        return qsTr("Effects off")
+    }
+
+    function materialLabel() {
+        var value = "solid"
+        try {
+            if (nativeWindow !== null && nativeWindow !== undefined)
+                value = nativeWindow.material
+        } catch (error) {
+            // Standalone QML tests intentionally run without native chrome.
+        }
+        value = String(value)
+        if (value === "mica") return qsTr("Windows Mica")
+        if (value === "vibrancy") return qsTr("macOS Vibrancy")
+        if (value === "scene_glass") return qsTr("Local scene glass")
+        return qsTr("Solid surfaces")
+    }
+
+    function effectiveAppearanceSummary() {
+        return qsTr("%1 with %2. Accessibility and graphics safeguards can reduce effects without changing your saved choice.")
+                .arg(effectTierLabel()).arg(materialLabel())
+    }
+
+    function resultsSummary() {
+        var category = selectedCategory === qsTr("All")
+                     ? qsTr("all categories") : selectedCategory
+        var query = searchField.text.trim()
+        if (query.length === 0)
+            return qsTr("%1 settings in %2").arg(resultCount()).arg(category)
+        return qsTr("%1 matches for %2 in %3").arg(resultCount()).arg(query).arg(category)
+    }
+
     function toneSummary() {
         var source = setting("app_tones", ({})) || ({})
         var entries = []
@@ -138,7 +193,6 @@ Item {
         }
         lastChange = { path: path, previous: previousValue }
         saveError = ""
-        savedTimer.restart()
         return true
     }
 
@@ -151,167 +205,169 @@ Item {
         commitChange(path, value, previousValue)
     }
 
-    Timer {
-        id: savedTimer
-        interval: 8000
-        repeat: false
-        onTriggered: root.lastChange = null
-    }
-
     ScrollView {
         id: scroll
+        objectName: "settingsScroll"
         anchors.fill: parent
         clip: true
+        contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-        ColumnLayout {
-            width: scroll.availableWidth
-            spacing: root.tokens.space24
+        Column {
+            width: scroll.contentWidth
+            spacing: root.tokens.space16
 
-            Item { Layout.preferredHeight: root.tokens.space8 }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
-                spacing: root.tokens.space12
-
-                PlainText {
-                    id: pageHeading
-                    Layout.fillWidth: true
-                    text: qsTr("Settings")
-                    color: root.tokens.text
-                    font.family: root.tokens.fontFamily
-                    font.pixelSize: root.tokens.pageHeading
-                    font.weight: Font.DemiBold
-                    Accessible.role: Accessible.Heading
-                    Accessible.name: text
-                }
-
-                QuietTextField {
-                    id: searchField
-                    Layout.fillWidth: true
-                    tokens: root.tokens
-                    placeholderText: qsTr("Search settings")
-                    accessibleName: qsTr("Search settings")
-                    accessibleDescription: qsTr("Search setting labels and descriptions within the selected category")
-                }
-
-                PlainText {
-                    Layout.fillWidth: true
-                    text: qsTr("%1 settings found").arg(root.resultCount())
-                    color: root.tokens.mutedText
-                    font.family: root.tokens.fontFamily
-                    font.pixelSize: root.tokens.secondary
-                    Accessible.name: text
-                }
+            Item {
+                width: parent.width
+                height: root.tokens.space8
             }
 
-            Flow {
-                Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
-                spacing: root.tokens.space8
-                Accessible.role: Accessible.PageTabList
-                Accessible.name: qsTr("Settings categories")
+            GlassSurface {
+                objectName: "settingsSearchSurface"
+                x: root.tokens.space32
+                width: Math.max(0, parent.width - root.tokens.space32 * 2)
+                role: "major"
+                padding: root.tokens.space24
+                tokens: root.tokens
+                implicitHeight: settingsHeader.implicitHeight + padding * 2
 
-                Repeater {
-                    model: root.categories
-
-                    delegate: NavigationButton {
-                        required property string modelData
-                        tokens: root.tokens
-                        text: modelData
-                        selected: root.selectedCategory === modelData
-                        onClicked: root.selectedCategory = modelData
-                    }
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
-                visible: root.lastChange !== null
-                implicitHeight: savedRow.implicitHeight + root.tokens.space16
-                radius: root.tokens.radius
-                color: root.tokens.successSurface
-                border.width: 1
-                border.color: root.tokens.success
-                Accessible.role: Accessible.AlertMessage
-                Accessible.name: qsTr("Saved. Undo is available.")
-
-                RowLayout {
-                    id: savedRow
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.margins: root.tokens.space8
+                Column {
+                    id: settingsHeader
+                    anchors.fill: parent
                     spacing: root.tokens.space12
 
                     PlainText {
-                        Layout.fillWidth: true
-                        text: qsTr("Saved")
+                        id: pageHeading
+                        width: parent.width
+                        text: qsTr("Settings")
                         color: root.tokens.text
                         font.family: root.tokens.fontFamily
-                        font.pixelSize: root.tokens.body
+                        font.pixelSize: root.tokens.pageHeading
                         font.weight: Font.DemiBold
+                        wrapMode: Text.Wrap
+                        Accessible.role: Accessible.Heading
+                        Accessible.name: text
                     }
 
-                    QuietButton {
+                    PlainText {
+                        width: parent.width
+                        text: qsTr("Tune dictation, privacy, accessibility, and local processing without leaving this device.")
+                        color: root.tokens.mutedText
+                        font.family: root.tokens.fontFamily
+                        font.pixelSize: root.tokens.body
+                        wrapMode: Text.Wrap
+                    }
+
+                    QuietTextField {
+                        id: searchField
+                        objectName: "settingsSearchField"
+                        width: parent.width
                         tokens: root.tokens
-                        text: qsTr("Undo")
-                        enabled: root.lastChange !== null
-                        accessibleDescription: qsTr("Restore the previous value for the most recent setting")
-                        onClicked: {
-                            if (root.lastChange !== null) {
-                                if (Boolean(bridge.setSetting(root.lastChange.path, root.lastChange.previous))) {
-                                    root.lastChange = null
-                                    root.saveError = ""
-                                } else {
-                                    root.saveError = qsTr("Undo could not be saved. The current value is still active.")
-                                }
-                            }
+                        placeholderText: qsTr("Search settings")
+                        accessibleName: qsTr("Search settings")
+                        accessibleDescription: qsTr("Search setting labels and descriptions within the selected category")
+                    }
+
+                    PlainText {
+                        id: resultSummary
+                        objectName: "settingsResultSummary"
+                        width: parent.width
+                        text: root.resultsSummary()
+                        color: root.tokens.mutedText
+                        font.family: root.tokens.fontFamily
+                        font.pixelSize: root.tokens.secondary
+                        wrapMode: Text.Wrap
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
+                    }
+                }
+            }
+
+            GlassSurface {
+                objectName: "settingsCategorySurface"
+                x: root.tokens.space32
+                width: Math.max(0, parent.width - root.tokens.space32 * 2)
+                role: "navigation"
+                padding: root.tokens.space12
+                elevated: false
+                tokens: root.tokens
+                implicitHeight: categoryGrid.implicitHeight + padding * 2
+
+                GridLayout {
+                    id: categoryGrid
+                    width: parent.width
+                    columns: width >= root.tokens.metric(480) ? 3
+                             : (width >= root.tokens.metric(300) ? 2 : 1)
+                    columnSpacing: root.tokens.space8
+                    rowSpacing: root.tokens.space8
+                    Accessible.role: Accessible.PageTabList
+                    Accessible.name: qsTr("Settings categories")
+
+                    Repeater {
+                        model: root.categories
+
+                        delegate: NavigationButton {
+                            required property string modelData
+                            Layout.fillWidth: true
+                            tokens: root.tokens
+                            text: modelData
+                            selected: root.selectedCategory === modelData
+                            onClicked: root.selectedCategory = modelData
                         }
                     }
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
+            InlineNotice {
+                x: root.tokens.space32
+                width: Math.max(0, parent.width - root.tokens.space32 * 2)
+                visible: root.lastChange !== null
+                tokens: root.tokens
+                kind: "success"
+                title: qsTr("Saved on this device")
+                message: qsTr("Your most recent setting is active.")
+                actionText: qsTr("Undo")
+                actionDescription: qsTr("Restore the previous value for the most recent setting")
+                onActionRequested: {
+                    if (root.lastChange !== null) {
+                        if (Boolean(bridge.setSetting(root.lastChange.path, root.lastChange.previous))) {
+                            root.lastChange = null
+                            root.saveError = ""
+                        } else {
+                            root.saveError = qsTr("Undo could not be saved. The current value is still active.")
+                        }
+                    }
+                }
+            }
+
+            GlassSurface {
+                x: root.tokens.space32
+                width: Math.max(0, parent.width - root.tokens.space32 * 2)
                 visible: root.pendingSensitiveChange !== null
-                implicitHeight: transcriptWarning.implicitHeight + root.tokens.space24
-                radius: root.tokens.radius
-                color: root.tokens.warningSurface
-                border.width: 1
-                border.color: root.tokens.warning
+                role: "notice"
+                padding: root.tokens.space16
+                fillColor: root.tokens.warningSurface
+                edgeColor: root.tokens.warning
+                tokens: root.tokens
+                implicitHeight: transcriptWarning.implicitHeight + padding * 2
                 Accessible.role: Accessible.AlertMessage
                 Accessible.name: qsTr("Confirm transcript logging")
 
-                ColumnLayout {
+                Column {
                     id: transcriptWarning
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.margins: root.tokens.space12
+                    anchors.fill: parent
                     spacing: root.tokens.space8
 
-                    PlainText {
-                        Layout.fillWidth: true
-                        text: qsTr("Confirm transcript logging")
-                        color: root.tokens.text
-                        font.family: root.tokens.fontFamily
-                        font.pixelSize: root.tokens.statusHeading
-                        font.weight: Font.DemiBold
-                        wrapMode: Text.Wrap
-                        Accessible.role: Accessible.Heading
+                    SectionHeading {
+                        width: parent.width
+                        tokens: root.tokens
+                        title: qsTr("Confirm transcript logging")
+                        description: qsTr("This creates a persistent local transcript record. Practice text is never logged.")
                     }
 
                     PlainText {
-                        Layout.fillWidth: true
-                        text: qsTr("This writes dictated text to %1 on this device. Practice text is never logged. Turn this on only if you want a persistent local transcript record.")
+                        width: parent.width
+                        text: qsTr("Dictated text will be written to %1 on this device. Turn this on only if you want that local record.")
                               .arg(String(root.setting("log_path", "speakr.log")))
                         color: root.tokens.text
                         font.family: root.tokens.fontFamily
@@ -320,7 +376,7 @@ Item {
                     }
 
                     Flow {
-                        Layout.fillWidth: true
+                        width: parent.width
                         spacing: root.tokens.space8
 
                         QuietButton {
@@ -348,148 +404,217 @@ Item {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
+            InlineNotice {
+                x: root.tokens.space32
+                width: Math.max(0, parent.width - root.tokens.space32 * 2)
                 visible: root.saveError.length > 0
-                implicitHeight: saveErrorText.implicitHeight + root.tokens.space24
-                radius: root.tokens.radius
-                color: root.tokens.dangerSurface
-                border.width: 1
-                border.color: root.tokens.danger
-                Accessible.role: Accessible.AlertMessage
-                Accessible.name: root.saveError
-
-                PlainText {
-                    id: saveErrorText
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.margins: root.tokens.space12
-                    text: root.saveError
-                    color: root.tokens.danger
-                    font.family: root.tokens.fontFamily
-                    font.pixelSize: root.tokens.body
-                    wrapMode: Text.Wrap
-                }
+                tokens: root.tokens
+                kind: "danger"
+                title: qsTr("Setting not saved")
+                message: root.saveError
             }
 
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.leftMargin: root.tokens.space32
-                Layout.rightMargin: root.tokens.space32
-                spacing: 0
+            GlassSurface {
+                objectName: "settingsRowsSurface"
+                x: root.tokens.space32
+                width: Math.max(0, parent.width - root.tokens.space32 * 2)
+                role: "content"
+                padding: root.tokens.space16
+                elevated: false
+                tokens: root.tokens
+                implicitHeight: settingRows.implicitHeight + padding * 2
 
-                Repeater {
-                    model: root.rows
+                Column {
+                    id: settingRows
+                    anchors.fill: parent
+                    spacing: 0
 
-                    delegate: SettingRow {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        visible: root.matches(modelData)
-                        Layout.preferredHeight: visible ? implicitHeight : 0
-                        tokens: root.tokens
-                        label: modelData.label
-                        description: modelData.description
-                        category: modelData.category
-                        path: modelData.path
-                        controlType: modelData.type
-                        options: modelData.options || []
-                        values: modelData.values || []
-                        currentValue: modelData.type === "hotkey"
-                                      ? (root.appState.hotkey || root.setting(modelData.path, modelData.fallback))
-                                      : root.setting(modelData.path, modelData.fallback)
-                        showCategory: root.selectedCategory === qsTr("All") || searchField.text.trim().length > 0
-                        capturingHotkey: bridge.capturingHotkey
-                        pendingHotkey: String(root.appState.pending_hotkey || "")
-                        actionText: modelData.actionText || qsTr("Open")
-                        actionKind: modelData.actionKind || "config"
-                        allowEmpty: Boolean(modelData.allowEmpty || false)
-                        onChangeRequested: function(path, value, previousValue) {
-                            root.applyChange(path, value, previousValue)
+                    ListView {
+                        id: settingsRowsList
+                        objectName: "settingsRowsRepeater"
+                        width: parent.width
+                        height: root.selectedCategory !== qsTr("All")
+                                || searchField.text.trim().length > 0
+                                ? Math.max(root.tokens.rowHeight, contentHeight)
+                                : Math.max(root.rows.length * root.tokens.rowHeight,
+                                           contentHeight)
+                        model: root.rows
+                        interactive: false
+                        clip: false
+                        cacheBuffer: height
+
+                        delegate: SettingRow {
+                            required property var modelData
+                            readonly property string resolvedDescription: modelData.type === "readonly"
+                                                                         ? root.effectiveAppearanceSummary()
+                                                                         : modelData.description
+                            objectName: "settingRow_" + modelData.path
+                            width: ListView.view.width
+                            visible: root.matches(modelData)
+                            height: visible ? implicitHeight : 0
+                            tokens: root.tokens
+                            label: modelData.label
+                            description: resolvedDescription
+                            category: modelData.category
+                            path: modelData.path
+                            controlType: modelData.type
+                            options: modelData.options || []
+                            values: modelData.values || []
+                            currentValue: modelData.type === "hotkey"
+                                          ? (root.appState.hotkey || root.setting(modelData.path, modelData.fallback))
+                                          : root.setting(modelData.path, modelData.fallback)
+                            showCategory: root.selectedCategory === qsTr("All") || searchField.text.trim().length > 0
+                            capturingHotkey: bridge.capturingHotkey
+                            pendingHotkey: String(root.appState.pending_hotkey || "")
+                            actionText: modelData.actionText || qsTr("Open")
+                            actionKind: modelData.actionKind || "config"
+                            allowEmpty: Boolean(modelData.allowEmpty || false)
+                            onChangeRequested: function(path, value, previousValue) {
+                                root.applyChange(path, value, previousValue)
+                            }
+                            onActionRequested: function(kind) { bridge.openLocal(kind) }
                         }
-                        onActionRequested: function(kind) { bridge.openLocal(kind) }
                     }
-                }
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.topMargin: root.tokens.space24
-                    visible: root.selectedCategory === qsTr("Advanced")
-                             && searchField.text.trim().length === 0
-                    implicitHeight: localValues.implicitHeight + root.tokens.space24
-                    radius: root.tokens.radius
-                    color: root.tokens.surfaceRaised
-                    border.width: 1
-                    border.color: root.tokens.border
-                    Accessible.role: Accessible.Grouping
-                    Accessible.name: qsTr("Exact per-app values")
+                    GlassSurface {
+                        width: parent.width
+                        visible: (root.selectedCategory === qsTr("Accessibility")
+                                  || root.selectedCategory === qsTr("Advanced"))
+                                 && searchField.text.trim().length === 0
+                        role: "notice"
+                        padding: root.tokens.space16
+                        elevated: false
+                        tokens: root.tokens
+                        implicitHeight: renderingDetails.implicitHeight + padding * 2
 
-                    ColumnLayout {
-                        id: localValues
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.margins: root.tokens.space12
-                        spacing: root.tokens.space8
+                        Column {
+                            id: renderingDetails
+                            anchors.fill: parent
+                            spacing: root.tokens.space8
 
-                        PlainText {
-                            Layout.fillWidth: true
-                            text: qsTr("Exact per-app values")
-                            color: root.tokens.text
-                            font.family: root.tokens.fontFamily
-                            font.pixelSize: root.tokens.statusHeading
-                            font.weight: Font.DemiBold
-                            wrapMode: Text.Wrap
-                            Accessible.role: Accessible.Heading
+                            StatusOrb {
+                                objectName: "effectiveAppearanceStatus"
+                                width: parent.width
+                                tokens: root.tokens
+                                statusKind: root.effectTierLabel() === qsTr("Effects off") ? "neutral" : "active"
+                                label: qsTr("%1 · %2").arg(root.effectTierLabel()).arg(root.materialLabel())
+                                description: qsTr("The effective visual appearance for this window")
+                            }
+
+                            PlainText {
+                                id: effectiveAppearanceText
+                                objectName: "effectiveAppearanceText"
+                                width: parent.width
+                                text: qsTr("Saved choice: %1. High Contrast, Reduce Transparency, remote desktop, or software rendering can automatically reduce effects.")
+                                      .arg(root.requestedEffectLabel())
+                                color: root.tokens.mutedText
+                                font.family: root.tokens.fontFamily
+                                font.pixelSize: root.tokens.secondary
+                                wrapMode: Text.Wrap
+                            }
+                        }
+                    }
+
+                    GlassSurface {
+                        width: parent.width
+                        visible: root.selectedCategory === qsTr("Advanced")
+                                 && searchField.text.trim().length === 0
+                        role: "notice"
+                        padding: root.tokens.space16
+                        elevated: false
+                        tokens: root.tokens
+                        implicitHeight: localValues.implicitHeight + padding * 2
+                        Accessible.role: Accessible.Grouping
+                        Accessible.name: qsTr("Exact per-app values")
+
+                        Column {
+                            id: localValues
+                            anchors.fill: parent
+                            spacing: root.tokens.space8
+
+                            SectionHeading {
+                                width: parent.width
+                                tokens: root.tokens
+                                title: qsTr("Exact per-app values")
+                                description: qsTr("These values stay in your local configuration file.")
+                            }
+
+                            PlainText {
+                                width: parent.width
+                                text: qsTr("Tones: %1").arg(root.toneSummary())
+                                color: root.tokens.text
+                                font.family: root.tokens.fontFamily
+                                font.pixelSize: root.tokens.secondary
+                                wrapMode: Text.Wrap
+                                Accessible.name: text
+                            }
+
+                            PlainText {
+                                width: parent.width
+                                text: qsTr("Shortcut exclusions: %1").arg(root.excludedAppsSummary())
+                                color: root.tokens.text
+                                font.family: root.tokens.fontFamily
+                                font.pixelSize: root.tokens.secondary
+                                wrapMode: Text.Wrap
+                                Accessible.name: text
+                            }
+
+                            QuietButton {
+                                tokens: root.tokens
+                                text: qsTr("Open local config")
+                                accessibleDescription: qsTr("Open the exact local per-app tone and shortcut exclusion values")
+                                onClicked: bridge.openLocal("config")
+                            }
+                        }
+                    }
+
+                    Column {
+                        id: noResults
+                        objectName: "settingsEmptyState"
+                        width: parent.width
+                        visible: root.resultCount() === 0
+                        spacing: root.tokens.space12
+                        Accessible.role: Accessible.Note
+                        Accessible.name: qsTr("No settings match")
+
+                        StatusOrb {
+                            x: Math.round((parent.width - width) / 2)
+                            tokens: root.tokens
+                            statusKind: "neutral"
+                            symbol: "?"
+                            label: qsTr("No settings match")
                         }
 
                         PlainText {
-                            Layout.fillWidth: true
-                            text: qsTr("Tones: %1").arg(root.toneSummary())
-                            color: root.tokens.text
+                            width: parent.width
+                            text: qsTr("Try a broader term, clear the search, or choose All categories.")
+                            color: root.tokens.mutedText
                             font.family: root.tokens.fontFamily
-                            font.pixelSize: root.tokens.secondary
+                            font.pixelSize: root.tokens.body
                             wrapMode: Text.Wrap
-                            Accessible.name: text
-                        }
-
-                        PlainText {
-                            Layout.fillWidth: true
-                            text: qsTr("Shortcut exclusions: %1").arg(root.excludedAppsSummary())
-                            color: root.tokens.text
-                            font.family: root.tokens.fontFamily
-                            font.pixelSize: root.tokens.secondary
-                            wrapMode: Text.Wrap
-                            Accessible.name: text
+                            horizontalAlignment: Text.AlignHCenter
                         }
 
                         QuietButton {
+                            x: Math.round((parent.width - width) / 2)
                             tokens: root.tokens
-                            text: qsTr("Open local config")
-                            accessibleDescription: qsTr("Open the exact local per-app tone and shortcut exclusion values")
-                            onClicked: bridge.openLocal("config")
+                            text: qsTr("Clear search")
+                            kind: "primary"
+                            accessibleDescription: qsTr("Clear the search and show all setting categories")
+                            onClicked: {
+                                searchField.clear()
+                                root.selectedCategory = qsTr("All")
+                                searchField.forceActiveFocus(Qt.TabFocusReason)
+                            }
                         }
                     }
                 }
-
-                PlainText {
-                    Layout.fillWidth: true
-                    Layout.topMargin: root.tokens.space24
-                    visible: root.resultCount() === 0
-                    text: qsTr("No settings match. Try a broader term or choose All.")
-                    color: root.tokens.mutedText
-                    font.family: root.tokens.fontFamily
-                    font.pixelSize: root.tokens.body
-                    wrapMode: Text.Wrap
-                    horizontalAlignment: Text.AlignHCenter
-                    Accessible.role: Accessible.Note
-                    Accessible.name: text
-                }
             }
 
-            Item { Layout.preferredHeight: root.tokens.space24 }
+            Item {
+                width: parent.width
+                height: root.tokens.space24
+            }
         }
     }
 }
