@@ -68,7 +68,7 @@ macOS uses Vibrancy behind the main QML scene. The HUD never uses native
 desktop-backed blur. `scene_glass` is drawn from local QML colors and shapes;
 it never samples the screen.
 
-| Surface | Full opacity | Reduced opacity | Off |
+| Surface | Full effects | Reduced effects | Off |
 |---|---:|---:|---|
 | Outer shell veil | 72% dark / 78% light | 94% | Solid canvas |
 | Navigation material | 76% dark / 82% light | 96% | Strong surface |

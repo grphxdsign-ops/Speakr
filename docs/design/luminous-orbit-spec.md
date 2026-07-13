@@ -355,8 +355,9 @@ Board rules:
 
 - Use system typography, local abstract shapes, labeled controls, and exact
   production copy.
-- Show light and dark parity rather than presenting dark mode as the only
-  designed state.
+- The Home board establishes light and dark parity. Flow boards may use the
+  dark reference world for density; runtime screenshots must prove every
+  surface in light, dark, and High Contrast before release.
 - Show full, reduced, and opaque fallback behavior.
 - Use explicit arrows and duration labels for flows.
 - Do not show a star field, particle effect, decorative waveform, gradient
