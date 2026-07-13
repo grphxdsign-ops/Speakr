@@ -428,6 +428,136 @@ class NativeControllerTests(unittest.TestCase):
             controller.detach()
             window.deleteLater()
 
+    def test_qml_can_publish_qt_rect_hit_regions_without_warnings(self):
+        controller = native_window.NativeWindowController(
+            qt=self.qt,
+            visual_effects="off",
+            platform_name="test",
+        )
+        engine = QQmlApplicationEngine()
+        engine.rootContext().setContextProperty("nativeWindow", controller)
+        warnings = []
+        engine.warnings.connect(
+            lambda values: warnings.extend(error.toString() for error in values)
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "HitRegionProbe.qml"
+            path.write_text(
+                """
+import QtQuick
+QtObject {
+    Component.onCompleted: nativeWindow.setHitRegions(
+        Qt.rect(8, 8, 620, 56),
+        Qt.rect(760, 8, 44, 44),
+        Qt.rect(808, 8, 44, 44),
+        Qt.rect(856, 8, 44, 44),
+        8)
+}
+""",
+                encoding="utf-8",
+            )
+            component = self.qt.QQmlComponent(
+                engine,
+                QUrl.fromLocalFile(str(path)),
+                self.qt.QQmlComponent.PreferSynchronous,
+            )
+            probe = component.create()
+            try:
+                self.assertIsNotNone(
+                    probe, [error.toString() for error in component.errors()]
+                )
+                self.qapp.processEvents()
+                self.assertEqual(warnings, [])
+                self.assertEqual(
+                    controller._hit_regions,
+                    {
+                        "titlebar": (8.0, 8.0, 620.0, 56.0),
+                        "minimize": (760.0, 8.0, 44.0, 44.0),
+                        "maximize": (808.0, 8.0, 44.0, 44.0),
+                        "close": (856.0, 8.0, 44.0, 44.0),
+                        "resize_border": 8.0,
+                    },
+                )
+                # QML publishes logical coordinates; Windows hit testing converts
+                # physical message coordinates back by DPR before comparison.
+                self.assertEqual(
+                    native_window.windows_hit_test(
+                        830, 20, 960, 700, controller._hit_regions
+                    ),
+                    native_window.HTMAXBUTTON,
+                )
+            finally:
+                if probe is not None:
+                    probe.deleteLater()
+                component.deleteLater()
+                self.qapp.processEvents()
+        engine.deleteLater()
+        self.qapp.processEvents()
+
+    def test_qml_invalid_hit_regions_degrade_to_safe_client_geometry(self):
+        controller = native_window.NativeWindowController(
+            qt=self.qt,
+            visual_effects="off",
+            platform_name="test",
+        )
+        engine = QQmlApplicationEngine()
+        engine.rootContext().setContextProperty("nativeWindow", controller)
+        warnings = []
+        engine.warnings.connect(
+            lambda values: warnings.extend(error.toString() for error in values)
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "InvalidHitRegionProbe.qml"
+            path.write_text(
+                """
+import QtQuick
+QtObject {
+    Component.onCompleted: nativeWindow.setHitRegions(
+        Qt.rect(0, 0, 0, 56),
+        null,
+        "not a rectangle",
+        Qt.rect(100, 8, 44, 44),
+        -4)
+}
+""",
+                encoding="utf-8",
+            )
+            component = self.qt.QQmlComponent(
+                engine,
+                QUrl.fromLocalFile(str(path)),
+                self.qt.QQmlComponent.PreferSynchronous,
+            )
+            probe = component.create()
+            try:
+                self.assertIsNotNone(
+                    probe, [error.toString() for error in component.errors()]
+                )
+                self.qapp.processEvents()
+                self.assertEqual(warnings, [])
+                self.assertEqual(
+                    controller._hit_regions,
+                    {
+                        "titlebar": None,
+                        "minimize": None,
+                        "maximize": None,
+                        "close": (100.0, 8.0, 44.0, 44.0),
+                        "resize_border": 0.0,
+                    },
+                )
+                self.assertEqual(
+                    native_window.windows_hit_test(
+                        20, 20, 200, 100, controller._hit_regions
+                    ),
+                    native_window.HTCLIENT,
+                )
+            finally:
+                if probe is not None:
+                    probe.deleteLater()
+                component.deleteLater()
+                self.qapp.processEvents()
+        engine.deleteLater()
+        self.qapp.processEvents()
+
     def test_native_failure_and_accessibility_preferences_fall_back_safely(self):
         adapter = _FakeAdapter(material_succeeds=False)
         controller = native_window.NativeWindowController(
