@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QApplication
 
 from speakr.interface_state import InterfaceState
 from speakr.qt_ui import Bridge
+from tests.qml_lifecycle import dispose_qml_fixture
 
 
 class _App:
@@ -234,9 +235,39 @@ class QmlLoadTests(unittest.TestCase):
             self.assertFalse(bool(hud.property("shouldShow")))
             self.assertEqual(warnings, [])
         finally:
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            dispose_qml_fixture(
+                self.qapp,
+                engine,
+                context_objects=(bridge,),
+            )
+            self.assertEqual(warnings, [])
+
+    def test_qml_teardown_destroys_roots_and_engine_before_bridge(self):
+        app = _App()
+        bridge = Bridge(app)
+        engine = QQmlApplicationEngine()
+        engine.rootContext().setContextProperty("bridge", bridge)
+        warnings = []
+        engine.warnings.connect(
+            lambda values: warnings.extend(error.toString() for error in values)
+        )
+        qml = Path(__file__).resolve().parents[1] / "speakr" / "ui" / "qml"
+        engine.load(QUrl.fromLocalFile(str(qml / "Main.qml")))
+        self.assertEqual(len(engine.rootObjects()), 1, warnings)
+        root = engine.rootObjects()[0]
+        destroyed = []
+        root.destroyed.connect(lambda *_: destroyed.append("root"))
+        engine.destroyed.connect(lambda *_: destroyed.append("engine"))
+        bridge.destroyed.connect(lambda *_: destroyed.append("bridge"))
+
+        dispose_qml_fixture(
+            self.qapp,
+            engine,
+            context_objects=(bridge,),
+        )
+
+        self.assertEqual(destroyed, ["root", "engine", "bridge"])
+        self.assertEqual(warnings, [])
 
     def test_all_qml_text_surfaces_are_plain_text_components(self):
         qml = Path(__file__).resolve().parents[1] / "speakr" / "ui" / "qml"
@@ -276,11 +307,14 @@ class QmlLoadTests(unittest.TestCase):
                 time.sleep(0.01)
             self.assertFalse(requested.is_set())
         finally:
-            item.deleteLater()
-            engine.deleteLater()
+            dispose_qml_fixture(
+                self.qapp,
+                engine,
+                roots=(item,),
+                components=(component,),
+            )
             server.shutdown()
             server.server_close()
-            self.qapp.processEvents()
 
     @staticmethod
     def _luminance(color):
@@ -342,15 +376,22 @@ class QmlLoadTests(unittest.TestCase):
             self.assertEqual(theme.property("motionStandard"), 0)
             self.assertEqual(theme.property("motionEmphasis"), 0)
         finally:
-            theme.deleteLater()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            dispose_qml_fixture(
+                self.qapp,
+                engine,
+                roots=(theme,),
+                components=(component,),
+            )
 
     def test_narrow_200_percent_navigation_wraps_without_eliding_labels(self):
         app = _App(text_scale=200)
         bridge = Bridge(app)
         engine = QQmlApplicationEngine()
         engine.rootContext().setContextProperty("bridge", bridge)
+        warnings = []
+        engine.warnings.connect(
+            lambda values: warnings.extend(error.toString() for error in values)
+        )
         qml = Path(__file__).resolve().parents[1] / "speakr" / "ui" / "qml"
         try:
             engine.load(QUrl.fromLocalFile(str(qml / "Main.qml")))
@@ -362,9 +403,12 @@ class QmlLoadTests(unittest.TestCase):
             self.assertEqual(main.property("topNavigationColumns"), 2)
             self.assertEqual(main.property("topNavigationRows"), 3)
         finally:
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            dispose_qml_fixture(
+                self.qapp,
+                engine,
+                context_objects=(bridge,),
+            )
+            self.assertEqual(warnings, [])
 
 
 if __name__ == "__main__":

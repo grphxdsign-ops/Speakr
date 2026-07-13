@@ -15,8 +15,6 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
 from PySide6.QtCore import (
     Property,
-    QCoreApplication,
-    QEvent,
     QObject,
     QPointF,
     Qt,
@@ -32,6 +30,7 @@ from PySide6.QtWidgets import QApplication
 from speakr.app import SpeakrApp
 from speakr.interface_state import InterfaceState
 from speakr.qt_ui import Bridge
+from tests.qml_lifecycle import dispose_qml_fixture
 from tests.test_qml_load import _App
 
 
@@ -94,20 +93,25 @@ class HudQmlTests(unittest.TestCase):
         for _ in range(count):
             cls.qapp.processEvents()
 
+    @classmethod
+    def _wait_until(cls, predicate, *, timeout_ms, poll_ms=5):
+        deadline = time.monotonic() + (timeout_ms / 1000.0)
+        while time.monotonic() < deadline:
+            cls.qapp.processEvents()
+            if predicate():
+                return True
+            QTest.qWait(poll_ms)
+        cls.qapp.processEvents()
+        return bool(predicate())
+
     def _close(self, bridge, engine):
         warnings = engine._hud_test_warnings
-        for root in engine.rootObjects():
-            root.hide()
-            root.deleteLater()
-        engine.collectGarbage()
-        engine.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        self._pump(5)
+        dispose_qml_fixture(
+            self.qapp,
+            engine,
+            context_objects=(bridge,),
+        )
         self.assertEqual(warnings, [])
-        bridge.close()
-        bridge.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        self._pump(2)
 
     @staticmethod
     def _system_accessibility(reduced_motion):
@@ -602,8 +606,10 @@ class HudQmlTests(unittest.TestCase):
         try:
             ring = hud.findChild(QObject, "hudSuccessRing")
             bloom = hud.findChild(QObject, "hudSuccessBloom")
+            theme = hud.findChild(QObject, "hudTheme")
             self.assertIsNotNone(ring)
             self.assertIsNotNone(bloom)
+            self.assertIsNotNone(theme)
 
             app.interface_state.update(
                 pipeline="formatting", pipeline_job_id=601
@@ -619,7 +625,19 @@ class HudQmlTests(unittest.TestCase):
             self.assertFalse(bool(bloom.property("running")))
             self.assertAlmostEqual(float(ring.property("opacity")), 0.0, places=3)
 
-            QTest.qWait(65)
+            self.assertTrue(
+                self._wait_until(
+                    lambda: (
+                        hud.property("displayedKind") == "success"
+                        and bool(ring.property("visible"))
+                        and bool(bloom.property("running"))
+                    ),
+                    timeout_ms=max(
+                        250, int(theme.property("motionStandard")) * 3
+                    ),
+                ),
+                "success bloom did not start after the bounded crossfade",
+            )
             self.assertTrue(bool(ring.property("visible")))
             self.assertTrue(bool(bloom.property("running")))
             self.assertEqual(hud.property("displayedKind"), "success")
@@ -639,7 +657,7 @@ class HudQmlTests(unittest.TestCase):
             os.environ["QT_QUICK_BACKEND"] = "software"
 
             from ctypes import wintypes
-            from PySide6.QtCore import Property, QObject, QPointF, Signal, QUrl
+            from PySide6.QtCore import QCoreApplication, QEvent, Property, QObject, QPointF, Signal, QUrl
             from PySide6.QtQml import QQmlApplicationEngine
             from PySide6.QtQuickControls2 import QQuickStyle
             from PySide6.QtTest import QTest
@@ -720,9 +738,28 @@ class HudQmlTests(unittest.TestCase):
             bridge = Bridge()
             engine = QQmlApplicationEngine()
             engine.rootContext().setContextProperty("bridge", bridge)
+            warnings = []
+            engine.warnings.connect(
+                lambda values: warnings.extend(error.toString() for error in values)
+            )
             engine.load(QUrl.fromLocalFile({str(self.qml / 'Hud.qml')!r}))
+
+            def finish(code, hud=None):
+                if hud is not None:
+                    hud.hide()
+                engine.collectGarbage()
+                engine.deleteLater()
+                QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                app.processEvents()
+                if code == 0 and warnings:
+                    code = 8
+                bridge.deleteLater()
+                QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                app.processEvents()
+                sys.exit(code)
+
             if len(engine.rootObjects()) != 1:
-                sys.exit(2)
+                finish(2)
             hud = engine.rootObjects()[0]
             bridge._state = dict(bridge._state, capture="listening", capture_job_id=1)
             bridge.stateChanged.emit()
@@ -731,13 +768,13 @@ class HudQmlTests(unittest.TestCase):
             after_window = int(ctypes.windll.user32.GetForegroundWindow() or 0)
             after_identity = identities(after_window)
             if after_identity is None:
-                sys.exit(77)
+                finish(77, hud)
             if before_window != after_window:
-                sys.exit(3)
+                finish(3, hud)
             if before_identity != after_identity:
-                sys.exit(4)
+                finish(4, hud)
             if QApplication.focusWidget() is not edit or hud.isActive():
-                sys.exit(5)
+                finish(5, hud)
             stage = hud.findChild(QObject, "hudSignalPath")
             pending = list(stage.childItems())
             while pending:
@@ -748,8 +785,8 @@ class HudQmlTests(unittest.TestCase):
                 if label and content_height is not None:
                     top = item.mapToScene(QPointF(0, 0)).y()
                     if top + float(content_height) > hud.height() + 0.5:
-                        sys.exit(6)
-            sys.exit(0)
+                        finish(6, hud)
+            finish(0, hud)
             """
         )
         environment = os.environ.copy()
