@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 
 Item {
     id: root
@@ -14,10 +15,54 @@ Item {
     property var pendingSensitiveChange: null
     property string saveError: ""
     property int rejectedChangeGeneration: 0
+    property int focusScrollGeneration: 0
     readonly property int visibleResultCount: resultCount()
 
     function focusHeading() {
         pageHeading.forceActiveFocus(Qt.OtherFocusReason)
+    }
+
+    function isPageDescendant(item) {
+        var current = item
+        while (current !== null && current !== undefined) {
+            if (current === root) return true
+            current = current.parent
+        }
+        return false
+    }
+
+    function ensureFocusedItemVisible(item) {
+        if (!isPageDescendant(item)) return
+        var viewport = scroll.contentItem
+        if (viewport === null || viewport === undefined
+                || viewport.contentY === undefined) return
+        var mapped = item.mapToItem(viewport, 0, 0)
+        var margin = root.tokens.space12
+        var top = Number(mapped.y)
+        var bottom = top + Number(item.height)
+        var viewportHeight = Number(viewport.height)
+        var originY = Number(viewport.originY || 0)
+        var contentHeight = Math.max(viewportHeight, Number(viewport.contentHeight || 0))
+        var maximumY = originY + Math.max(0, contentHeight - viewportHeight)
+        var nextY = Number(viewport.contentY)
+        if (top < margin)
+            nextY += top - margin
+        else if (bottom > viewportHeight - margin)
+            nextY += bottom - viewportHeight + margin
+        viewport.contentY = Math.max(originY, Math.min(maximumY, nextY))
+    }
+
+    function queueFocusedItemVisibility(item) {
+        focusScrollGeneration += 1
+        var generation = focusScrollGeneration
+        Qt.callLater(function() {
+            if (generation !== root.focusScrollGeneration) return
+            root.ensureFocusedItemVisible(item)
+            Qt.callLater(function() {
+                if (generation === root.focusScrollGeneration)
+                    root.ensureFocusedItemVisible(item)
+            })
+        })
     }
 
     readonly property var categories: [
@@ -32,7 +77,8 @@ Item {
         qsTr("Advanced")
     ]
 
-    readonly property var rows: [
+    readonly property var rows: root.baseRows.concat(root.perAppRows())
+    readonly property var baseRows: [
         { category: qsTr("Dictation"), label: qsTr("Shortcut"), description: qsTr("Hold or press this shortcut to dictate. Capture has no timeout; Escape cancels."), keywords: "hotkey key", path: "hotkey", type: "hotkey", fallback: "right ctrl" },
         { category: qsTr("Dictation"), label: qsTr("Shortcut behavior"), description: qsTr("Hold records until release. Toggle uses one press to start and another to stop."), keywords: "hold toggle", path: "toggle_mode", type: "combo", options: [qsTr("Hold to speak"), qsTr("Press to start and stop")], values: [false, true], fallback: false },
         { category: qsTr("Dictation"), label: qsTr("Spoken layout commands"), description: qsTr("Recognize phrases such as new line, new paragraph, and bullet point."), keywords: "voice commands layout", path: "voice_commands", type: "switch", fallback: true },
@@ -54,7 +100,7 @@ Item {
         { category: qsTr("Text Cleanup"), advanced: true, label: qsTr("Start local Ollama automatically"), description: qsTr("Start the user's local Ollama process when cleanup needs it."), keywords: "serve model", path: "formatting.autostart_ollama", type: "switch", fallback: true },
         { category: qsTr("Text Cleanup"), advanced: true, label: qsTr("Local Ollama model"), description: qsTr("Exact local model name used for optional cleanup."), keywords: "llama", path: "formatting.ollama_model", type: "text", fallback: "llama3.1:8b" },
 
-        { category: qsTr("Per-App Behavior"), advanced: true, label: qsTr("Per-app tones and exclusions"), description: qsTr("Open the local configuration file to manage exact application names and casual, formal, neutral, or literal behavior."), keywords: "per-app tone excluded-app values apps exclusions literal", path: "", type: "action", actionText: qsTr("Open local config"), actionKind: "config" },
+        { category: qsTr("Per-App Behavior"), label: qsTr("Manage per-app behavior"), description: qsTr("Open the local configuration file to add, remove, or change exact application behavior values."), keywords: "per-app manage config application", path: "__per_app_config", type: "action", actionText: qsTr("Open local config"), actionKind: "config" },
 
         { category: qsTr("Privacy"), label: qsTr("Keep microphone ready"), description: qsTr("Keep the local microphone stream open for lower latency. Turning Dictation off always closes it."), keywords: "stream mic indicator", path: "keep_mic_stream_open", type: "switch", fallback: true },
         { category: qsTr("Privacy"), label: qsTr("Rolling RAM audio"), description: qsTr("Seconds held only in RAM and continuously replaced so the first word is not clipped."), keywords: "preroll memory audio", path: "preroll_seconds", type: "number", fallback: 0.4 },
@@ -85,7 +131,7 @@ Item {
         { category: qsTr("Advanced"), label: qsTr("Local Ollama address"), description: qsTr("Loopback address for the user's local Ollama process. Remote addresses are rejected."), keywords: "url 127 localhost", path: "formatting.ollama_url", type: "text", fallback: "http://127.0.0.1:11434" },
         { category: qsTr("Advanced"), label: qsTr("Ollama timeout"), description: qsTr("Seconds before optional local cleanup falls back to basic cleanup."), keywords: "fallback", path: "formatting.timeout_seconds", type: "number", fallback: 15 },
         { category: qsTr("Advanced"), label: qsTr("Ollama keep-alive"), description: qsTr("How long the local model remains loaded after dictation."), keywords: "memory vram", path: "formatting.keep_alive", type: "text", fallback: "10m" },
-        { category: qsTr("Advanced"), label: qsTr("Raw configuration"), description: qsTr("Open the local configuration file for exact values not shown here."), keywords: "json expert", path: "", type: "action", actionText: qsTr("Open local config"), actionKind: "config" }
+        { category: qsTr("Advanced"), label: qsTr("Raw configuration"), description: qsTr("Open the local configuration file for exact values not shown here."), keywords: "json expert", path: "__raw_config", type: "action", actionText: qsTr("Open local config"), actionKind: "config" }
     ]
 
     function setting(path, fallbackValue) {
@@ -99,6 +145,67 @@ Item {
             source = source[parts[i]]
         }
         return source === undefined ? fallbackValue : source
+    }
+
+    function perAppRows() {
+        var result = []
+        var tones = setting("app_tones", ({})) || ({})
+        var toneApps = []
+        for (var appName in tones) {
+            if (tones.hasOwnProperty === undefined || tones.hasOwnProperty(appName))
+                toneApps.push(String(appName))
+        }
+        toneApps.sort()
+        if (toneApps.length === 0) {
+            result.push({
+                category: qsTr("Per-App Behavior"), advanced: true,
+                label: qsTr("Per-app tones"),
+                description: qsTr("No per-app tones are configured."),
+                keywords: "per-app tone configured values none",
+                path: "__app_tones_empty", type: "readonly", fallback: ""
+            })
+        } else {
+            for (var toneIndex = 0; toneIndex < toneApps.length; ++toneIndex) {
+                var toneApp = toneApps[toneIndex]
+                var tone = String(tones[toneApp])
+                result.push({
+                    category: qsTr("Per-App Behavior"), advanced: true,
+                    label: qsTr("Tone for %1").arg(toneApp),
+                    description: qsTr("%1 uses the configured %2 tone. This exact value stays in your local configuration file.").arg(toneApp).arg(tone),
+                    keywords: "per-app tone configured exact application " + toneApp + " " + tone,
+                    path: "__app_tone_" + toneIndex, type: "readonly", fallback: ""
+                })
+            }
+        }
+
+        var exclusions = setting("hotkey_exclude_apps", []) || []
+        var excludedApps = []
+        if (exclusions.length !== undefined) {
+            for (var exclusionIndex = 0; exclusionIndex < exclusions.length; ++exclusionIndex)
+                excludedApps.push(String(exclusions[exclusionIndex]))
+        }
+        excludedApps.sort()
+        if (excludedApps.length === 0) {
+            result.push({
+                category: qsTr("Per-App Behavior"), advanced: true,
+                label: qsTr("Shortcut exclusions"),
+                description: qsTr("No applications are excluded from the Speakr shortcut."),
+                keywords: "excluded-app shortcut exclusions configured values none",
+                path: "__excluded_apps_empty", type: "readonly", fallback: ""
+            })
+        } else {
+            for (var excludedIndex = 0; excludedIndex < excludedApps.length; ++excludedIndex) {
+                var excludedApp = excludedApps[excludedIndex]
+                result.push({
+                    category: qsTr("Per-App Behavior"), advanced: true,
+                    label: qsTr("Shortcut exclusion for %1").arg(excludedApp),
+                    description: qsTr("The Speakr shortcut is disabled while %1 is active. This exact value stays in your local configuration file.").arg(excludedApp),
+                    keywords: "excluded-app shortcut exclusion configured exact application " + excludedApp,
+                    path: "__excluded_app_" + excludedIndex, type: "readonly", fallback: ""
+                })
+            }
+        }
+        return result
     }
 
     function matches(row) {
@@ -171,24 +278,6 @@ Item {
         return qsTr("%1 matches for %2 in %3").arg(resultCount()).arg(query).arg(category)
     }
 
-    function toneSummary() {
-        var source = setting("app_tones", ({})) || ({})
-        var entries = []
-        for (var key in source) {
-            if (source.hasOwnProperty === undefined || source.hasOwnProperty(key))
-                entries.push(String(key) + ": " + String(source[key]))
-        }
-        entries.sort()
-        return entries.length > 0 ? entries.join("  •  ") : qsTr("None configured")
-    }
-
-    function excludedAppsSummary() {
-        var source = setting("hotkey_exclude_apps", []) || []
-        if (source.length !== undefined)
-            return source.length > 0 ? Array.prototype.join.call(source, ", ") : qsTr("None configured")
-        return String(source)
-    }
-
     function genericSaveError() {
         return qsTr("That setting could not be saved. The previous value is still active.")
     }
@@ -204,28 +293,31 @@ Item {
         return ""
     }
 
-    function rejectedSettingExplanation(previousStateVersion) {
-        var currentStateVersion = Number(appState.version || 0)
-        if (currentStateVersion <= previousStateVersion)
-            return genericSaveError()
+    function rejectedSettingExplanation() {
         var busyExplanation = busySettingExplanation()
         return busyExplanation.length > 0 ? busyExplanation : genericSaveError()
     }
 
-    function refreshRejectedSettingExplanation(generation, previousStateVersion) {
+    function refreshRejectedSettingExplanation(generation) {
         if (generation === rejectedChangeGeneration && lastChange === null)
-            saveError = rejectedSettingExplanation(previousStateVersion)
+            saveError = rejectedSettingExplanation()
+    }
+
+    function dismissOwnedBusyIssue() {
+        var busyExplanation = busySettingExplanation()
+        if (busyExplanation.length > 0 && saveError === busyExplanation)
+            bridge.dismissIssue()
     }
 
     function commitChange(path, value, previousValue) {
-        var stateVersion = Number(appState.version || 0)
+        dismissOwnedBusyIssue()
         if (!Boolean(bridge.setSetting(path, value))) {
             rejectedChangeGeneration += 1
             var generation = rejectedChangeGeneration
-            saveError = rejectedSettingExplanation(stateVersion)
+            saveError = genericSaveError()
             lastChange = null
             Qt.callLater(function() {
-                root.refreshRejectedSettingExplanation(generation, stateVersion)
+                root.refreshRejectedSettingExplanation(generation)
             })
             return false
         }
@@ -242,6 +334,33 @@ Item {
             return
         }
         commitChange(path, value, previousValue)
+    }
+
+    Connections {
+        target: root.Window.window
+
+        function onActiveFocusItemChanged() {
+            if (target !== null && target !== undefined)
+                root.queueFocusedItemVisibility(target.activeFocusItem)
+        }
+    }
+
+    Connections {
+        target: scroll.contentItem
+
+        function onContentHeightChanged() {
+            var window = root.Window.window
+            if (window !== null && window !== undefined
+                    && root.isPageDescendant(window.activeFocusItem))
+                root.queueFocusedItemVisibility(window.activeFocusItem)
+        }
+
+        function onHeightChanged() {
+            var window = root.Window.window
+            if (window !== null && window !== undefined
+                    && root.isPageDescendant(window.activeFocusItem))
+                root.queueFocusedItemVisibility(window.activeFocusItem)
+        }
     }
 
     ScrollView {
@@ -484,7 +603,7 @@ Item {
 
                         delegate: SettingRow {
                             required property var modelData
-                            readonly property string resolvedDescription: modelData.type === "readonly"
+                            readonly property string resolvedDescription: modelData.path === "__effective_appearance"
                                                                          ? root.effectiveAppearanceSummary()
                                                                          : modelData.description
                             objectName: "settingRow_" + modelData.path
@@ -553,59 +672,6 @@ Item {
                                 font.family: root.tokens.fontFamily
                                 font.pixelSize: root.tokens.secondary
                                 wrapMode: Text.Wrap
-                            }
-                        }
-                    }
-
-                    GlassSurface {
-                        width: parent.width
-                        visible: root.selectedCategory === qsTr("Advanced")
-                                 && searchField.text.trim().length === 0
-                        role: "notice"
-                        padding: root.tokens.space16
-                        elevated: false
-                        tokens: root.tokens
-                        implicitHeight: localValues.implicitHeight + padding * 2
-                        Accessible.role: Accessible.Grouping
-                        Accessible.name: qsTr("Exact per-app values")
-
-                        Column {
-                            id: localValues
-                            anchors.fill: parent
-                            spacing: root.tokens.space8
-
-                            SectionHeading {
-                                width: parent.width
-                                tokens: root.tokens
-                                title: qsTr("Exact per-app values")
-                                description: qsTr("These values stay in your local configuration file.")
-                            }
-
-                            PlainText {
-                                width: parent.width
-                                text: qsTr("Tones: %1").arg(root.toneSummary())
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.secondary
-                                wrapMode: Text.Wrap
-                                Accessible.name: text
-                            }
-
-                            PlainText {
-                                width: parent.width
-                                text: qsTr("Shortcut exclusions: %1").arg(root.excludedAppsSummary())
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.secondary
-                                wrapMode: Text.Wrap
-                                Accessible.name: text
-                            }
-
-                            QuietButton {
-                                tokens: root.tokens
-                                text: qsTr("Open local config")
-                                accessibleDescription: qsTr("Open the exact local per-app tone and shortcut exclusion values")
-                                onClicked: bridge.openLocal("config")
                             }
                         }
                     }

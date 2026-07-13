@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from PySide6.QtCore import (
     Q_RETURN_ARG,
     QMetaObject,
     QObject,
+    QPointF,
     Property,
     QUrl,
     Qt,
@@ -21,6 +24,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from speakr.interface_state import InterfaceState
@@ -66,8 +70,11 @@ class _App:
             "toggle_mode": False,
             "sample_rate": 16000,
             "active_sample_rate": 16000,
-            "app_tones": {},
-            "hotkey_exclude_apps": [],
+            "app_tones": {
+                "Acme.exe": "formal",
+                "Writer.exe": "literal",
+            },
+            "hotkey_exclude_apps": ["Game.exe"],
         }
 
     @staticmethod
@@ -265,6 +272,54 @@ class SettingsHelpQmlTests(unittest.TestCase):
         for _ in range(4):
             self.qapp.processEvents()
 
+    def _render_qml(self, main, cycles=1):
+        for _ in range(cycles):
+            main.requestUpdate()
+            QTest.qWait(25)
+            main.grabWindow()
+            self.qapp.processEvents()
+
+    @staticmethod
+    def _has_ancestor(item, object_name):
+        current = item
+        while current is not None:
+            if current.objectName() == object_name:
+                return True
+            current = current.parentItem()
+        return False
+
+    @classmethod
+    def _find_visual_child(cls, item, object_name):
+        for child in item.childItems():
+            if child.objectName() == object_name:
+                return child
+            match = cls._find_visual_child(child, object_name)
+            if match is not None:
+                return match
+        return None
+
+    def _assert_item_inside_scroll_view(
+        self,
+        item,
+        scroll,
+        scale,
+        target,
+        *,
+        expect_scrolled=True,
+    ):
+        viewport = scroll.property("contentItem")
+        position = item.mapToItem(viewport, QPointF(0, 0))
+        top = position.y()
+        bottom = top + item.height()
+        self.assertGreaterEqual(top, -1, (scale, target, top, bottom))
+        self.assertLessEqual(
+            bottom,
+            viewport.height() + 1,
+            (scale, target, top, bottom, viewport.height()),
+        )
+        if expect_scrolled:
+            self.assertGreater(viewport.property("contentY"), 0, (scale, target))
+
     @staticmethod
     def _invoke_qml(target, method, *arguments):
         qml_arguments = [Q_ARG("QVariant", argument) for argument in arguments]
@@ -274,6 +329,118 @@ class SettingsHelpQmlTests(unittest.TestCase):
             Qt.ConnectionType.DirectConnection,
             Q_RETURN_ARG("QVariant"),
             *qml_arguments,
+        )
+
+    def _exercise_focus_visibility(self):
+        for scale in (100, 150, 200):
+            with self.subTest(scale=scale):
+                app, bridge, native, engine, main, warnings = self._load_main(scale)
+                self.assertIsNotNone(app)
+                self.assertIsNotNone(native)
+                try:
+                    main.setProperty("currentPage", "settings")
+                    settings = main.findChild(QObject, "settingsPage")
+                    search = main.findChild(QObject, "settingsSearchField")
+                    settings_scroll = main.findChild(QObject, "settingsScroll")
+                    self.assertIsNotNone(settings)
+                    self.assertIsNotNone(search)
+                    self.assertIsNotNone(settings_scroll)
+                    settings.setProperty("selectedCategory", "Advanced")
+                    self._render_qml(main, 3)
+                    search.forceActiveFocus(Qt.FocusReason.TabFocusReason)
+                    self._render_qml(main)
+
+                    focused = main.activeFocusItem()
+                    for _ in range(48):
+                        if self._has_ancestor(focused, "settingRow___raw_config"):
+                            break
+                        if self._has_ancestor(focused, "settingsPage"):
+                            self._assert_item_inside_scroll_view(
+                                focused,
+                                settings_scroll,
+                                scale,
+                                "Settings Tab sequence",
+                                expect_scrolled=False,
+                            )
+                        QTest.keyClick(main, Qt.Key.Key_Tab)
+                        self._render_qml(main)
+                        focused = main.activeFocusItem()
+                    self.assertTrue(
+                        self._has_ancestor(focused, "settingRow___raw_config"),
+                        (scale, focused.objectName() if focused is not None else None),
+                    )
+                    self._assert_item_inside_scroll_view(
+                        focused,
+                        settings_scroll,
+                        scale,
+                        "Settings raw configuration",
+                    )
+
+                    main.setProperty("currentPage", "help")
+                    self._render_qml(main, 3)
+                    help_page = main.findChild(QObject, "helpPage")
+                    help_scroll = main.findChild(QObject, "helpScroll")
+                    self.assertIsNotNone(help_page)
+                    self.assertIsNotNone(help_scroll)
+                    QMetaObject.invokeMethod(
+                        help_page,
+                        "requestReset",
+                        Qt.ConnectionType.DirectConnection,
+                        Q_ARG("QVariant", "privacy"),
+                    )
+                    self._render_qml(main, 6)
+                    focused = main.activeFocusItem()
+                    self.assertEqual(focused.objectName(), "resetCancelButton")
+                    self._assert_item_inside_scroll_view(
+                        focused,
+                        help_scroll,
+                        scale,
+                        "Help reset Cancel",
+                    )
+                    self.assertEqual(warnings, [])
+                finally:
+                    bridge.close()
+                    engine.deleteLater()
+                    self.qapp.processEvents()
+
+    def test_focus_targets_remain_visible_at_supported_text_scales(self):
+        self._exercise_focus_visibility()
+
+    def test_windows_qpa_keeps_keyboard_and_reset_focus_visible(self):
+        child_flag = "SPEAKR_WINDOWS_FOCUS_TEST_CHILD"
+        if os.environ.get(child_flag) == "1":
+            self.assertEqual(os.environ.get("QT_QPA_PLATFORM"), "windows")
+            self.assertEqual(self.qapp.platformName(), "windows")
+            self._exercise_focus_visibility()
+            return
+        if sys.platform != "win32":
+            self.skipTest("Windows QPA verification runs on Windows")
+        environment = os.environ.copy()
+        environment[child_flag] = "1"
+        environment["QT_QPA_PLATFORM"] = "windows"
+        environment["QT_QUICK_BACKEND"] = "software"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "unittest",
+                (
+                    "tests.test_settings_help_qml.SettingsHelpQmlTests."
+                    "test_windows_qpa_keeps_keyboard_and_reset_focus_visible"
+                ),
+                "-v",
+            ],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            "\n".join((completed.stdout, completed.stderr)),
         )
 
     def test_visual_effects_search_and_effective_material_are_truthful(self):
@@ -357,10 +524,19 @@ class SettingsHelpQmlTests(unittest.TestCase):
                 if row.get("category") == "Advanced" or row.get("advanced") is True
             ]
             self.assertTrue(required_paths.issubset({row.get("path") for row in advanced_rows}))
-            self.assertIn(
-                "Per-app tones and exclusions",
-                {row.get("label") for row in advanced_rows},
+            tone_row = next(
+                row for row in advanced_rows if row.get("label") == "Tone for Acme.exe"
             )
+            exclusion_row = next(
+                row
+                for row in advanced_rows
+                if row.get("label") == "Shortcut exclusion for Game.exe"
+            )
+            self.assertIn("formal", tone_row.get("description"))
+            self.assertIn("Acme.exe", tone_row.get("description"))
+            self.assertIn("Game.exe", exclusion_row.get("description"))
+            self.assertEqual(tone_row.get("type"), "readonly")
+            self.assertEqual(exclusion_row.get("type"), "readonly")
 
             settings.setProperty("selectedCategory", "Advanced")
             queries = (
@@ -381,7 +557,11 @@ class SettingsHelpQmlTests(unittest.TestCase):
                 "Local Ollama address",
                 "Ollama timeout",
                 "Ollama keep-alive",
-                "Per-app tones and exclusions",
+                "Acme.exe",
+                "formal",
+                "Writer.exe",
+                "literal",
+                "Game.exe",
             )
             for query in queries:
                 with self.subTest(query=query):
@@ -390,10 +570,32 @@ class SettingsHelpQmlTests(unittest.TestCase):
                     self.assertGreater(settings.property("visibleResultCount"), 0)
                     self.assertIn("Advanced", summary.property("text"))
 
+            search.setProperty("text", "Acme.exe")
+            self._render_qml(main, 2)
+            rows_list = main.findChild(QObject, "settingsRowsRepeater")
+            tone_delegate = self._find_visual_child(
+                rows_list,
+                "settingRow___app_tone_0",
+            )
+            self.assertIsNotNone(tone_delegate)
+            self.assertTrue(tone_delegate.property("visible"))
+            self.assertIn("formal", tone_delegate.property("description"))
+            search.setProperty("text", "Game.exe")
+            self._render_qml(main, 2)
+            exclusion_delegate = self._find_visual_child(
+                rows_list,
+                "settingRow___excluded_app_0",
+            )
+            self.assertIsNotNone(exclusion_delegate)
+            self.assertTrue(exclusion_delegate.property("visible"))
+            self.assertIn("Game.exe", exclusion_delegate.property("description"))
+
             settings.setProperty("selectedCategory", "All")
-            search.setProperty("text", "Speech model")
-            self.qapp.processEvents()
-            self.assertEqual(settings.property("visibleResultCount"), 1)
+            for query in ("Speech model", "Acme.exe", "formal", "Game.exe"):
+                with self.subTest(unique_query=query):
+                    search.setProperty("text", query)
+                    self.qapp.processEvents()
+                    self.assertEqual(settings.property("visibleResultCount"), 1)
             self.assertEqual(warnings, [])
         finally:
             bridge.close()
@@ -413,6 +615,17 @@ class SettingsHelpQmlTests(unittest.TestCase):
             result = self._invoke_qml(settings, "commitChange", "toggle_mode", True, False)
             self.assertFalse(result)
             self._process_queued_qml()
+            self.assertEqual(app.setting_attempts[-1], ("toggle_mode", True))
+            self.assertEqual(
+                settings.property("saveError"),
+                "Wait for the current dictation to finish before changing this setting.",
+            )
+
+            first_busy_version = app.interface_state.snapshot()["version"]
+            result = self._invoke_qml(settings, "commitChange", "toggle_mode", True, False)
+            self.assertFalse(result)
+            self._process_queued_qml()
+            self.assertGreater(app.interface_state.snapshot()["version"], first_busy_version)
             self.assertEqual(app.setting_attempts[-1], ("toggle_mode", True))
             self.assertEqual(
                 settings.property("saveError"),
@@ -480,6 +693,27 @@ class SettingsHelpQmlTests(unittest.TestCase):
             self.assertEqual(help_page.property("resetError"), busy_message)
             self.assertEqual(confirmation.property("detail"), busy_message)
             self.assertTrue(confirmation.property("visible"))
+
+            first_busy_version = app.interface_state.snapshot()["version"]
+            result = self._invoke_qml(help_page, "confirmReset")
+            self.assertFalse(result)
+            self._process_queued_qml()
+            self.assertGreater(app.interface_state.snapshot()["version"], first_busy_version)
+            self.assertEqual(app.reset_attempts[-1], "privacy")
+            self.assertEqual(help_page.property("pendingResetSection"), "privacy")
+            self.assertEqual(help_page.property("resetError"), busy_message)
+            self.assertEqual(confirmation.property("detail"), busy_message)
+
+            app.reset_rejection = "save"
+            result = self._invoke_qml(help_page, "confirmReset")
+            self.assertFalse(result)
+            self._process_queued_qml()
+            generic_message = (
+                "Those defaults could not be restored. Your current settings are unchanged."
+            )
+            self.assertEqual(help_page.property("pendingResetSection"), "privacy")
+            self.assertEqual(help_page.property("resetError"), generic_message)
+            self.assertEqual(confirmation.property("detail"), generic_message)
 
             app.reset_rejection = ""
             result = self._invoke_qml(help_page, "confirmReset")
@@ -594,6 +828,7 @@ class SettingsHelpQmlTests(unittest.TestCase):
         self.assertNotIn("https://", combined)
         self.assertNotIn("ShaderEffect", combined)
         self.assertNotIn("Animation.Infinite", combined)
+        self.assertNotIn("Exact per-app values", settings)
         self.assertNotRegex(combined, r"\bText\s*\{")
         self.assertNotRegex(combined, r"\bTextArea\s*\{")
 

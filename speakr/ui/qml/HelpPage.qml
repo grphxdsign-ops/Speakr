@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 
 Item {
     id: root
@@ -12,10 +13,54 @@ Item {
     property string pendingResetSection: ""
     property string resetError: ""
     property int rejectedResetGeneration: 0
+    property int focusScrollGeneration: 0
     signal repeatSetupRequested()
 
     function focusHeading() {
         pageHeading.forceActiveFocus(Qt.OtherFocusReason)
+    }
+
+    function isPageDescendant(item) {
+        var current = item
+        while (current !== null && current !== undefined) {
+            if (current === root) return true
+            current = current.parent
+        }
+        return false
+    }
+
+    function ensureFocusedItemVisible(item) {
+        if (!isPageDescendant(item)) return
+        var viewport = scroll.contentItem
+        if (viewport === null || viewport === undefined
+                || viewport.contentY === undefined) return
+        var mapped = item.mapToItem(viewport, 0, 0)
+        var margin = root.tokens.space12
+        var top = Number(mapped.y)
+        var bottom = top + Number(item.height)
+        var viewportHeight = Number(viewport.height)
+        var originY = Number(viewport.originY || 0)
+        var contentHeight = Math.max(viewportHeight, Number(viewport.contentHeight || 0))
+        var maximumY = originY + Math.max(0, contentHeight - viewportHeight)
+        var nextY = Number(viewport.contentY)
+        if (top < margin)
+            nextY += top - margin
+        else if (bottom > viewportHeight - margin)
+            nextY += bottom - viewportHeight + margin
+        viewport.contentY = Math.max(originY, Math.min(maximumY, nextY))
+    }
+
+    function queueFocusedItemVisibility(item) {
+        focusScrollGeneration += 1
+        var generation = focusScrollGeneration
+        Qt.callLater(function() {
+            if (generation !== root.focusScrollGeneration) return
+            root.ensureFocusedItemVisible(item)
+            Qt.callLater(function() {
+                if (generation === root.focusScrollGeneration)
+                    root.ensureFocusedItemVisible(item)
+            })
+        })
     }
 
     function value(source, key, fallbackValue) {
@@ -66,7 +111,10 @@ Item {
         rejectedResetGeneration += 1
         pendingResetSection = section
         resetError = ""
-        Qt.callLater(function() { resetCancel.forceActiveFocus(Qt.TabFocusReason) })
+        Qt.callLater(function() {
+            resetCancel.forceActiveFocus(Qt.TabFocusReason)
+            root.queueFocusedItemVisibility(resetCancel)
+        })
     }
 
     function genericResetError() {
@@ -79,25 +127,28 @@ Item {
         if (issue !== null && issue !== undefined) {
             var code = String(issue.code || "")
             var message = String(issue.message || "").trim()
-            if ((code === "busy_setting" || code === "setting_save_failed")
+            if (code === "busy_setting"
                     && message.length > 0)
                 return message
         }
         return ""
     }
 
-    function rejectedResetExplanation(previousStateVersion) {
-        var currentStateVersion = Number(appState.version || 0)
-        if (currentStateVersion <= previousStateVersion)
-            return genericResetError()
+    function rejectedResetExplanation() {
         var issueExplanation = resetIssueExplanation()
         return issueExplanation.length > 0 ? issueExplanation : genericResetError()
     }
 
-    function refreshRejectedResetExplanation(generation, previousStateVersion) {
+    function refreshRejectedResetExplanation(generation) {
         if (generation === rejectedResetGeneration
                 && pendingResetSection.length > 0)
-            resetError = rejectedResetExplanation(previousStateVersion)
+            resetError = rejectedResetExplanation()
+    }
+
+    function dismissOwnedBusyIssue() {
+        var busyExplanation = resetIssueExplanation()
+        if (busyExplanation.length > 0 && resetError === busyExplanation)
+            bridge.dismissIssue()
     }
 
     function cancelReset() {
@@ -109,7 +160,7 @@ Item {
     function confirmReset() {
         var section = pendingResetSection
         if (section.length === 0) return false
-        var stateVersion = Number(appState.version || 0)
+        dismissOwnedBusyIssue()
         var succeeded = section === "interface" ? resetInterface()
                       : (section === "privacy" ? resetPrivacy() : false)
         if (succeeded) {
@@ -120,9 +171,9 @@ Item {
         }
         rejectedResetGeneration += 1
         var generation = rejectedResetGeneration
-        resetError = rejectedResetExplanation(stateVersion)
+        resetError = genericResetError()
         Qt.callLater(function() {
-            root.refreshRejectedResetExplanation(generation, stateVersion)
+            root.refreshRejectedResetExplanation(generation)
         })
         return false
     }
@@ -146,6 +197,33 @@ Item {
         return active === configured
                 ? qsTr("%1 Hz").arg(active)
                 : qsTr("%1 Hz; restart to use %2 Hz").arg(active).arg(configured)
+    }
+
+    Connections {
+        target: root.Window.window
+
+        function onActiveFocusItemChanged() {
+            if (target !== null && target !== undefined)
+                root.queueFocusedItemVisibility(target.activeFocusItem)
+        }
+    }
+
+    Connections {
+        target: scroll.contentItem
+
+        function onContentHeightChanged() {
+            var window = root.Window.window
+            if (window !== null && window !== undefined
+                    && root.isPageDescendant(window.activeFocusItem))
+                root.queueFocusedItemVisibility(window.activeFocusItem)
+        }
+
+        function onHeightChanged() {
+            var window = root.Window.window
+            if (window !== null && window !== undefined
+                    && root.isPageDescendant(window.activeFocusItem))
+                root.queueFocusedItemVisibility(window.activeFocusItem)
+        }
     }
 
     ScrollView {
@@ -481,6 +559,7 @@ Item {
 
                         QuietButton {
                             id: resetCancel
+                            objectName: "resetCancelButton"
                             tokens: root.tokens
                             text: qsTr("Cancel")
                             kind: "primary"
@@ -489,6 +568,7 @@ Item {
                         }
 
                         QuietButton {
+                            objectName: "resetConfirmButton"
                             tokens: root.tokens
                             text: qsTr("Restore defaults")
                             kind: "danger"
