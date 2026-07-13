@@ -4,11 +4,12 @@ import queue
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
 
-from speakr.app import SpeakrApp
+from speakr.app import SpeakrApp, _migrate_existing_user_interface
 from speakr.interface_state import InterfaceState
 
 
@@ -38,6 +39,23 @@ class _Session:
 
 
 class AppLifecycleTests(unittest.TestCase):
+    def test_read_only_existing_user_config_keeps_in_memory_migration(self):
+        config = SimpleNamespace(
+            data={"ui": {"onboarding_complete": False}},
+            set=mock.Mock(side_effect=PermissionError("read only")),
+        )
+        logger = mock.Mock()
+
+        _migrate_existing_user_interface(
+            config,
+            logger,
+            config_existed=True,
+            had_ui_settings=False,
+        )
+
+        self.assertTrue(config.data["ui"]["onboarding_complete"])
+        logger.warning.assert_called_once()
+
     def test_successful_normal_recording_clears_both_microphone_issues(self):
         app = SpeakrApp.__new__(SpeakrApp)
         app.enabled = True

@@ -229,7 +229,7 @@ ApplicationWindow {
                     }
                 }
 
-                Text {
+                PlainText {
                     text: qsTr("Speakr")
                     color: tokens.text
                     font.family: tokens.fontFamily
@@ -256,7 +256,7 @@ ApplicationWindow {
                     color: tokens.success
                 }
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     text: qsTr("Everything stays on this device")
                     color: tokens.text
@@ -392,7 +392,7 @@ ApplicationWindow {
             anchors.centerIn: parent
             spacing: tokens.space12
 
-            Text {
+            PlainText {
                 Layout.alignment: Qt.AlignHCenter
                 text: qsTr("Closing local services")
                 color: tokens.text
@@ -401,7 +401,7 @@ ApplicationWindow {
                 font.weight: Font.DemiBold
             }
 
-            Text {
+            PlainText {
                 Layout.alignment: Qt.AlignHCenter
                 text: qsTr("Audio buffers and temporary Practice text are being cleared.")
                 color: tokens.mutedText

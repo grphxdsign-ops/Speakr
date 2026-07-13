@@ -10,7 +10,7 @@ QuietButton {
     Accessible.role: Accessible.PageTab
     Accessible.selected: selected
 
-    contentItem: Text {
+    contentItem: PlainText {
         text: control.text
         color: control.enabled ? control.tokens.text : control.tokens.disabledText
         font.family: control.tokens.fontFamily

@@ -40,7 +40,7 @@ ColumnLayout {
         }
     }
 
-    Text {
+    PlainText {
         Layout.alignment: Qt.AlignHCenter
         Layout.fillWidth: true
         text: root.label

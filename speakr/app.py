@@ -10,11 +10,13 @@ from __future__ import annotations
 import json
 import os
 import queue
+import socket
 import subprocess
 import sys
 import threading
 import time
 import webbrowser
+from urllib.parse import urlsplit
 
 from speakr import config as cfg_mod
 from speakr.audio import AudioRecorder
@@ -61,6 +63,38 @@ def _level_band(level: float) -> str:
     return "high"
 
 
+def _migrate_existing_user_interface(config, logger, *, config_existed, had_ui_settings):
+    """Keep existing users out of onboarding even if their config is read-only."""
+    if not config_existed or had_ui_settings:
+        return
+    try:
+        config.set("ui", "onboarding_complete", value=True)
+    except OSError as exc:
+        logger.warning(
+            "Could not persist the existing-user interface migration; "
+            "continuing with the in-memory setting: %s",
+            exc,
+        )
+        config.data.setdefault("ui", {})["onboarding_complete"] = True
+
+
+def _open_running_legacy_panel() -> bool:
+    """Open a verified loopback panel owned by a running pre-native release."""
+    try:
+        url = cfg_mod.PANEL_URL_PATH.read_text(encoding="utf-8-sig").strip()
+        parsed = urlsplit(url)
+        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
+            return False
+        port = parsed.port
+        if port is None:
+            return False
+        with socket.create_connection((parsed.hostname, port), timeout=0.25):
+            pass
+        return bool(webbrowser.open(url))
+    except (OSError, UnicodeError, ValueError):
+        return False
+
+
 class SpeakrApp:
     def __init__(self):
         self.log = setup_logging()
@@ -77,8 +111,12 @@ class SpeakrApp:
         self.config = Config()
         # Existing users should not be forced through first-run onboarding.
         # New installs retain the default false value and start at Privacy.
-        if config_existed and not had_ui_settings:
-            self.config.set("ui", "onboarding_complete", value=True)
+        _migrate_existing_user_interface(
+            self.config,
+            self.log,
+            config_existed=config_existed,
+            had_ui_settings=had_ui_settings,
+        )
         self.first_run = not config_existed
 
         self.dictionary = Dictionary(cfg_mod.DICTIONARY_PATH)
@@ -1717,6 +1755,7 @@ def main():
             cfg_mod.SHOW_REQUEST_PATH.write_text(str(time.time_ns()), encoding="utf-8")
         except OSError:
             pass
+        _open_running_legacy_panel()
         return
     # Remove only a stale request left by an earlier crashed/exited primary.
     # This must happen immediately after acquiring the mutex, before QML or

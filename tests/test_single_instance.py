@@ -45,12 +45,41 @@ class SingleInstanceWakeTests(unittest.TestCase):
                 app_module.cfg_mod, "SHOW_REQUEST_PATH", request
             ), mock.patch.object(
                 app_module, "setup_logging", return_value=logger
+            ), mock.patch.object(
+                app_module, "_open_running_legacy_panel", return_value=False
             ), mock.patch.object(app_module, "SpeakrApp") as app_type:
                 app_module.main()
 
             app_type.assert_not_called()
             logger.warning.assert_called_once()
             self.assertTrue(request.read_text(encoding="utf-8").isdigit())
+
+    def test_running_legacy_panel_opens_only_after_loopback_probe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            panel = Path(temporary) / "panel.url"
+            panel.write_text("http://127.0.0.1:43117/", encoding="utf-8")
+            connection = mock.MagicMock()
+            with mock.patch.object(app_module.cfg_mod, "PANEL_URL_PATH", panel), mock.patch.object(
+                app_module.socket, "create_connection", return_value=connection
+            ) as connect, mock.patch.object(
+                app_module.webbrowser, "open", return_value=True
+            ) as open_browser:
+                self.assertTrue(app_module._open_running_legacy_panel())
+
+            connect.assert_called_once_with(("127.0.0.1", 43117), timeout=0.25)
+            open_browser.assert_called_once_with("http://127.0.0.1:43117/")
+
+    def test_running_legacy_panel_rejects_non_loopback_url(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            panel = Path(temporary) / "panel.url"
+            panel.write_text("https://example.invalid/", encoding="utf-8")
+            with mock.patch.object(app_module.cfg_mod, "PANEL_URL_PATH", panel), mock.patch.object(
+                app_module.socket, "create_connection"
+            ) as connect, mock.patch.object(app_module.webbrowser, "open") as open_browser:
+                self.assertFalse(app_module._open_running_legacy_panel())
+
+            connect.assert_not_called()
+            open_browser.assert_not_called()
 
     def test_watcher_observes_request_created_during_startup(self):
         with tempfile.TemporaryDirectory() as temporary:

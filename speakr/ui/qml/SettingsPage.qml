@@ -176,7 +176,7 @@ Item {
                 Layout.rightMargin: root.tokens.space32
                 spacing: root.tokens.space12
 
-                Text {
+                PlainText {
                     id: pageHeading
                     Layout.fillWidth: true
                     text: qsTr("Settings")
@@ -197,7 +197,7 @@ Item {
                     accessibleDescription: qsTr("Search setting labels and descriptions within the selected category")
                 }
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     text: qsTr("%1 settings found").arg(root.resultCount())
                     color: root.tokens.mutedText
@@ -249,7 +249,7 @@ Item {
                     anchors.margins: root.tokens.space8
                     spacing: root.tokens.space12
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("Saved")
                         color: root.tokens.text
@@ -298,7 +298,7 @@ Item {
                     anchors.margins: root.tokens.space12
                     spacing: root.tokens.space8
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("Confirm transcript logging")
                         color: root.tokens.text
@@ -309,7 +309,7 @@ Item {
                         Accessible.role: Accessible.Heading
                     }
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("This writes dictated text to %1 on this device. Practice text is never logged. Turn this on only if you want a persistent local transcript record.")
                               .arg(String(root.setting("log_path", "speakr.log")))
@@ -361,7 +361,7 @@ Item {
                 Accessible.role: Accessible.AlertMessage
                 Accessible.name: root.saveError
 
-                Text {
+                PlainText {
                     id: saveErrorText
                     anchors.left: parent.left
                     anchors.right: parent.right
@@ -434,7 +434,7 @@ Item {
                         anchors.margins: root.tokens.space12
                         spacing: root.tokens.space8
 
-                        Text {
+                        PlainText {
                             Layout.fillWidth: true
                             text: qsTr("Exact per-app values")
                             color: root.tokens.text
@@ -445,7 +445,7 @@ Item {
                             Accessible.role: Accessible.Heading
                         }
 
-                        Text {
+                        PlainText {
                             Layout.fillWidth: true
                             text: qsTr("Tones: %1").arg(root.toneSummary())
                             color: root.tokens.text
@@ -455,7 +455,7 @@ Item {
                             Accessible.name: text
                         }
 
-                        Text {
+                        PlainText {
                             Layout.fillWidth: true
                             text: qsTr("Shortcut exclusions: %1").arg(root.excludedAppsSummary())
                             color: root.tokens.text
@@ -474,7 +474,7 @@ Item {
                     }
                 }
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     Layout.topMargin: root.tokens.space24
                     visible: root.resultCount() === 0

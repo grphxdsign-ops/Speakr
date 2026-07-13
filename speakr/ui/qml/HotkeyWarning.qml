@@ -40,7 +40,7 @@ Rectangle {
         anchors.margins: root.tokens.space8
         spacing: root.tokens.space8
 
-        Text {
+        PlainText {
             text: "!"
             color: root.tokens.warning
             font.family: root.tokens.fontFamily
@@ -49,7 +49,7 @@ Rectangle {
             Accessible.ignored: true
         }
 
-        Text {
+        PlainText {
             id: warningText
             Layout.fillWidth: true
             text: qsTr("This is an ordinary typing or navigation key. Speakr may start while you use it in another app. Confirm only if that is intentional.")

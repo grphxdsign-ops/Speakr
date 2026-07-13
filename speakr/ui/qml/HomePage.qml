@@ -195,7 +195,7 @@ Item {
                 Layout.rightMargin: root.tokens.space32
                 spacing: root.tokens.space16
 
-                Text {
+                PlainText {
                     id: pageHeading
                     Layout.fillWidth: true
                     text: qsTr("Home")
@@ -252,7 +252,7 @@ Item {
                             color: root.statusColor()
                             Accessible.ignored: true
 
-                            Text {
+                            PlainText {
                                 anchors.centerIn: parent
                                 text: root.statusGlyph()
                                 color: root.tokens.highContrast
@@ -268,7 +268,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: root.tokens.space4
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: root.statusText()
                                 color: root.tokens.text
@@ -280,7 +280,7 @@ Item {
                                 Accessible.name: text
                             }
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: root.statusDetail()
                                 color: root.tokens.mutedText
@@ -322,7 +322,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: root.tokens.space8
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: root.setting("toggle_mode", false)
                               ? qsTr("Press %1 to start and stop").arg(root.displayHotkey())
@@ -335,7 +335,7 @@ Item {
                         Accessible.role: Accessible.Heading
                     }
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("Speakr cleans up your words locally and inserts them at the cursor.")
                         color: root.tokens.mutedText
@@ -397,7 +397,7 @@ Item {
                 Layout.rightMargin: root.tokens.space32
                 spacing: 0
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     Layout.bottomMargin: root.tokens.space12
                     text: qsTr("At a glance")
@@ -446,7 +446,7 @@ Item {
                             columnSpacing: root.tokens.space24
                             rowSpacing: root.tokens.space4
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: modelData.label
                                 color: root.tokens.text
@@ -455,7 +455,7 @@ Item {
                                 font.weight: Font.Medium
                             }
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: modelData.value
                                 color: root.tokens.mutedText
@@ -468,7 +468,7 @@ Item {
                 }
             }
 
-            Text {
+            PlainText {
                 Layout.fillWidth: true
                 Layout.leftMargin: root.tokens.space32
                 Layout.rightMargin: root.tokens.space32

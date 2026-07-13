@@ -80,7 +80,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: root.tokens.space4
 
-            Text {
+            PlainText {
                 Layout.fillWidth: true
                 visible: root.showCategory
                 text: root.category
@@ -91,7 +91,7 @@ Rectangle {
                 wrapMode: Text.Wrap
             }
 
-            Text {
+            PlainText {
                 Layout.fillWidth: true
                 text: root.label
                 color: root.tokens.text
@@ -101,7 +101,7 @@ Rectangle {
                 wrapMode: Text.Wrap
             }
 
-            Text {
+            PlainText {
                 Layout.fillWidth: true
                 text: root.description
                 color: root.tokens.mutedText
@@ -200,7 +200,7 @@ Rectangle {
                 visible: root.controlType === "hotkey"
                 spacing: root.tokens.space8
 
-                Text {
+                PlainText {
                     text: root.capturingHotkey
                           ? (root.pendingHotkey.length > 0
                              ? qsTr("Captured: %1").arg(root.pendingHotkey)

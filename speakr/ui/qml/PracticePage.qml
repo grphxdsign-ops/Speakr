@@ -95,7 +95,7 @@ Item {
                 Layout.rightMargin: root.tokens.space32
                 spacing: root.tokens.space8
 
-                Text {
+                PlainText {
                     id: pageHeading
                     Layout.fillWidth: true
                     text: qsTr("Practice")
@@ -107,7 +107,7 @@ Item {
                     Accessible.name: text
                 }
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     text: qsTr("Try a dictation without inserting text anywhere.")
                     color: root.tokens.mutedText
@@ -116,7 +116,7 @@ Item {
                     wrapMode: Text.Wrap
                 }
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     text: qsTr("Not stored by Speakr; clears when you leave Practice.")
                     color: root.tokens.text
@@ -154,7 +154,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: root.tokens.space8
 
-                            Text {
+                            PlainText {
                                 text: root.value(root.practice, "active", false)
                                       ? qsTr("Listening")
                                       : (root.value(root.practice, "busy", false)
@@ -189,7 +189,7 @@ Item {
                                     }
                                 }
 
-                                Text {
+                                PlainText {
                                     text: root.levelLabel()
                                     color: root.tokens.mutedText
                                     font.family: root.tokens.fontFamily
@@ -212,7 +212,7 @@ Item {
                         }
                     }
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         visible: root.value(root.practice, "error", "").length > 0
                         text: root.value(root.practice, "error", "")
@@ -234,7 +234,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: root.tokens.space8
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: qsTr("What Speakr heard")
                                 color: root.tokens.text
@@ -245,7 +245,7 @@ Item {
                                 Accessible.role: Accessible.Heading
                             }
 
-                            TextArea {
+                            PlainTextArea {
                                 id: heardTranscript
                                 Layout.fillWidth: true
                                 Layout.minimumHeight: root.tokens.metric(150)
@@ -280,7 +280,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: root.tokens.space8
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: qsTr("What Speakr would type")
                                 color: root.tokens.text
@@ -291,7 +291,7 @@ Item {
                                 Accessible.role: Accessible.Heading
                             }
 
-                            TextArea {
+                            PlainTextArea {
                                 id: wouldTypeTranscript
                                 Layout.fillWidth: true
                                 Layout.minimumHeight: root.tokens.metric(150)
@@ -369,7 +369,7 @@ Item {
                     Accessible.role: Accessible.AlertMessage
                     Accessible.name: String(root.value(root.vocabularyIssue(), "message", ""))
 
-                    Text {
+                    PlainText {
                         id: practiceVocabularyIssue
                         anchors.left: parent.left
                         anchors.right: parent.right
@@ -388,7 +388,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: root.tokens.space8
 
-                    Text {
+                    PlainText {
                         text: qsTr("Add a word")
                         color: root.tokens.text
                         font.family: root.tokens.fontFamily
@@ -420,7 +420,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: root.tokens.space8
 
-                    Text {
+                    PlainText {
                         text: qsTr("Add a replacement")
                         color: root.tokens.text
                         font.family: root.tokens.fontFamily

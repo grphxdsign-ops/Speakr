@@ -52,7 +52,7 @@ Switch {
         }
     }
 
-    contentItem: Text {
+    contentItem: PlainText {
         id: label
         leftPadding: control.indicator.width + control.spacing
         text: control.text

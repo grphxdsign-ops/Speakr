@@ -130,7 +130,7 @@ Item {
                 Layout.rightMargin: root.tokens.space32
                 spacing: root.tokens.space8
 
-                Text {
+                PlainText {
                     id: pageHeading
                     Layout.fillWidth: true
                     text: qsTr("Vocabulary")
@@ -142,7 +142,7 @@ Item {
                     Accessible.name: text
                 }
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     text: qsTr("Teach Speakr names, specialized words, and exact replacements. Everything stays local.")
                     color: root.tokens.mutedText
@@ -177,7 +177,7 @@ Item {
                     columnSpacing: root.tokens.space16
                     rowSpacing: root.tokens.space8
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: String(root.field(root.issue(), "message", ""))
                         color: root.issueCode() === "busy_setting"
@@ -263,7 +263,7 @@ Item {
                         }
                     }
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         visible: root.manualList(false).length === 0
                         text: qsTr("No manual words yet. Add names or terms that speech models often miss.")
@@ -294,7 +294,7 @@ Item {
                                 anchors.margins: root.tokens.space8
                                 spacing: root.tokens.space12
 
-                                Text {
+                                PlainText {
                                     Layout.fillWidth: true
                                     text: root.wordText(modelData)
                                     color: root.tokens.text
@@ -357,7 +357,7 @@ Item {
                         }
                     }
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         visible: root.manualList(true).length === 0
                         text: qsTr("No replacements yet. Add one when the same phrase needs the same correction every time.")
@@ -392,7 +392,7 @@ Item {
                                     Layout.fillWidth: true
                                     spacing: root.tokens.space4
 
-                                    Text {
+                                    PlainText {
                                         Layout.fillWidth: true
                                         text: qsTr("Heard: %1").arg(String(root.field(modelData, "heard", "")))
                                         color: root.tokens.mutedText
@@ -401,7 +401,7 @@ Item {
                                         wrapMode: Text.Wrap
                                     }
 
-                                    Text {
+                                    PlainText {
                                         Layout.fillWidth: true
                                         text: qsTr("Use: %1").arg(String(root.field(modelData, "intended", "")))
                                         color: root.tokens.text
@@ -433,7 +433,7 @@ Item {
                 ColumnLayout {
                     spacing: root.tokens.space16
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("Learned words are stored only on this device. Approve useful words or forget ones you do not want suggested.")
                         color: root.tokens.mutedText
@@ -442,7 +442,7 @@ Item {
                         wrapMode: Text.Wrap
                     }
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         visible: (root.learnedWords || []).length === 0
                         text: qsTr("No learned words yet. Speakr will suggest recurring uncommon words here when local learning is on.")
@@ -479,7 +479,7 @@ Item {
                                     Layout.fillWidth: true
                                     spacing: root.tokens.space4
 
-                                    Text {
+                                    PlainText {
                                         Layout.fillWidth: true
                                         text: root.wordText(modelData)
                                         color: root.tokens.text
@@ -490,7 +490,7 @@ Item {
                                         Accessible.name: qsTr("Learned word: %1").arg(text)
                                     }
 
-                                    Text {
+                                    PlainText {
                                         Layout.fillWidth: true
                                         text: root.field(modelData, "last_seen", "").length > 0
                                               ? qsTr("Last seen %1").arg(root.field(modelData, "last_seen", ""))
@@ -550,7 +550,7 @@ Item {
                     columnSpacing: root.tokens.space16
                     rowSpacing: root.tokens.space8
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("Expert option: edit the local dictionary file directly. Comments and ordering are preserved.")
                         color: root.tokens.mutedText
@@ -601,7 +601,7 @@ Item {
                              ? qsTr("Confirm forget learned word") : qsTr("Confirm remove vocabulary entry")
             Accessible.description: root.pendingTarget
 
-            Text {
+            PlainText {
                 Layout.fillWidth: true
                 text: root.pendingAction === "learned" ? qsTr("Forget this learned word?")
                                                        : qsTr("Remove this vocabulary entry?")
@@ -613,7 +613,7 @@ Item {
                 Accessible.role: Accessible.Heading
             }
 
-            Text {
+            PlainText {
                 Layout.fillWidth: true
                 text: root.pendingTarget
                 color: root.tokens.text
@@ -624,7 +624,7 @@ Item {
                 Accessible.name: text
             }
 
-            Text {
+            PlainText {
                 Layout.fillWidth: true
                 text: root.pendingAction === "learned"
                       ? qsTr("Speakr will remove its local learning entry.")

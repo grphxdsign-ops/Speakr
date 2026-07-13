@@ -68,7 +68,7 @@ Item {
                 Layout.rightMargin: root.tokens.space32
                 spacing: root.tokens.space8
 
-                Text {
+                PlainText {
                     id: pageHeading
                     Layout.fillWidth: true
                     text: qsTr("Help & diagnostics")
@@ -80,7 +80,7 @@ Item {
                     Accessible.name: text
                 }
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     text: qsTr("Repair local setup, inspect device details, or reopen the guided setup.")
                     color: root.tokens.mutedText
@@ -108,7 +108,7 @@ Item {
                     anchors.margins: root.tokens.space16
                     spacing: root.tokens.space8
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("Everything stays on this device")
                         color: root.tokens.text
@@ -119,7 +119,7 @@ Item {
                         Accessible.role: Accessible.Heading
                     }
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("Speakr does not send audio, transcripts, screen context, learned vocabulary, diagnostics, or usage data away from this computer. The only non-loopback network activity is a one-time local speech-model download.")
                         color: root.tokens.text
@@ -128,7 +128,7 @@ Item {
                         wrapMode: Text.Wrap
                     }
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("Optional Ollama cleanup uses only 127.0.0.1 on your own machine. Basic cleanup works without Ollama.")
                         color: root.tokens.mutedText
@@ -145,7 +145,7 @@ Item {
                 Layout.rightMargin: root.tokens.space32
                 spacing: root.tokens.space12
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     text: qsTr("Repair setup")
                     color: root.tokens.text
@@ -155,7 +155,7 @@ Item {
                     Accessible.role: Accessible.Heading
                 }
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     text: qsTr("If Speakr cannot hear you or insert text, review microphone, Accessibility, Input Monitoring, or automation permissions in system settings.")
                     color: root.tokens.mutedText
@@ -198,7 +198,7 @@ Item {
                 Layout.rightMargin: root.tokens.space32
                 spacing: 0
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     Layout.bottomMargin: root.tokens.space12
                     text: qsTr("Current local setup")
@@ -244,7 +244,7 @@ Item {
                             columnSpacing: root.tokens.space24
                             rowSpacing: root.tokens.space4
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: modelData.label
                                 color: root.tokens.text
@@ -253,7 +253,7 @@ Item {
                                 font.weight: Font.Medium
                             }
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: modelData.value
                                 color: root.tokens.mutedText
@@ -272,7 +272,7 @@ Item {
                 Layout.rightMargin: root.tokens.space32
                 spacing: root.tokens.space12
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     text: qsTr("Local files and fallback")
                     color: root.tokens.text
@@ -322,7 +322,7 @@ Item {
                 Layout.rightMargin: root.tokens.space32
                 spacing: root.tokens.space12
 
-                Text {
+                PlainText {
                     text: qsTr("Restore defaults by section")
                     color: root.tokens.text
                     font.family: root.tokens.fontFamily
@@ -331,7 +331,7 @@ Item {
                     Accessible.role: Accessible.Heading
                 }
 
-                Text {
+                PlainText {
                     Layout.fillWidth: true
                     text: qsTr("These actions keep your vocabulary and speech model files.")
                     color: root.tokens.mutedText

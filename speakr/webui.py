@@ -105,7 +105,7 @@ class WebUI:
     def wait_state(self, after: int, timeout: float = 20.0):
         state = getattr(self.app, "interface_state", None)
         if state is not None and hasattr(state, "wait"):
-            return state.wait(after, timeout)
+            return state.wait(after, timeout) or self.state()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             current = self.state()
@@ -157,7 +157,11 @@ def _make_handler(ui: WebUI):
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Permissions-Policy", "camera=(), geolocation=(), payment=(), usb=()")
+            self.send_header(
+                "Permissions-Policy",
+                "camera=(), microphone=(), geolocation=(), payment=(), usb=(), "
+                "clipboard-read=(), clipboard-write=()",
+            )
             self.send_header(
                 "Content-Security-Policy",
                 "default-src 'none'; "
@@ -343,7 +347,7 @@ function render(){
  var seconds=Number(settings.preroll_seconds||0).toFixed(1);$("prerollText").textContent="Keeps "+seconds+" seconds of rolling audio in RAM and continuously replaces it.";$("micDisclosure").textContent=settings.keep_mic_stream_open?"The microphone connection stays open while Ready. Only "+seconds+" seconds are held in RAM and continuously replaced.":"The microphone opens only when recording starts.";
 }
 function refresh(){return Promise.all([api("/api/state"),api("/api/settings")]).then(function(v){state=v[0];settings=v[1];render();});}
-function wait(){if(stopped)return;var after=Number(state.version||0);api("/api/wait?after="+after).then(function(v){state=v;render();return api("/api/settings");}).then(function(v){settings=v;render();wait();}).catch(function(){setTimeout(wait,1200);});}
+ function wait(){if(stopped)return;var after=Number(state.version||0);api("/api/wait?after="+after).then(function(v){if(v)state=v;render();return api("/api/settings");}).then(function(v){if(v)settings=v;render();wait();}).catch(function(){setTimeout(wait,1200);});}
 document.querySelectorAll(".navbtn").forEach(function(btn){btn.addEventListener("click",function(){document.querySelectorAll(".navbtn").forEach(function(n){n.removeAttribute("aria-current");});btn.setAttribute("aria-current","page");document.querySelectorAll("main section").forEach(function(s){s.hidden=s.id!==btn.dataset.page;});document.querySelector("#"+btn.dataset.page+" h1, #"+btn.dataset.page+" .status h1").focus&&document.querySelector("#"+btn.dataset.page+" h1, #"+btn.dataset.page+" .status h1").focus();});});
 $("toggle").onclick=function(){action("toggle_dictation");};$("captureKey").onclick=function(){action("begin_hotkey_capture");};$("cancelKey").onclick=function(){action("cancel_hotkey_capture");};$("confirmKey").onclick=function(){action("confirm_hotkey");};$("dismissIssue").onclick=function(){action("dismiss_issue");};$("issueAction").onclick=function(){action("open_system_settings");};$("openSettings").onclick=function(){action("open_system_settings");};$("openConfig").onclick=function(){action("open_local",{kind:"config"});};$("openLog").onclick=function(){action("open_local",{kind:"log"});};
 [["keepMic","keep_mic_stream_open"],["screenContext","screen_context.enabled"],["editMode","edit_mode.enabled"],["recentContext","formatting.include_recent_context"],["logTranscripts","log_transcripts"]].forEach(function(pair){$(pair[0]).onchange=function(){if(pair[1]==="log_transcripts"&&this.checked&&!confirm("Dictated text will be written to the local file:\n"+(settings.log_path||"speakr.log")+"\n\nContinue?")){this.checked=false;return;}setSetting(pair[1],this.checked);};});

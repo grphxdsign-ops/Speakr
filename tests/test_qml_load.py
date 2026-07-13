@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import os
+import re
+import threading
+import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -232,6 +236,50 @@ class QmlLoadTests(unittest.TestCase):
         finally:
             bridge.close()
             engine.deleteLater()
+            self.qapp.processEvents()
+
+    def test_all_qml_text_surfaces_are_plain_text_components(self):
+        qml = Path(__file__).resolve().parents[1] / "speakr" / "ui" / "qml"
+        for path in qml.glob("*.qml"):
+            if path.name in {"PlainText.qml", "PlainTextArea.qml"}:
+                continue
+            source = path.read_text(encoding="utf-8")
+            self.assertIsNone(re.search(r"\bText\s*\{", source), path.name)
+            self.assertIsNone(re.search(r"\bTextArea\s*\{", source), path.name)
+
+    def test_hostile_markup_in_plain_text_never_fetches_an_image(self):
+        requested = threading.Event()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requested.set()
+                self.send_response(204)
+                self.end_headers()
+
+            def log_message(self, _format, *_args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        engine = QQmlApplicationEngine()
+        qml = Path(__file__).resolve().parents[1] / "speakr" / "ui" / "qml"
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(qml / "PlainText.qml")))
+        item = component.create()
+        self.assertIsNotNone(item, [error.toString() for error in component.errors()])
+        try:
+            port = server.server_address[1]
+            item.setProperty("text", f'<img src="http://127.0.0.1:{port}/probe.png">')
+            deadline = time.monotonic() + 0.2
+            while time.monotonic() < deadline:
+                self.qapp.processEvents()
+                time.sleep(0.01)
+            self.assertFalse(requested.is_set())
+        finally:
+            item.deleteLater()
+            engine.deleteLater()
+            server.shutdown()
+            server.server_close()
             self.qapp.processEvents()
 
     @staticmethod

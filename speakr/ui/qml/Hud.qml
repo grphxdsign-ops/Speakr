@@ -269,7 +269,7 @@ Window {
                                : (root.value(root.appState, "pipeline", "idle") === "success"
                                   ? tokens.success : tokens.accent)
 
-                        Text {
+                        PlainText {
                             readonly property bool success:
                                 root.value(root.appState, "pipeline", "idle") === "success"
                             anchors.centerIn: parent
@@ -317,7 +317,7 @@ Window {
                     Layout.fillWidth: true
                     spacing: 0
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         Layout.preferredHeight: tokens.metric(root.large ? 24 : 18)
                         text: root.primaryText()
@@ -329,7 +329,7 @@ Window {
                         elide: Text.ElideRight
                     }
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         Layout.preferredHeight: tokens.metric(root.large ? 22 : 18)
                         text: root.secondaryText()

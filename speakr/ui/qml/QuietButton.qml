@@ -22,7 +22,7 @@ Button {
     Accessible.name: text
     Accessible.description: accessibleDescription
 
-    contentItem: Text {
+    contentItem: PlainText {
         id: contentLabel
         text: control.text
         color: !control.enabled

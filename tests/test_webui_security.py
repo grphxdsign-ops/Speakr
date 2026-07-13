@@ -117,6 +117,8 @@ class WebUISecurityTests(unittest.TestCase):
         self.assertIn("no-store", headers["Cache-Control"])
         self.assertEqual(headers["X-Frame-Options"], "DENY")
         self.assertIn("default-src 'none'", headers["Content-Security-Policy"])
+        self.assertIn("microphone=()", headers["Permissions-Policy"])
+        self.assertIn("clipboard-read=()", headers["Permissions-Policy"])
         self.assertNotIn("Access-Control-Allow-Origin", headers)
         self.assertNotIn(b"speakr.cloud", body)
         self.assertNotIn(b"https://", body)
@@ -173,6 +175,15 @@ class WebUISecurityTests(unittest.TestCase):
         self.assertEqual(state["capture"], "listening")
         self.assertNotIn("practice", state)
         self.assertNotIn("transcript", state)
+
+    def test_idle_wait_timeout_returns_current_state_instead_of_null(self):
+        current = self.ui.app.interface_state.snapshot()
+        result = self.ui.wait_state(current["version"], timeout=0)
+
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["version"], current["version"])
+        self.assertNotIn("practice", result)
+        self.assertNotIn("transcript", result)
 
 
 if __name__ == "__main__":

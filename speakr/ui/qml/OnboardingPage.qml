@@ -187,7 +187,7 @@ Item {
                     Layout.rightMargin: root.tokens.space32
                     spacing: root.tokens.space8
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("Welcome to Speakr")
                         color: root.tokens.text
@@ -198,7 +198,7 @@ Item {
                         Accessible.name: text
                     }
 
-                    Text {
+                    PlainText {
                         Layout.fillWidth: true
                         text: qsTr("Set up private voice-to-text in five short steps. Nothing here is timed.")
                         color: root.tokens.mutedText
@@ -235,7 +235,7 @@ Item {
                                 onClicked: root.goTo(index)
                             }
 
-                            Text {
+                            PlainText {
                                 anchors.verticalCenter: parent.verticalCenter
                                 visible: index < root.stepNames.length - 1
                                 text: "→"
@@ -272,7 +272,7 @@ Item {
                         columnSpacing: root.tokens.space16
                         rowSpacing: root.tokens.space8
 
-                        Text {
+                        PlainText {
                             Layout.fillWidth: true
                             text: root.issueMessage()
                             color: root.tokens.danger
@@ -299,7 +299,7 @@ Item {
                     spacing: root.tokens.space16
                     transform: Translate { id: pageShift }
 
-                    Text {
+                    PlainText {
                         id: stepHeading
                         Layout.fillWidth: true
                         text: root.stepNames[root.currentStep]
@@ -341,7 +341,7 @@ Item {
                                     anchors.margins: root.tokens.space16
                                     spacing: root.tokens.space12
 
-                                    Text {
+                                    PlainText {
                                         Layout.fillWidth: true
                                         text: qsTr("Voice to text, on this device")
                                         color: root.tokens.text
@@ -352,7 +352,7 @@ Item {
                                         Accessible.role: Accessible.Heading
                                     }
 
-                                    Text {
+                                    PlainText {
                                         Layout.fillWidth: true
                                         text: qsTr("Audio stays in memory. Transcripts, screen context, vocabulary, and diagnostics stay on this computer. Speakr has no accounts, telemetry, analytics, or cloud fallback.")
                                         color: root.tokens.text
@@ -361,7 +361,7 @@ Item {
                                         wrapMode: Text.Wrap
                                     }
 
-                                    Text {
+                                    PlainText {
                                         Layout.fillWidth: true
                                         text: qsTr("The only non-loopback network activity is a one-time speech-model download from Hugging Face. Optional Ollama cleanup uses 127.0.0.1 and is never required.")
                                         color: root.tokens.mutedText
@@ -383,7 +383,7 @@ Item {
                         ColumnLayout {
                             spacing: root.tokens.space16
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: qsTr("Choose a local speech model")
                                 color: root.tokens.text
@@ -394,7 +394,7 @@ Item {
                                 Accessible.role: Accessible.Heading
                             }
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: qsTr("Automatic is recommended. It selects a model for the available local hardware and safely falls back to CPU.")
                                 color: root.tokens.mutedText
@@ -420,7 +420,7 @@ Item {
                                 border.width: 1
                                 border.color: root.tokens.border
 
-                                Text {
+                                PlainText {
                                     id: modelStatus
                                     anchors.left: parent.left
                                     anchors.right: parent.right
@@ -452,7 +452,7 @@ Item {
                         ColumnLayout {
                             spacing: root.tokens.space16
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: qsTr("Check microphone access")
                                 color: root.tokens.text
@@ -463,7 +463,7 @@ Item {
                                 Accessible.role: Accessible.Heading
                             }
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: root.permissionBlocked()
                                       ? qsTr("Microphone or accessibility permission needs attention. Open system settings, make the change, then recheck.")
@@ -503,7 +503,7 @@ Item {
                         ColumnLayout {
                             spacing: root.tokens.space16
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: qsTr("Choose how dictation starts")
                                 color: root.tokens.text
@@ -514,7 +514,7 @@ Item {
                                 Accessible.role: Accessible.Heading
                             }
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: qsTr("Shortcut capture never times out. Select Cancel or press Escape if you change your mind.")
                                 color: root.tokens.mutedText
@@ -526,7 +526,7 @@ Item {
                             ColumnLayout {
                                 spacing: root.tokens.space8
 
-                                Text {
+                                PlainText {
                                     text: bridge.capturingHotkey
                                           ? (String(root.value(root.appState, "pending_hotkey", "")).length > 0
                                              ? qsTr("Captured: %1").arg(root.value(root.appState, "pending_hotkey", ""))
@@ -568,7 +568,7 @@ Item {
                                 }
                             }
 
-                            Text {
+                            PlainText {
                                 text: qsTr("Shortcut behavior")
                                 color: root.tokens.text
                                 font.family: root.tokens.fontFamily
@@ -588,7 +588,7 @@ Item {
                         ColumnLayout {
                             spacing: root.tokens.space16
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: qsTr("Try a private practice dictation")
                                 color: root.tokens.text
@@ -599,7 +599,7 @@ Item {
                                 Accessible.role: Accessible.Heading
                             }
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: qsTr("Practice is optional. It never inserts text, updates learning, enters cleanup context, touches the clipboard, or writes transcript logs.")
                                 color: root.tokens.mutedText
@@ -608,7 +608,7 @@ Item {
                                 wrapMode: Text.Wrap
                             }
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 text: qsTr("Not stored by Speakr; clears when you leave Practice.")
                                 color: root.tokens.text
@@ -647,7 +647,7 @@ Item {
                                            ? bridge.stopPractice() : bridge.startPractice()
                             }
 
-                            Text {
+                            PlainText {
                                 Layout.fillWidth: true
                                 visible: String(root.value(root.practice, "error", "")).length > 0
                                 text: String(root.value(root.practice, "error", ""))
@@ -659,7 +659,7 @@ Item {
                                 Accessible.name: text
                             }
 
-                            TextArea {
+                            PlainTextArea {
                                 Layout.fillWidth: true
                                 Layout.minimumHeight: root.tokens.metric(140)
                                 readOnly: true

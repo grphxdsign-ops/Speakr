@@ -19,7 +19,7 @@ ComboBox {
     Accessible.name: accessibleName
     Accessible.description: accessibleDescription
 
-    contentItem: Text {
+    contentItem: PlainText {
         leftPadding: 0
         rightPadding: control.tokens.space8
         text: control.displayText
@@ -30,7 +30,7 @@ ComboBox {
         elide: Text.ElideRight
     }
 
-    indicator: Text {
+    indicator: PlainText {
         x: control.width - width - control.tokens.space12
         y: (control.height - height) / 2
         text: "⌄"
@@ -56,7 +56,7 @@ ComboBox {
         Accessible.role: Accessible.ListItem
         Accessible.name: modelData
 
-        contentItem: Text {
+        contentItem: PlainText {
             text: modelData
             color: option.enabled ? control.tokens.text : control.tokens.disabledText
             font.family: control.tokens.fontFamily
