@@ -1,26 +1,3 @@
-# Builds the click-and-done installers the download site points at:
-#   Speakr.dmg        — fully self-contained Speakr.app (Python bundled by
-#                       PyInstaller, nothing to install on the machine) in a
-#                       drag-to-Applications disk image. Apple Silicon.
-#   Speakr-Setup.exe  — Inno Setup installer wrapping the PyInstaller onedir
-#                       build: per-user (no admin prompt), Start Menu +
-#                       optional desktop shortcut, launches Speakr when done.
-#
-# Trigger: push a tag like v0.1.0 (or run manually from the Actions tab with
-# a tag name). Assets land on the GitHub release for that tag, and the site's
-# download buttons pick them up automatically via the releases/latest API.
-#
-# Mac signing: with no secrets configured the app ships ad-hoc signed —
-# launchable everywhere, but Gatekeeper shows the one-time "unidentified
-# developer" approval on first open (that prompt is Apple policy for
-# anything not notarized; no build step can remove it). To make the DMG
-# truly zero-prompt, add these repo secrets and the workflow upgrades
-# itself to Developer ID signing + notarization automatically:
-#   MACOS_CERTIFICATE_P12        base64 of a Developer ID Application .p12
-#   MACOS_CERTIFICATE_PASSWORD   password for that .p12
-#   APPLE_ID                     Apple ID email of the developer account
-#   APPLE_TEAM_ID                10-char team ID
-#   APPLE_APP_SPECIFIC_PASSWORD  app-specific password for notarytool
 name: Release
 
 on:
@@ -29,261 +6,388 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v0.1.0)"
-        required: true
+        description: "Optional exact existing tag to prove; manual runs never publish"
+        required: false
+        type: string
 
+# Build jobs are read-only. Only the final, tag-verified publisher receives
+# permission to create or mutate a GitHub release.
 permissions:
-  contents: write
+  contents: read
+
+env:
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
-  mac-dmg:
-    runs-on: macos-latest
+  release_context:
+    name: Resolve immutable release context
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.context.outputs.sha }}
+      tag: ${{ steps.context.outputs.tag }}
+      version: ${{ steps.context.outputs.version }}
+      publish: ${{ steps.context.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag identity
+        id: context
+        env:
+          REQUESTED_TAG: ${{ inputs.tag || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          candidate=""
+          publish="false"
+          tag_verified="false"
+
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            candidate="$GITHUB_REF_NAME"
+          elif [ -n "$REQUESTED_TAG" ]; then
+            candidate="$REQUESTED_TAG"
+          fi
+
+          if [ -n "$candidate" ]; then
+            if [[ "$candidate" != v* ]]; then
+              echo "::warning::'$candidate' is not a v* release tag; this run is proof-only."
+            elif ! git show-ref --verify --quiet "refs/tags/$candidate"; then
+              echo "::warning::'$candidate' is not an existing repository tag; this run is proof-only."
+            elif [ "$(git rev-list -n 1 "$candidate")" != "$sha" ]; then
+              echo "::warning::'$candidate' does not identify checked-out commit $sha; this run is proof-only."
+            else
+              tag_verified="true"
+            fi
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            if [ "$tag_verified" != "true" ]; then
+              echo "::error::A tag-triggered run must resolve to that exact existing tag and commit."
+              exit 1
+            fi
+            publish="true"
+          elif [ "$tag_verified" = "true" ]; then
+            echo "Manual proof is pinned to existing tag $candidate; publication remains disabled."
+          fi
+
+          if [ "$tag_verified" = "true" ]; then
+            version="${candidate#v}"
+            tag="$candidate"
+          else
+            version="0.0.0-proof.$GITHUB_RUN_NUMBER"
+            tag=""
+          fi
+
+          {
+            echo "sha=$sha"
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+          echo "Build SHA: $sha"
+          echo "Publish: $publish"
+          [ -z "$tag" ] || echo "Verified tag: $tag"
+
+  mac_dmg:
+    name: macOS signed/notarized DMG proof
+    needs: release_context
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release_context.outputs.sha }}
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install pinned release environment
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          python -m pip install -r requirements-release.txt
+          python -m pip check
+          python scripts/check_qt_build_environment.py
 
-      - name: Enforce Essentials-only Qt build environment
-        run: python scripts/check_qt_build_environment.py
-
-      - name: Run unit and interface contract tests
+      - name: Run offline unit and interface contracts
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m unittest discover -s tests -v
-
-      - name: Build icon (.icns)
         run: |
-          mkdir speakr.iconset
-          for s in 16 32 128 256 512; do
-            sips -z $s $s assets/icon.png --out speakr.iconset/icon_${s}x${s}.png >/dev/null
-            sips -z $((s*2)) $((s*2)) assets/icon.png --out speakr.iconset/icon_${s}x${s}@2x.png >/dev/null
-          done
-          iconutil -c icns speakr.iconset -o speakr.icns
+          python -m compileall -q speakr tests scripts
+          python -m unittest discover -s tests -v
 
-      - name: Build Speakr.app (self-contained, Python bundled)
-        # --paths .: frozen_entry.py lives in scripts/, and PyInstaller's
-        # import analysis searches the ENTRY SCRIPT'S OWN directory, not the
-        # working directory it was invoked from — without this, it can't see
-        # the speakr/ package one level up at the repo root, "successfully"
-        # builds anyway, and only fails at actual runtime with
-        # ModuleNotFoundError: No module named 'speakr' (reproduced locally
-        # before adding this flag).
-        # --collect-all on the ML stack: ctranslate2 ships native libs and
-        # faster_whisper ships the bundled Silero VAD onnx asset, neither of
-        # which static import analysis finds. pystray picks its macOS backend
-        # with a dynamic import, hence the explicit hidden-import.
-        run: >
-          pyinstaller --noconfirm --windowed
-          --name Speakr --icon speakr.icns
-          --osx-bundle-identifier com.speakr.dictation
-          --paths .
-          --collect-all ctranslate2
-          --collect-all faster_whisper
-          --collect-all onnxruntime
-          --hidden-import pystray._darwin
-          --hidden-import PySide6.QtQuick
-          --hidden-import PySide6.QtQuickControls2
-          --add-data "speakr/ui/qml:speakr/ui/qml"
-          --add-data "assets/icon.png:assets"
-          --exclude-module PySide6.QtWebEngine
-          --exclude-module PySide6.QtWebEngineCore
-          --exclude-module PySide6.QtWebEngineQuick
-          --exclude-module PySide6.QtWebEngineWidgets
-          --exclude-module PySide6.QtWebView
-          --exclude-module PySide6.QtWebChannel
-          scripts/frozen_entry.py
-
-      - name: Add Qt open-source notice
-        run: |
-          cat > dist/Speakr.app/Contents/Resources/THIRD_PARTY_NOTICES.txt <<'NOTICE'
-          Speakr includes Qt for Python / PySide6-Essentials 6.11.1.
-          Qt for Python is copyright The Qt Company Ltd. and contributors.
-          The installed open-source package is offered under LGPL-3.0-only,
-          GPL-2.0-only, or GPL-3.0-only, as described by its package metadata.
-          Speakr does not modify Qt source files.
-          NOTICE
-
-      - name: Audit native UI artifact
-        # Run before plist mutation, signing, and DMG wrapping. The scanner
-        # requires Main.qml, Hud.qml, and the local icon; rejects embedded
-        # browser/Addons filenames; and permits only loopback URLs in UI data.
-        run: python scripts/scan_artifact_privacy.py dist/Speakr.app
-
-      - name: Menu-bar metadata + permission strings
-        # LSUIElement: menu-bar app, no Dock icon (matches how Speakr runs).
-        # The usage strings are what macOS shows on the permission prompts.
-        # MUST run before the signing step below: editing Info.plist changes
-        # a file the code signature seals, so any signature present at edit
-        # time is invalidated — exactly what shipped in v0.1.1, where this
-        # edit ran AFTER PyInstaller's build-time ad-hoc signing and Apple
-        # Silicon Macs refused to launch the app at all ("Speakr is damaged
-        # and can't be opened").
-        run: |
-          PLIST=dist/Speakr.app/Contents/Info.plist
-          plutil -replace LSUIElement -bool true "$PLIST" 2>/dev/null || plutil -insert LSUIElement -bool true "$PLIST"
-          plutil -insert NSMicrophoneUsageDescription -string "Speakr transcribes your dictation locally on this Mac. Audio never leaves the machine." "$PLIST" 2>/dev/null || true
-
-      - name: Sign Speakr.app
-        # Re-sign the whole bundle now that Info.plist is final. Apple
-        # Silicon kills any app whose signature is invalid, so this step is
-        # what makes the downloaded app launchable at all. With a Developer
-        # ID cert in the repo secrets this signs for real (hardened runtime,
-        # ready to notarize); otherwise it falls back to a valid ad-hoc
-        # signature, which launches fine after Gatekeeper's one-time
-        # unidentified-developer approval.
+      - name: Prepare Developer ID identity
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          PUBLISH_RELEASE: ${{ needs.release_context.outputs.publish }}
+        shell: bash
         run: |
-          xattr -cr dist/Speakr.app
-          if [ -n "$MACOS_CERTIFICATE_P12" ]; then
-            echo "$MACOS_CERTIFICATE_P12" | base64 -d > cert.p12
-            security create-keychain -p ci build.keychain
-            security default-keychain -s build.keychain
-            security unlock-keychain -p ci build.keychain
-            security import cert.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-            security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain > /dev/null
-            rm cert.p12
-            IDENTITY=$(security find-identity -v -p codesigning build.keychain | awk -F'"' 'NR==1{print $2}')
-            echo "Signing with Developer ID: $IDENTITY"
-            codesign --force --deep --options runtime --timestamp \
-              --entitlements scripts/entitlements.plist \
-              --sign "$IDENTITY" dist/Speakr.app
-            echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
-          else
-            echo "No signing certificate in secrets — ad-hoc signing (see the comment at the top of this file to make the DMG zero-prompt)."
-            codesign --force --deep --sign - dist/Speakr.app
-          fi
-          codesign --verify --deep --strict --verbose=2 dist/Speakr.app
+          set -euo pipefail
+          missing=0
+          for name in MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              missing=$((missing + 1))
+            fi
+          done
 
-      - name: Smoke-test the build
-        # A PyInstaller build can report success while being completely
-        # broken at runtime (exactly what shipped in v0.1.0 — missing
-        # --paths . above meant the speakr package silently wasn't bundled
-        # at all). Actually launch it and confirm it's still alive a few
-        # seconds later instead of trusting the build exit code alone.
-        # Runs AFTER the plist edit + re-sign so it exercises the exact
-        # bundle that ships — v0.1.1's smoke test passed on a bundle that a
-        # later step then broke. Hugging Face is forced offline here: the UI
-        # must remain usable in its truthful model-recovery state, and a
-        # packaging smoke test must not download model weights.
-        run: |
-          SMOKE_HOME="$RUNNER_TEMP/speakr-native-smoke"
-          rm -rf "$SMOKE_HOME"
-          mkdir -p "$SMOKE_HOME"
-          HF_HUB_OFFLINE=1 SPEAKR_HOME="$SMOKE_HOME" dist/Speakr.app/Contents/MacOS/Speakr > smoke.log 2>&1 &
-          pid=$!
-          sleep 6
-          if ! kill -0 "$pid" 2>/dev/null; then
-            echo "::error::Speakr exited within 6s of launch — the build is broken. Output:"
-            cat smoke.log
-            [ -f "$SMOKE_HOME/speakr.log" ] && cat "$SMOKE_HOME/speakr.log"
+          if [ "$missing" -ne 0 ] && [ "$missing" -ne 5 ]; then
+            echo "::error::macOS release credentials are partially configured; provide all five signing/notarization secrets or none."
             exit 1
           fi
-          if { cat smoke.log; [ -f "$SMOKE_HOME/speakr.log" ] && cat "$SMOKE_HOME/speakr.log"; } | grep -Eiq "Native UI (unavailable|failed)|using recovery interface" || [ -f "$SMOKE_HOME/panel.url" ]; then
-            echo "::error::Speakr stayed alive only by selecting the browser recovery interface; the native QML release is broken."
-            cat smoke.log
-            [ -f "$SMOKE_HOME/speakr.log" ] && cat "$SMOKE_HOME/speakr.log"
-            kill "$pid" 2>/dev/null || true
+          if [ "$PUBLISH_RELEASE" = "true" ] && [ "$missing" -ne 0 ]; then
+            echo "::error::Tag publication is blocked until Developer ID and notarization credentials are configured."
             exit 1
           fi
-          kill "$pid"
-          echo "Smoke test passed — process stayed alive with the native QML frontend."
 
-      - name: Wrap into Speakr.dmg
-        run: |
-          mkdir dmgroot
-          cp -R dist/Speakr.app dmgroot/
-          ln -s /Applications dmgroot/Applications
-          hdiutil create -volname Speakr -srcfolder dmgroot -ov -format UDZO Speakr.dmg
+          if [ "$missing" -eq 5 ]; then
+            echo "MAC_DISTRIBUTION_SIGNED=false" >> "$GITHUB_ENV"
+            echo "SPEAKR_SIGN_IDENTITY=-" >> "$GITHUB_ENV"
+            echo "No distribution credentials: producing a nonpublishing ad-hoc proof."
+            exit 0
+          fi
 
-      - name: Notarize and staple the DMG
-        # Only when a Developer ID cert was used above. Notarizing the DMG
-        # covers the app inside it; stapling means Gatekeeper can verify
-        # offline — first launch is completely prompt-free (bar the
-        # standard mic/accessibility permission asks).
-        if: env.SIGN_IDENTITY != ''
+          python - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+          Path("cert.p12").write_bytes(base64.b64decode(os.environ["MACOS_CERTIFICATE_P12"]))
+          PY
+          security create-keychain -p ci build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import cert.p12 -k build.keychain \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain >/dev/null
+          security list-keychains -d user -s build.keychain login.keychain-db
+          rm -f cert.p12
+
+          identity="$(security find-identity -v -p codesigning build.keychain \
+            | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+          if [ -z "$identity" ]; then
+            echo "::error::Certificate does not contain a Developer ID Application identity."
+            exit 1
+          fi
+          echo "MAC_DISTRIBUTION_SIGNED=true" >> "$GITHUB_ENV"
+          echo "SPEAKR_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "Developer ID identity prepared."
+
+      - name: Build, scan, and explicitly sign Speakr.app
+        env:
+          PYTHON: python
+        run: bash package_mac.sh
+
+      - name: Notarize and staple distribution app
+        if: env.MAC_DISTRIBUTION_SIGNED == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        shell: bash
         run: |
-          codesign --force --timestamp --sign "$SIGN_IDENTITY" Speakr.dmg
+          set -euo pipefail
+          ditto -c -k --keepParent dist/Speakr.app Speakr-notarization.zip
+          xcrun notarytool submit Speakr-notarization.zip --wait \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
+          xcrun stapler staple dist/Speakr.app
+          xcrun stapler validate dist/Speakr.app
+          codesign --verify --strict --verbose=2 dist/Speakr.app
+          rm -f Speakr-notarization.zip
+
+      - name: Create final DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmgroot="$RUNNER_TEMP/speakr-dmgroot"
+          case "$dmgroot" in "$RUNNER_TEMP"/*) rm -rf -- "$dmgroot" ;; *) exit 1 ;; esac
+          mkdir -p "$dmgroot"
+          ditto dist/Speakr.app "$dmgroot/Speakr.app"
+          ln -s /Applications "$dmgroot/Applications"
+          hdiutil create -volname Speakr -srcfolder "$dmgroot" -ov -format UDZO Speakr.dmg
+
+      - name: Notarize and staple distribution DMG
+        if: env.MAC_DISTRIBUTION_SIGNED == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          codesign --force --timestamp --sign "$SPEAKR_SIGN_IDENTITY" Speakr.dmg
           xcrun notarytool submit Speakr.dmg --wait \
             --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_APP_SPECIFIC_PASSWORD"
           xcrun stapler staple Speakr.dmg
+          xcrun stapler validate Speakr.dmg
 
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
+      - name: Mount and prove the exact final DMG app offline
+        shell: bash
+        run: |
+          set -euo pipefail
+          mountpoint="$RUNNER_TEMP/speakr-final-dmg"
+          installroot="$RUNNER_TEMP/Applications"
+          smoke_home="$RUNNER_TEMP/speakr-final-smoke-home"
+          receipt="$RUNNER_TEMP/speakr-final-receipt.json"
+          rm -rf -- "$mountpoint" "$installroot" "$smoke_home"
+          rm -f -- "$receipt"
+          mkdir -p "$mountpoint" "$installroot" "$smoke_home"
+          pid=""
+          cleanup() {
+            [ -z "$pid" ] || kill "$pid" 2>/dev/null || true
+            hdiutil detach "$mountpoint" -quiet 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          hdiutil attach Speakr.dmg -readonly -nobrowse -mountpoint "$mountpoint"
+          mounted_app="$mountpoint/Speakr.app"
+          python scripts/scan_artifact_privacy.py "$mounted_app"
+          codesign --verify --strict --verbose=2 "$mounted_app"
+          ditto "$mounted_app" "$installroot/Speakr.app"
+          installed_app="$installroot/Speakr.app"
+          python scripts/scan_artifact_privacy.py "$installed_app"
+          codesign --verify --strict --verbose=2 "$installed_app"
+          lipo -archs "$installed_app/Contents/MacOS/Speakr" | tr ' ' '\n' | grep -qx arm64 || {
+            echo "::error::Final DMG does not contain the required Apple Silicon executable."
+            exit 1
+          }
+          if [ "$MAC_DISTRIBUTION_SIGNED" = "true" ]; then
+            xcrun stapler validate Speakr.dmg
+            xcrun stapler validate "$installed_app"
+            spctl --assess --type execute --verbose=4 "$installed_app"
+          fi
+
+          SPEAKR_HOME="$smoke_home" \
+          SPEAKR_RELEASE_PROOF_PATH="$receipt" \
+          SPEAKR_RELEASE_PROOF_QUIT=1 \
+          HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+            "$installed_app/Contents/MacOS/Speakr" >smoke.log 2>&1 &
+          pid=$!
+          for _ in $(seq 1 60); do
+            [ -f "$receipt" ] && break
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.5
+          done
+          if [ ! -f "$receipt" ]; then
+            echo "::error::Copied app did not emit a native readiness receipt."
+            cat smoke.log
+            [ -f "$smoke_home/speakr.log" ] && cat "$smoke_home/speakr.log"
+            exit 1
+          fi
+          for _ in $(seq 1 20); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.5
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "::error::Copied app did not quit after writing its release receipt."
+            exit 1
+          fi
+          set +e
+          wait "$pid"
+          status=$?
+          set -e
+          pid=""
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Copied app exited with status $status."
+            cat smoke.log
+            exit 1
+          fi
+          python scripts/validate_release_receipt.py "$receipt"
+          hdiutil detach "$mountpoint"
+          trap - EXIT
+
+      - name: Upload macOS proof artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: Speakr.dmg
+          name: ${{ needs.release_context.outputs.publish == 'true' && 'Speakr-macOS-release' || 'Speakr-macOS-proof-NON-DISTRIBUTABLE' }}
+          path: Speakr.dmg
+          if-no-files-found: error
+          retention-days: 14
 
-  windows-installer:
-    runs-on: windows-latest
+  windows_installer:
+    name: Windows installed-artifact proof
+    needs: release_context
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release_context.outputs.sha }}
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller pillow
-
-      - name: Enforce Essentials-only Qt build environment
-        run: python scripts/check_qt_build_environment.py
-
-      - name: Run unit and interface contract tests
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python -m unittest discover -s tests -v
-
-      - name: Convert icon to .ico
-        run: python -c "from PIL import Image; Image.open('assets/icon.png').save('icon.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])"
-
-      - name: Build Speakr (onedir)
-        # onedir, not onefile: onefile re-extracts hundreds of MB into a temp
-        # dir on EVERY launch. The Inno installer below gives the one-file
-        # download UX without that per-launch cost.
-        # --paths .: see the matching comment in the mac-dmg job — same
-        # entry-script-in-a-subdirectory gap, reproduced locally on both
-        # platforms' build shape before adding this flag.
-        run: >
-          pyinstaller --noconfirm --windowed
-          --name Speakr --icon icon.ico
-          --paths .
-          --collect-all ctranslate2
-          --collect-all faster_whisper
-          --collect-all onnxruntime
-          --hidden-import pystray._win32
-          --hidden-import comtypes.stream
-          --hidden-import PySide6.QtQuick
-          --hidden-import PySide6.QtQuickControls2
-          --add-data "speakr/ui/qml:speakr/ui/qml"
-          --add-data "assets/icon.png:assets"
-          --exclude-module PySide6.QtWebEngine
-          --exclude-module PySide6.QtWebEngineCore
-          --exclude-module PySide6.QtWebEngineQuick
-          --exclude-module PySide6.QtWebEngineWidgets
-          --exclude-module PySide6.QtWebView
-          --exclude-module PySide6.QtWebChannel
-          scripts/frozen_entry.py
-
-      - name: Add Qt open-source notice
+      - name: Install pinned release environment
         shell: pwsh
         run: |
+          python -m pip install -r requirements-release.txt
+          python -m pip check
+          python scripts/check_qt_build_environment.py
+
+      - name: Run offline unit and interface contracts
+        env:
+          QT_QPA_PLATFORM: offscreen
+        shell: pwsh
+        run: |
+          python -m compileall -q speakr tests scripts
+          python -m unittest discover -s tests -v
+
+      - name: Prepare Windows Authenticode identity
+        env:
+          WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          PUBLISH_RELEASE: ${{ needs.release_context.outputs.publish }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hasPfx = ![string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX)
+          $hasPassword = ![string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)
+          if ($hasPfx -ne $hasPassword) {
+            throw "Windows release credentials are partially configured; provide both PFX and password or neither."
+          }
+          if ($env:PUBLISH_RELEASE -eq "true" -and !$hasPfx) {
+            throw "Tag publication is blocked until the Windows Authenticode certificate is configured."
+          }
+          if (!$hasPfx) {
+            "WINDOWS_DISTRIBUTION_SIGNED=false" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "No Authenticode credentials: producing an unsigned, non-distributable proof."
+            exit 0
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "speakr-code-signing.pfx"
+          [IO.File]::WriteAllBytes(
+            $pfxPath,
+            [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX)
+          )
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+            -Filter signtool.exe -File -Recurse |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $signTool) { throw "Windows SDK signtool.exe is unavailable" }
+          "WINDOWS_DISTRIBUTION_SIGNED=true" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "WINDOWS_SIGNING_PFX=$pfxPath" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "WINDOWS_SIGNTOOL=$($signTool.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Windows Authenticode identity prepared."
+
+      - name: Build and scan Windows onedir
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -c "from PIL import Image; Image.open('assets/icon.png').save('icon.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])"
+          python scripts/build_release.py --icon icon.ico
           @'
           Speakr includes Qt for Python / PySide6-Essentials 6.11.1.
           Qt for Python is copyright The Qt Company Ltd. and contributors.
@@ -291,62 +395,188 @@ jobs:
           GPL-2.0-only, or GPL-3.0-only, as described by its package metadata.
           Speakr does not modify Qt source files.
           '@ | Set-Content -Encoding utf8 dist\Speakr\THIRD_PARTY_NOTICES.txt
+          python scripts\scan_artifact_privacy.py dist\Speakr
+          if ($env:WINDOWS_DISTRIBUTION_SIGNED -eq "true") {
+            & $env:WINDOWS_SIGNTOOL sign /fd SHA256 /td SHA256 `
+              /tr http://timestamp.digicert.com `
+              /f $env:WINDOWS_SIGNING_PFX /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+              dist\Speakr\Speakr.exe
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & $env:WINDOWS_SIGNTOOL verify /pa /all /v dist\Speakr\Speakr.exe
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
-      - name: Audit native UI artifact
-        run: python scripts\scan_artifact_privacy.py dist\Speakr
-
-      - name: Smoke-test the build
-        # Same regression guard as the mac-dmg job: a PyInstaller build can
-        # report success while being completely broken at runtime (exactly
-        # what v0.1.0 shipped — missing --paths . above meant the speakr
-        # package silently wasn't bundled at all). Actually launch it and
-        # confirm it's still alive a few seconds later. Model downloads are
-        # disabled so this verifies the native UI's offline recovery state.
+      - name: Build Inno Setup installer
+        env:
+          APP_VERSION: ${{ needs.release_context.outputs.version }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         shell: pwsh
         run: |
-          $smokeHome = Join-Path $env:RUNNER_TEMP "speakr-native-smoke"
-          Remove-Item -Recurse -Force $smokeHome -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $smokeHome | Out-Null
-          $env:SPEAKR_HOME = $smokeHome
-          $env:HF_HUB_OFFLINE = "1"
-          $p = Start-Process -FilePath "dist\Speakr\Speakr.exe" `
-               -RedirectStandardOutput smoke_out.log -RedirectStandardError smoke_err.log -PassThru
-          Start-Sleep -Seconds 6
-          if ($p.HasExited) {
-            Write-Host "::error::Speakr.exe exited within 6s of launch — the build is broken. Output:"
-            Get-Content smoke_out.log, smoke_err.log -ErrorAction SilentlyContinue
-            Get-Content (Join-Path $smokeHome "speakr.log") -ErrorAction SilentlyContinue
-            exit 1
-          }
-          $logText = @(
-            Get-Content smoke_out.log, smoke_err.log -ErrorAction SilentlyContinue
-            Get-Content (Join-Path $smokeHome "speakr.log") -ErrorAction SilentlyContinue
-          ) -join "`n"
-          if ($logText -match "Native UI (unavailable|failed)|using recovery interface" -or
-              (Test-Path (Join-Path $smokeHome "panel.url"))) {
-            Write-Host "::error::Speakr stayed alive only by selecting the browser recovery interface; the native QML release is broken."
-            Write-Host $logText
-            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-            exit 1
-          }
-          Stop-Process -Id $p.Id -Force
-          Write-Host "Smoke test passed — process stayed alive with the native QML frontend."
-
-      - name: Build Speakr-Setup.exe (Inno Setup)
-        shell: pwsh
-        run: |
-          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
-          $ver = $tag.TrimStart("v")
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (!(Test-Path $iscc)) {
-            choco install innosetup -y --no-progress
-            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path -LiteralPath $iscc)) {
+            choco install innosetup --version=6.7.1 -y --no-progress
           }
-          & $iscc /DAppVersion=$ver scripts\installer.iss
+          if (!(Test-Path -LiteralPath $iscc)) {
+            throw "Inno Setup compiler is unavailable"
+          }
+          & $iscc "/DAppVersion=$env:APP_VERSION" scripts\installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path -LiteralPath Speakr-Setup.exe)) { throw "Installer output is missing" }
+          if ($env:WINDOWS_DISTRIBUTION_SIGNED -eq "true") {
+            & $env:WINDOWS_SIGNTOOL sign /fd SHA256 /td SHA256 `
+              /tr http://timestamp.digicert.com `
+              /f $env:WINDOWS_SIGNING_PFX /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+              Speakr-Setup.exe
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & $env:WINDOWS_SIGNTOOL verify /pa /all /v Speakr-Setup.exe
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (![string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX)) {
+            Remove-Item -LiteralPath $env:WINDOWS_SIGNING_PFX -Force -ErrorAction SilentlyContinue
+          }
 
-      - name: Upload to release
+      - name: Silently install, scan, and prove the exact installed app offline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installRoot = Join-Path $env:RUNNER_TEMP "SpeakrInstalled"
+          $smokeHome = Join-Path $env:RUNNER_TEMP "SpeakrSmokeHome"
+          $receipt = Join-Path $env:RUNNER_TEMP "speakr-final-receipt.json"
+          $installerLog = Join-Path $env:RUNNER_TEMP "speakr-installer.log"
+          $process = $null
+          $uninstaller = $null
+
+          foreach ($path in @($installRoot, $smokeHome)) {
+            $resolvedParent = [IO.Path]::GetFullPath((Split-Path -Parent $path))
+            if ($resolvedParent -ne [IO.Path]::GetFullPath($env:RUNNER_TEMP)) {
+              throw "Refusing to clean an unexpected path: $path"
+            }
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Remove-Item -LiteralPath $receipt -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $smokeHome | Out-Null
+
+          try {
+            if ($env:WINDOWS_DISTRIBUTION_SIGNED -eq "true") {
+              & $env:WINDOWS_SIGNTOOL verify /pa /all /v Speakr-Setup.exe
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+            $install = Start-Process -FilePath (Resolve-Path Speakr-Setup.exe) `
+              -ArgumentList @(
+                "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+                "/DIR=`"$installRoot`"", "/LOG=`"$installerLog`""
+              ) -Wait -PassThru
+            if ($install.ExitCode -ne 0) { throw "Silent installer failed with $($install.ExitCode)" }
+
+            $installedExe = Join-Path $installRoot "Speakr.exe"
+            if (!(Test-Path -LiteralPath $installedExe)) { throw "Installed executable is missing" }
+            python scripts\scan_artifact_privacy.py $installRoot
+            if ($env:WINDOWS_DISTRIBUTION_SIGNED -eq "true") {
+              & $env:WINDOWS_SIGNTOOL verify /pa /all /v $installedExe
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+
+            $env:SPEAKR_HOME = $smokeHome
+            $env:SPEAKR_RELEASE_PROOF_PATH = $receipt
+            $env:SPEAKR_RELEASE_PROOF_QUIT = "1"
+            $env:HF_HUB_OFFLINE = "1"
+            $env:TRANSFORMERS_OFFLINE = "1"
+            $process = Start-Process -FilePath $installedExe `
+              -RedirectStandardOutput smoke_out.log `
+              -RedirectStandardError smoke_err.log -PassThru
+
+            $deadline = [DateTime]::UtcNow.AddSeconds(30)
+            while (!(Test-Path -LiteralPath $receipt) -and
+                   !$process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+            }
+            if (!$process.HasExited) {
+              if (!$process.WaitForExit(10000)) { throw "Proof process did not quit after receipt" }
+            }
+            if ($process.ExitCode -ne 0) {
+              Get-Content smoke_out.log, smoke_err.log -ErrorAction SilentlyContinue
+              throw "Installed proof process exited with $($process.ExitCode)"
+            }
+            if (!(Test-Path -LiteralPath $receipt)) {
+              Get-Content smoke_out.log, smoke_err.log -ErrorAction SilentlyContinue
+              Get-Content (Join-Path $smokeHome "speakr.log") -ErrorAction SilentlyContinue
+              throw "Installed app did not emit a native readiness receipt"
+            }
+
+            python scripts\validate_release_receipt.py $receipt
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            $uninstaller = Join-Path $installRoot "unins000.exe"
+            if (!(Test-Path -LiteralPath $uninstaller)) { throw "Uninstaller is missing" }
+          }
+          finally {
+            if ($null -ne $process -and !$process.HasExited) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            }
+            if ($null -ne $uninstaller -and (Test-Path -LiteralPath $uninstaller)) {
+              $uninstall = Start-Process -FilePath $uninstaller `
+                -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") `
+                -Wait -PassThru
+              if ($uninstall.ExitCode -ne 0) {
+                Write-Error "Silent uninstall failed with $($uninstall.ExitCode)"
+              }
+            }
+          }
+          if (Test-Path -LiteralPath (Join-Path $installRoot "Speakr.exe")) {
+            throw "Silent uninstall left the installed executable behind"
+          }
+
+      - name: Upload Windows proof artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Speakr-Windows-${{ needs.release_context.outputs.publish == 'true' && 'release' || 'proof-NON-DISTRIBUTABLE' }}
+          path: Speakr-Setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish exact verified tag artifacts
+    needs: [release_context, mac_dmg, windows_installer]
+    if: needs.release_context.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release_context.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Re-verify immutable tag before publication
+        env:
+          RELEASE_TAG: ${{ needs.release_context.outputs.tag }}
+          RELEASE_SHA: ${{ needs.release_context.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$RELEASE_SHA"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Speakr-*-release
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Verify publication inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f release-artifacts/Speakr.dmg
+          test -f release-artifacts/Speakr-Setup.exe
+          find release-artifacts -maxdepth 1 -type f -print
+
+      - name: Upload assets to the verified GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: Speakr-Setup.exe
+          tag_name: ${{ needs.release_context.outputs.tag }}
+          files: |
+            release-artifacts/Speakr.dmg
+            release-artifacts/Speakr-Setup.exe
