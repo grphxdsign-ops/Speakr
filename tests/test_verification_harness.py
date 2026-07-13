@@ -23,10 +23,14 @@ from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
 
+from scripts import capture_ui_verification as capture_module
 from scripts.capture_ui_verification import capture_scenarios
 from scripts.verify_luminous_interface import (
+    REPORT_SCHEMA_VERSION,
     REQUIRED_EVIDENCE_TESTS,
     ROUTED_PR12_PRODUCT_VETOES,
+    SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+    EvidenceIdentityError,
     detect_missing_interactive_windows_proof,
     detect_qml_runtime_warnings,
     diff_check_commands,
@@ -35,6 +39,11 @@ from scripts.verify_luminous_interface import (
     run_verification,
     sanitize_evidence_text,
     scan_raw_runtime_outputs,
+    validate_evidence_identity,
+)
+from scripts.source_identity import (
+    FINGERPRINT_ALGORITHM,
+    collect_source_identity,
 )
 from speakr import qt_ui
 from speakr.interface_state import InterfaceState
@@ -80,6 +89,19 @@ class _FocusStealingHud:
 
     def hide(self):
         self.hidden = True
+
+
+def _fake_source_identity(seed: str, *, clean: bool = True):
+    return {
+        "schema_version": 1,
+        "head_sha": seed * 40,
+        "working_tree_fingerprint": "sha256:" + seed * 64,
+        "fingerprint_algorithm": FINGERPRINT_ALGORITHM,
+        "working_tree": "clean" if clean else "dirty",
+        "clean": clean,
+        "tracked_change_count": 0 if clean else 1,
+        "relevant_untracked_source_count": 0,
+    }
 
 
 class VerificationHarnessTests(unittest.TestCase):
@@ -155,6 +177,84 @@ class VerificationHarnessTests(unittest.TestCase):
             invalid_evidence_test_ids({"misspelled": (misspelled,)}),
             [misspelled],
         )
+
+    def test_source_identity_is_path_safe_and_tracks_relevant_dirty_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "identity-repository"
+            repository.mkdir()
+
+            def git(*arguments):
+                return subprocess.run(
+                    ["git", *arguments],
+                    cwd=repository,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+
+            git("init", "--quiet")
+            git("config", "user.name", "Speakr Verification")
+            git("config", "user.email", "verification@example.invalid")
+            (repository / ".gitignore").write_text(
+                "build/\nconfig.json\n__pycache__/\n",
+                encoding="utf-8",
+            )
+            tracked = repository / "README.md"
+            tracked.write_text("baseline\n", encoding="utf-8")
+            private_runtime = repository / "config.json"
+            private_runtime.write_text('{"private": false}\n', encoding="utf-8")
+            git("add", ".gitignore", "README.md")
+            git("add", "--force", "config.json")
+            git("commit", "--quiet", "-m", "baseline")
+
+            clean = collect_source_identity(repository)
+            self.assertTrue(clean["clean"])
+            self.assertEqual(clean["working_tree"], "clean")
+            self.assertEqual(clean["tracked_change_count"], 0)
+            self.assertEqual(clean["relevant_untracked_source_count"], 0)
+            self.assertRegex(clean["head_sha"], r"^[0-9a-f]{40}$")
+            serialized = json.dumps(clean, sort_keys=True)
+            self.assertNotIn(str(repository), serialized)
+            self.assertNotIn(str(Path.home()), serialized)
+
+            private_runtime.write_text('{"private": true}\n', encoding="utf-8")
+            self.assertEqual(collect_source_identity(repository), clean)
+
+            tracked.write_text("modified\n", encoding="utf-8")
+            tracked_dirty = collect_source_identity(repository)
+            self.assertFalse(tracked_dirty["clean"])
+            self.assertEqual(tracked_dirty["tracked_change_count"], 1)
+            self.assertNotEqual(
+                tracked_dirty["working_tree_fingerprint"],
+                clean["working_tree_fingerprint"],
+            )
+
+            source_directory = repository / "speakr" / "ui" / "qml"
+            source_directory.mkdir(parents=True)
+            (source_directory / "Probe.qml").write_text(
+                "import QtQuick\nItem {}\n", encoding="utf-8"
+            )
+            untracked_dirty = collect_source_identity(repository)
+            self.assertEqual(
+                untracked_dirty["relevant_untracked_source_count"], 1
+            )
+            self.assertNotEqual(
+                untracked_dirty["working_tree_fingerprint"],
+                tracked_dirty["working_tree_fingerprint"],
+            )
+
+            (repository / "build").mkdir()
+            (repository / "build" / "runtime.txt").write_text(
+                "ignored\n", encoding="utf-8"
+            )
+            (repository / "config.json").write_text(
+                '{"private": true}\n', encoding="utf-8"
+            )
+            (repository / "notes.md").write_text(
+                "outside relevant source roots\n", encoding="utf-8"
+            )
+            excluded = collect_source_identity(repository)
+            self.assertEqual(excluded, untracked_dirty)
 
     def test_every_qml_component_compiles_without_errors(self):
         engine = QQmlApplicationEngine()
@@ -370,6 +470,197 @@ class VerificationHarnessTests(unittest.TestCase):
             self.assertEqual(report["steps"][0]["exit_code"], None)
             self.assertIn("qmllint unavailable", report["steps"][0]["error"])
 
+    def test_stale_green_report_is_replaced_with_current_running_identity(self):
+        expected_identity = _fake_source_identity("a")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            report_path = output / "verification-report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "passed",
+                        "source_identity": _fake_source_identity("b"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def inspect_running_report():
+                running = json.loads(report_path.read_text(encoding="utf-8"))
+                self.assertEqual(running["schema_version"], REPORT_SCHEMA_VERSION)
+                self.assertEqual(running["status"], "running")
+                self.assertEqual(running["automated_status"], "running")
+                self.assertEqual(running["source_identity"], expected_identity)
+                raise FileNotFoundError("qmllint unavailable")
+
+            with mock.patch(
+                "scripts.verify_luminous_interface.collect_source_identity",
+                return_value=expected_identity,
+            ), mock.patch(
+                "scripts.verify_luminous_interface._qmllint_executable",
+                side_effect=inspect_running_report,
+            ), mock.patch("sys.stderr", new=io.StringIO()):
+                self.assertEqual(run_verification(output), 1)
+
+            failed = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(failed["schema_version"], REPORT_SCHEMA_VERSION)
+            self.assertEqual(failed["status"], "failed")
+            self.assertEqual(failed["source_identity"], expected_identity)
+            self.assertNotEqual(failed["status"], "passed")
+
+    def test_stale_missing_and_mismatched_evidence_identity_is_rejected(self):
+        expected = _fake_source_identity("a")
+        valid = {
+            "schema_version": SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+            "status": "passed",
+            "source_identity": expected,
+        }
+        validate_evidence_identity(
+            valid,
+            expected,
+            label="screenshot manifest",
+            schema_version=SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+            status="passed",
+        )
+        invalid = {
+            "legacy schema-1": {**valid, "schema_version": 1},
+            "missing identity": {
+                "schema_version": SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+                "status": "passed",
+            },
+            "mismatched identity": {
+                **valid,
+                "source_identity": _fake_source_identity("b"),
+            },
+            "non-passed status": {**valid, "status": "running"},
+        }
+        for label, document in invalid.items():
+            with self.subTest(label=label), self.assertRaises(EvidenceIdentityError):
+                validate_evidence_identity(
+                    document,
+                    expected,
+                    label="screenshot manifest",
+                    schema_version=SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+                    status="passed",
+                )
+
+    def test_aggregate_rejects_missing_legacy_and_mismatched_manifest_identity(self):
+        expected = _fake_source_identity("a")
+        cases = {
+            "missing": None,
+            "legacy_schema_1": {
+                "schema_version": 1,
+                "status": "passed",
+                "source_identity": expected,
+            },
+            "missing_identity": {
+                "schema_version": SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+                "status": "passed",
+            },
+            "mismatch": {
+                "schema_version": SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+                "status": "passed",
+                "source_identity": _fake_source_identity("b"),
+            },
+        }
+        commands = [("platform_screenshots", ("fake-capture",), {})]
+        for label, manifest in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+
+                def fake_capture(*_args, **_kwargs):
+                    manifest_path = output / "screenshots" / "manifest.json"
+                    if manifest is None:
+                        manifest_path.unlink(missing_ok=True)
+                    else:
+                        manifest_path.write_text(
+                            json.dumps(manifest), encoding="utf-8"
+                        )
+                    return subprocess.CompletedProcess(
+                        args=["fake-capture"],
+                        returncode=0,
+                        stdout="capture completed\n",
+                        stderr="",
+                    )
+
+                with mock.patch(
+                    "scripts.verify_luminous_interface.collect_source_identity",
+                    side_effect=(expected, expected),
+                ), mock.patch(
+                    "scripts.verify_luminous_interface._qmllint_executable",
+                    return_value="qmllint",
+                ), mock.patch(
+                    "scripts.verify_luminous_interface.verification_commands",
+                    return_value=commands,
+                ), mock.patch(
+                    "scripts.verify_luminous_interface.subprocess.run",
+                    side_effect=fake_capture,
+                ), mock.patch("sys.stderr", new=io.StringIO()), mock.patch(
+                    "sys.stdout", new=io.StringIO()
+                ):
+                    self.assertEqual(run_verification(output), 1)
+
+                report = json.loads(
+                    (output / "verification-report.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(report["status"], "failed")
+                self.assertEqual(
+                    report["failed_step"], "evidence_identity_validation"
+                )
+
+    def test_mid_run_source_mutation_invalidates_otherwise_green_evidence(self):
+        source_at_start = _fake_source_identity("a")
+        source_at_end = _fake_source_identity("b", clean=False)
+        commands = [("platform_screenshots", ("fake-capture",), {})]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+
+            def fake_capture(*_args, **_kwargs):
+                manifest_path = output / "screenshots" / "manifest.json"
+                manifest_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+                            "status": "passed",
+                            "source_identity": source_at_start,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(
+                    args=["fake-capture"],
+                    returncode=0,
+                    stdout="capture completed\n",
+                    stderr="",
+                )
+
+            with mock.patch(
+                "scripts.verify_luminous_interface.collect_source_identity",
+                side_effect=(source_at_start, source_at_end),
+            ), mock.patch(
+                "scripts.verify_luminous_interface._qmllint_executable",
+                return_value="qmllint",
+            ), mock.patch(
+                "scripts.verify_luminous_interface.verification_commands",
+                return_value=commands,
+            ), mock.patch(
+                "scripts.verify_luminous_interface.subprocess.run",
+                side_effect=fake_capture,
+            ), mock.patch("sys.stderr", new=io.StringIO()), mock.patch(
+                "sys.stdout", new=io.StringIO()
+            ):
+                self.assertEqual(run_verification(output), 1)
+
+            report = json.loads(
+                (output / "verification-report.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["failed_step"], "source_identity_stability")
+            self.assertEqual(report["source_identity"], source_at_start)
+
     def test_platform_screenshot_runtime_diagnostics_fail_report(self):
         diagnostics = "\n".join(
             (
@@ -395,6 +686,9 @@ class VerificationHarnessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             with mock.patch(
+                "scripts.verify_luminous_interface.collect_source_identity",
+                return_value=_fake_source_identity("a"),
+            ), mock.patch(
                 "scripts.verify_luminous_interface._qmllint_executable",
                 return_value="qmllint",
             ), mock.patch(
@@ -598,6 +892,51 @@ class VerificationHarnessTests(unittest.TestCase):
             bridge.deleteLater()
             self._pump()
 
+    def test_capture_invalidates_stale_manifest_before_qt_startup(self):
+        expected_identity = _fake_source_identity("a")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "capture"
+            output.mkdir()
+            manifest_path = output / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "passed",
+                        "source_identity": _fake_source_identity("b"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def inspect_running_manifest():
+                running = json.loads(manifest_path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    running["schema_version"], SCREENSHOT_MANIFEST_SCHEMA_VERSION
+                )
+                self.assertEqual(running["status"], "running")
+                self.assertEqual(running["source_identity"], expected_identity)
+                raise RuntimeError("Qt startup failed")
+
+            with mock.patch.object(
+                capture_module,
+                "collect_source_identity",
+                return_value=expected_identity,
+            ), mock.patch.object(
+                capture_module,
+                "_application",
+                side_effect=inspect_running_manifest,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Qt startup failed"):
+                    capture_scenarios(
+                        output, ("home-light-full-960x700-100",)
+                    )
+
+            failed = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(failed["status"], "failed")
+            self.assertEqual(failed["failure"], "capture_failed")
+            self.assertEqual(failed["source_identity"], expected_identity)
+
     def test_platform_screenshot_manifest_is_complete_and_idempotent(self):
         names = (
             "help-light-off-640x520-200",
@@ -633,7 +972,12 @@ class VerificationHarnessTests(unittest.TestCase):
             first = capture_scenarios(output, names)
             second = capture_scenarios(output, names)
             self.assertEqual(first, second)
-            self.assertEqual(first["schema_version"], 2)
+            self.assertEqual(
+                first["schema_version"], SCREENSHOT_MANIFEST_SCHEMA_VERSION
+            )
+            self.assertEqual(first["status"], "passed")
+            self.assertEqual(first["source_identity"], collect_source_identity(self.root))
+            self.assertNotIn(str(self.root), json.dumps(first["source_identity"]))
             self.assertEqual(len(first["scenarios"]), len(names))
             self.assertIn(first["platform"]["qpa"], {"offscreen", "windows", "cocoa"})
             self.assertEqual(
@@ -703,6 +1047,7 @@ class VerificationHarnessTests(unittest.TestCase):
     def test_verification_tools_add_no_network_surface(self):
         for path in (
             self.root / "scripts" / "capture_ui_verification.py",
+            self.root / "scripts" / "source_identity.py",
             self.root / "scripts" / "verify_luminous_interface.py",
         ):
             source = path.read_text(encoding="utf-8")

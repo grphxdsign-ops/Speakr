@@ -20,11 +20,13 @@ The command fails at the first broken gate and writes evidence below
   satisfy each automated audit area, and a separate `manual_platform_status`
   that remains `required` after the automated run passes. Machine-local roots
   are represented as `<repo>`, `<output>`, and `<home>` in shareable evidence.
+  It is replaced with a non-passed current-source report before the first gate.
 - Numbered logs retain complete diagnostic stdout and stderr with only
   machine-local root paths redacted.
 - `screenshots/manifest.json` records the OS, QPA, Qt version, requested
   renderer environment, effective renderer API observed after each capture,
-  dimensions, SHA-256, and the explicit limits of what every PNG proves.
+  dimensions, SHA-256, source identity, and the explicit limits of what every
+  PNG proves.
 - Screenshot PNGs are platform review artifacts, not golden comparison files.
 
 The audit runs, in order:
@@ -38,12 +40,46 @@ git diff --check <merge-base>...HEAD
 git diff --check
 python scripts/capture_ui_verification.py
 internal raw runtime stdout/stderr marker scan
+internal source identity stability check
+internal report/manifest identity validation
 ```
 
 The committed-diff check uses `SPEAKR_VERIFY_BASE`, then the pull request's
 `GITHUB_BASE_REF`, then `origin/main` when one of those bases resolves. If no
 base is discoverable, the report labels the remaining command as a working-tree
 fallback instead of claiming that committed changes were checked.
+
+## Evidence freshness and source identity
+
+Schema-3 reports and screenshot manifests bind evidence to the source that
+actually produced it. Both contain the same path-safe identity:
+
+- the full 40-character `HEAD` commit SHA;
+- a SHA-256 working-tree fingerprint derived from the canonical staged and
+  unstaged tracked diff plus relevant, non-ignored untracked source under
+  `speakr/`, `tests/`, `scripts/`, and `assets/` (including QML and local UI
+  assets);
+- explicit clean/dirty state and counts for tracked changes and relevant
+  untracked source.
+
+The identity contains no repository path or source filename. Ignored build
+output, virtual environments, caches, logs, runtime configuration, lock files,
+personal dictionary data, learned words, and other private/runtime files do not
+enter the fingerprint.
+
+At aggregate startup, any prior green report is atomically replaced with
+`initializing`, then a current-source `running` report. The screenshot manifest
+is likewise marked current-source `pending`; standalone capture writes
+`running` before Qt starts. Therefore interruption cannot leave an earlier
+`passed` artifact looking current.
+
+The screenshot subprocess recomputes identity after capture. The aggregate
+recomputes identity after the command, warning-scan, and screenshot stages
+complete. It then re-reads both persisted JSON documents and requires schema 3,
+the expected
+non-final/final status, and exact identity equality before changing the report
+to `passed`. Missing identity, legacy schema-1/2 evidence, stale manifests,
+mismatched fingerprints, or a source mutation during the run fail closed.
 
 The runner sets the unit-test process to Qt offscreen/software mode and forces
 Hugging Face and Transformers offline. The screenshot process keeps the host's
@@ -121,6 +157,7 @@ Review native material and focus behavior separately through the manual gates.
 | HUD | Input-transparent/non-focusable flags, concurrency, stale-job safety, fail-closed focus guard, High Contrast, and software fallback. |
 | Keyboard | Navigation order, page-title focus, visible focused controls, and untimed hotkey cancellation. Screen-reader heading navigation remains an open routed product finding below. |
 | Privacy | Sanitized interface state, numeric-loopback-only behavior, hostile-markup isolation, no remote QML assets, an Essentials-only release boundary, and artifact privacy scans. |
+| Evidence freshness | Full HEAD SHA, deterministic path-safe dirty-tree fingerprint, non-passed startup invalidation, schema-3 report/manifest equality, and end-of-run mutation detection. |
 
 ## Routed PR-12 product findings
 

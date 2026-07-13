@@ -4,7 +4,7 @@
 The PNGs produced here are review artifacts, not pixel-perfect golden files.
 Every scenario disables motion so repeated captures on the same host are
 stable, while the manifest records the platform and rendering backend that
-produced them.
+produced them plus the immutable source identity they verify.
 """
 
 from __future__ import annotations
@@ -36,6 +36,11 @@ ROOT = Path(__file__).resolve().parents[1]
 QML_DIR = ROOT / "speakr" / "ui" / "qml"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from scripts.source_identity import (  # noqa: E402
+    collect_source_identity,
+    write_json_atomic,
+)
 
 from PySide6.QtCore import QMetaObject, QObject, QUrl, qVersion  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
@@ -187,6 +192,7 @@ SCENARIOS = (
     ),
 )
 SCENARIO_BY_NAME = {scenario.name: scenario for scenario in SCENARIOS}
+MANIFEST_SCHEMA_VERSION = 3
 
 
 class _ArtifactApp(_App):
@@ -427,7 +433,9 @@ def _clear_managed_artifacts(output: Path) -> None:
         previous = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeError):
         previous = {}
-    if isinstance(previous, dict) and previous.get("schema_version") in (1, 2):
+    # Legacy manifests are consulted only to delete narrowly validated files
+    # owned by this tool. They are never accepted as verification evidence.
+    if isinstance(previous, dict) and previous.get("schema_version") in (1, 2, 3):
         artifacts = previous.get("scenarios", [])
         if not isinstance(artifacts, list):
             artifacts = []
@@ -465,40 +473,67 @@ def capture_scenarios(
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     _clear_managed_artifacts(output)
-    application = _application()
+    manifest_path = output / "manifest.json"
+    source_at_start = collect_source_identity(ROOT)
+    running_manifest: dict[str, object] = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "status": "running",
+        "source_identity": source_at_start,
+        "purpose": "platform layout evidence; not a pixel-perfect golden",
+        "scenarios": [],
+    }
+    write_json_atomic(manifest_path, running_manifest)
+
     artifacts = []
-    for name in requested:
-        scenario = SCENARIO_BY_NAME[name]
-        destination = output / f"{scenario.name}.png"
-        if scenario.surface == "main":
-            width, height, renderer_api, warnings = _capture_main(
-                application, scenario, destination
+    try:
+        application = _application()
+        for name in requested:
+            scenario = SCENARIO_BY_NAME[name]
+            destination = output / f"{scenario.name}.png"
+            if scenario.surface == "main":
+                width, height, renderer_api, warnings = _capture_main(
+                    application, scenario, destination
+                )
+            else:
+                width, height, renderer_api, warnings = _capture_hud(
+                    application, scenario, destination
+                )
+            artifacts.append(
+                {
+                    "name": scenario.name,
+                    "surface": scenario.surface,
+                    "file": destination.name,
+                    "width": width,
+                    "height": height,
+                    "text_scale": scenario.text_scale,
+                    "theme": scenario.theme,
+                    "visual_effects": scenario.visual_effects,
+                    "simulated_system_high_contrast": (
+                        scenario.simulated_system_high_contrast
+                    ),
+                    "renderer_api": renderer_api,
+                    "qml_warnings": warnings,
+                    "sha256": _sha256(destination),
+                }
             )
-        else:
-            width, height, renderer_api, warnings = _capture_hud(
-                application, scenario, destination
-            )
-        artifacts.append(
-            {
-                "name": scenario.name,
-                "surface": scenario.surface,
-                "file": destination.name,
-                "width": width,
-                "height": height,
-                "text_scale": scenario.text_scale,
-                "theme": scenario.theme,
-                "visual_effects": scenario.visual_effects,
-                "simulated_system_high_contrast": (
-                    scenario.simulated_system_high_contrast
-                ),
-                "renderer_api": renderer_api,
-                "qml_warnings": warnings,
-                "sha256": _sha256(destination),
-            }
-        )
+    except Exception:
+        running_manifest["status"] = "failed"
+        running_manifest["failure"] = "capture_failed"
+        write_json_atomic(manifest_path, running_manifest)
+        raise
+
+    source_at_end = collect_source_identity(ROOT)
+    if source_at_end != source_at_start:
+        running_manifest["status"] = "failed"
+        running_manifest["failure"] = "source_changed_during_capture"
+        running_manifest["observed_source_identity"] = source_at_end
+        write_json_atomic(manifest_path, running_manifest)
+        raise RuntimeError("source identity changed during screenshot capture")
 
     manifest: dict[str, object] = {
-        "schema_version": 2,
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "status": "passed",
+        "source_identity": source_at_start,
         "purpose": "platform layout evidence; not a pixel-perfect golden",
         "capture_scope": {
             "proves": (
@@ -526,10 +561,7 @@ def capture_scenarios(
         },
         "scenarios": artifacts,
     }
-    (output / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_json_atomic(manifest_path, manifest)
     return manifest
 
 

@@ -23,6 +23,18 @@ from typing import Sequence
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.source_identity import (  # noqa: E402
+    SourceIdentityError,
+    collect_source_identity,
+    write_json_atomic,
+)
+
+
+REPORT_SCHEMA_VERSION = 3
+SCREENSHOT_MANIFEST_SCHEMA_VERSION = 3
 
 # These exact tests are the minimum proof for each audit area.  The harness
 # still runs the complete suite, including every regression test not listed.
@@ -116,6 +128,16 @@ REQUIRED_EVIDENCE_TESTS = {
         "tests.test_renderer_truth.PreparedHandoffTests.test_frontend_commit_orders_prepare_before_core_and_aborts_once",
     ),
     "platform_screenshot_artifacts": (
+        "tests.test_verification_harness.VerificationHarnessTests.test_capture_invalidates_stale_manifest_before_qt_startup",
+        "tests.test_verification_harness.VerificationHarnessTests.test_platform_screenshot_manifest_is_complete_and_idempotent",
+    ),
+    "evidence_source_identity": (
+        "tests.test_verification_harness.VerificationHarnessTests.test_source_identity_is_path_safe_and_tracks_relevant_dirty_state",
+        "tests.test_verification_harness.VerificationHarnessTests.test_stale_green_report_is_replaced_with_current_running_identity",
+        "tests.test_verification_harness.VerificationHarnessTests.test_stale_missing_and_mismatched_evidence_identity_is_rejected",
+        "tests.test_verification_harness.VerificationHarnessTests.test_aggregate_rejects_missing_legacy_and_mismatched_manifest_identity",
+        "tests.test_verification_harness.VerificationHarnessTests.test_mid_run_source_mutation_invalidates_otherwise_green_evidence",
+        "tests.test_verification_harness.VerificationHarnessTests.test_capture_invalidates_stale_manifest_before_qt_startup",
         "tests.test_verification_harness.VerificationHarnessTests.test_platform_screenshot_manifest_is_complete_and_idempotent",
     ),
 }
@@ -459,19 +481,102 @@ def verification_commands(
     return commands
 
 
+class EvidenceIdentityError(RuntimeError):
+    """Raised when persisted evidence cannot be tied to this source tree."""
+
+
+def _read_evidence_document(path: Path, label: str) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise EvidenceIdentityError(f"{label} is missing") from exc
+    except (json.JSONDecodeError, OSError, UnicodeError) as exc:
+        raise EvidenceIdentityError(f"{label} is not valid JSON") from exc
+    if not isinstance(value, dict):
+        raise EvidenceIdentityError(f"{label} is not a JSON object")
+    return value
+
+
+def validate_evidence_identity(
+    document: dict[str, object],
+    expected_identity: dict[str, object],
+    *,
+    label: str,
+    schema_version: int,
+    status: str,
+) -> None:
+    """Reject stale, legacy, incomplete, or mismatched evidence metadata."""
+
+    if document.get("schema_version") != schema_version:
+        raise EvidenceIdentityError(
+            f"{label} schema is not {schema_version}; legacy evidence is invalid"
+        )
+    if document.get("status") != status:
+        raise EvidenceIdentityError(f"{label} status is not {status}")
+    identity = document.get("source_identity")
+    if not isinstance(identity, dict):
+        raise EvidenceIdentityError(f"{label} source identity is missing")
+    if identity != expected_identity:
+        raise EvidenceIdentityError(f"{label} source identity does not match")
+
+
 def _write_report(path: Path, report: dict[str, object]) -> None:
-    path.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    write_json_atomic(path, report)
 
 
 def run_verification(output: Path) -> int:
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    report_path = output / "verification-report.json"
+    screenshot_manifest_path = output / "screenshots" / "manifest.json"
+    # Invalidate any prior PASS before Git inspection or tool discovery. If
+    # startup is interrupted, the artifact remains explicitly non-passed.
+    _write_report(
+        report_path,
+        {
+            "schema_version": REPORT_SCHEMA_VERSION,
+            "status": "initializing",
+            "automated_status": "not_passed",
+            "source_identity": None,
+            "steps": [],
+        },
+    )
+    write_json_atomic(
+        screenshot_manifest_path,
+        {
+            "schema_version": SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+            "status": "initializing",
+            "source_identity": None,
+            "scenarios": [],
+        },
+    )
+    try:
+        source_at_start = collect_source_identity(ROOT)
+    except SourceIdentityError as error:
+        message = sanitize_evidence_text(error, output)
+        failed_report: dict[str, object] = {
+            "schema_version": REPORT_SCHEMA_VERSION,
+            "status": "failed",
+            "automated_status": "failed",
+            "source_identity": None,
+            "failed_step": "source_identity_start",
+            "steps": [
+                {
+                    "name": "source_identity_start",
+                    "exit_code": 1,
+                    "error": message,
+                }
+            ],
+        }
+        _write_report(report_path, failed_report)
+        print(f"FAILED: source_identity_start ({message})", file=sys.stderr)
+        return 1
+
     report: dict[str, object] = {
-        "schema_version": 2,
+        "schema_version": REPORT_SCHEMA_VERSION,
         "status": "running",
         "automated_status": "running",
+        "source_identity": source_at_start,
         "manual_platform_status": "required",
         "routed_product_findings_status": "open_pr12_inputs",
         "routed_product_findings": ROUTED_PR12_PRODUCT_VETOES,
@@ -503,8 +608,50 @@ def run_verification(output: Path) -> int:
         },
         "steps": [],
     }
-    report_path = output / "verification-report.json"
     _write_report(report_path, report)
+    write_json_atomic(
+        screenshot_manifest_path,
+        {
+            "schema_version": SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+            "status": "pending",
+            "source_identity": source_at_start,
+            "purpose": "platform layout evidence; not a pixel-perfect golden",
+            "scenarios": [],
+        },
+    )
+
+    def fail_identity_gate(
+        name: str,
+        index: int,
+        message: str,
+        details: dict[str, object] | None = None,
+    ) -> int:
+        safe_message = sanitize_evidence_text(message, output)
+        log_name = f"{index:02d}-{name}.log"
+        payload = {"error": safe_message}
+        if details:
+            payload.update(details)
+        (output / log_name).write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        report["status"] = "failed"
+        report["automated_status"] = "failed"
+        report["failed_step"] = name
+        report["steps"].append(
+            {
+                "name": name,
+                "command": ["internal", name],
+                "exit_code": 1,
+                "log": log_name,
+                "error": safe_message,
+                "runtime_qml_warnings": [],
+                "missing_platform_proof": [],
+            }
+        )
+        _write_report(report_path, report)
+        print(f"FAILED: {name} ({safe_message}); see {output / log_name}", file=sys.stderr)
+        return 1
 
     try:
         qmllint_executable = _qmllint_executable()
@@ -647,6 +794,88 @@ def run_verification(output: Path) -> int:
         return 1
     print("PASS: raw_runtime_log_marker_scan")
     _write_report(report_path, report)
+
+    evidence_index = len(commands) + 2
+    try:
+        persisted_report = _read_evidence_document(
+            report_path, "verification report"
+        )
+        validate_evidence_identity(
+            persisted_report,
+            source_at_start,
+            label="verification report",
+            schema_version=REPORT_SCHEMA_VERSION,
+            status="running",
+        )
+        screenshot_manifest = _read_evidence_document(
+            screenshot_manifest_path, "screenshot manifest"
+        )
+        validate_evidence_identity(
+            screenshot_manifest,
+            source_at_start,
+            label="screenshot manifest",
+            schema_version=SCREENSHOT_MANIFEST_SCHEMA_VERSION,
+            status="passed",
+        )
+    except EvidenceIdentityError as error:
+        return fail_identity_gate(
+            "evidence_identity_validation",
+            evidence_index,
+            str(error),
+        )
+    evidence_log = f"{evidence_index:02d}-evidence_identity_validation.log"
+    (output / evidence_log).write_text(
+        "Verification report and screenshot manifest match the stable source "
+        "identity.\n",
+        encoding="utf-8",
+    )
+    report["steps"].append(
+        {
+            "name": "evidence_identity_validation",
+            "command": ["internal", "validate persisted evidence identity"],
+            "exit_code": 0,
+            "log": evidence_log,
+            "runtime_qml_warnings": [],
+            "missing_platform_proof": [],
+        }
+    )
+    print("PASS: evidence_identity_validation")
+
+    stability_index = len(commands) + 3
+    try:
+        source_at_end = collect_source_identity(ROOT)
+    except SourceIdentityError as error:
+        return fail_identity_gate(
+            "source_identity_stability",
+            stability_index,
+            str(error),
+        )
+    if source_at_end != source_at_start:
+        return fail_identity_gate(
+            "source_identity_stability",
+            stability_index,
+            "source identity changed during verification",
+            {
+                "source_identity_at_start": source_at_start,
+                "source_identity_at_end": source_at_end,
+            },
+        )
+    stability_log = f"{stability_index:02d}-source_identity_stability.log"
+    (output / stability_log).write_text(
+        json.dumps(source_at_end, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    report["steps"].append(
+        {
+            "name": "source_identity_stability",
+            "command": ["internal", "recompute source identity"],
+            "exit_code": 0,
+            "log": stability_log,
+            "runtime_qml_warnings": [],
+            "missing_platform_proof": [],
+        }
+    )
+    print("PASS: source_identity_stability")
 
     report["status"] = "passed"
     report["automated_status"] = "passed"
