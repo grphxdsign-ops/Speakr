@@ -236,7 +236,23 @@ jobs:
           mkdir -p "$dmgroot"
           ditto dist/Speakr.app "$dmgroot/Speakr.app"
           ln -s /Applications "$dmgroot/Applications"
-          hdiutil create -volname Speakr -srcfolder "$dmgroot" -ov -format UDZO Speakr.dmg
+          sync
+          dmg_created=false
+          for attempt in 1 2 3; do
+            rm -f -- Speakr.dmg
+            if hdiutil create -volname Speakr -srcfolder "$dmgroot" \
+                -ov -format UDZO Speakr.dmg; then
+              dmg_created=true
+              break
+            fi
+            echo "::warning::DMG creation attempt $attempt was busy; retrying."
+            sync
+            sleep $((attempt * 3))
+          done
+          if [ "$dmg_created" != "true" ]; then
+            echo "::error::Could not create the final DMG after three bounded attempts."
+            exit 1
+          fi
 
       - name: Notarize and staple distribution DMG
         if: env.MAC_DISTRIBUTION_SIGNED == 'true'

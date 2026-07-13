@@ -102,6 +102,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("xcrun notarytool submit Speakr-notarization.zip", self.workflow)
         self.assertIn("xcrun stapler staple dist/Speakr.app", self.workflow)
         self.assertIn("xcrun notarytool submit Speakr.dmg", self.workflow)
+        self.assertIn("DMG creation attempt $attempt was busy; retrying", self.workflow)
         self.assertIn("ditto \"$mounted_app\" \"$installroot/Speakr.app\"", self.workflow)
         self.assertIn("lipo -archs", self.workflow)
         self.assertIn("WINDOWS_CERTIFICATE_PFX", self.workflow)
