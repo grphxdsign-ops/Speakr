@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import unittest
 from pathlib import Path
 
@@ -10,18 +11,22 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
 from PySide6.QtCore import (
     Property,
+    QCoreApplication,
+    QEvent,
     QMetaObject,
     QObject,
     QPointF,
     QRectF,
     Signal,
     Slot,
+    Qt,
     QUrl,
 )
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QKeySequence
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtQuickControls2 import QQuickStyle
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from speakr import native_window, qt_ui
@@ -90,6 +95,10 @@ class _WindowController(QObject):
         self._maximized = not self._maximized
         self.action = "toggleMaximize"
         self.maximizedChanged.emit()
+
+    @Slot()
+    def toggleFullScreen(self):
+        self.action = "toggleFullScreen"
 
     @Slot()
     def closeMain(self):
@@ -176,12 +185,68 @@ class ShellHomeTests(unittest.TestCase):
         engine.warnings.connect(
             lambda values: warnings.extend(error.toString() for error in values)
         )
+        engine._speakr_warning_messages = warnings
         engine.load(QUrl.fromLocalFile(str(self.qml / "Main.qml")))
         self.qapp.processEvents()
         self.qapp.processEvents()
         self.assertEqual(len(engine.rootObjects()), 1, warnings)
         self.assertEqual(warnings, [])
         return app, bridge, controller, engine, engine.rootObjects()[0]
+
+    def _drain_deferred_deletes(self):
+        for _ in range(3):
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            self.qapp.processEvents()
+
+    def _dispose_qml(
+        self,
+        bridge,
+        engine,
+        *,
+        root=None,
+        components=(),
+        warnings=None,
+    ):
+        captured_warnings = (
+            warnings
+            if warnings is not None
+            else getattr(engine, "_speakr_warning_messages", None)
+        )
+        roots = []
+        if root is not None:
+            roots.append(root)
+        try:
+            for engine_root in engine.rootObjects():
+                if engine_root not in roots:
+                    roots.append(engine_root)
+        except RuntimeError:
+            pass
+
+        for item in roots:
+            try:
+                item.hide()
+                item.deleteLater()
+            except RuntimeError:
+                pass
+        for component in components:
+            if component is None:
+                continue
+            try:
+                component.deleteLater()
+            except RuntimeError:
+                pass
+        try:
+            engine.deleteLater()
+        except RuntimeError:
+            pass
+        self._drain_deferred_deletes()
+
+        if captured_warnings is not None:
+            self.assertEqual(captured_warnings, [])
+
+        bridge.close()
+        bridge.deleteLater()
+        self._drain_deferred_deletes()
 
     def test_custom_chrome_reports_logical_hit_regions_and_44px_controls(self):
         _app, bridge, controller, engine, main = self._load_main()
@@ -217,9 +282,115 @@ class ShellHomeTests(unittest.TestCase):
             self.assertTrue(QMetaObject.invokeMethod(close, "click"))
             self.assertEqual(controller.action, "close")
         finally:
-            bridge.close()
-            engine.deleteLater()
+            self._dispose_qml(bridge, engine, root=main)
+
+    def test_fullscreen_shortcut_uses_standard_key_and_invokes_controller(self):
+        _app, bridge, controller, engine, main = self._load_main()
+        try:
+            main.show()
+            main.requestActivate()
+            QTest.qWait(50)
             self.qapp.processEvents()
+
+            standard = main.findChild(QObject, "standardFullScreenShortcut")
+            fallback = main.findChild(QObject, "fallbackFullScreenShortcut")
+            self.assertIsNotNone(standard)
+            self.assertIsNotNone(fallback)
+            self.assertEqual(
+                standard.property("context"), Qt.ShortcutContext.WindowShortcut
+            )
+            self.assertEqual(
+                fallback.property("context"), Qt.ShortcutContext.WindowShortcut
+            )
+
+            bindings = QKeySequence.keyBindings(QKeySequence.StandardKey.FullScreen)
+            standard_available = bool(standard.property("nativeText"))
+            fallback_sequence = QKeySequence(
+                "Ctrl+Meta+F" if sys.platform == "darwin" else "F11"
+            )
+            if standard_available:
+                self.assertTrue(standard.property("enabled"))
+                self.assertFalse(fallback.property("enabled"))
+                self.assertGreaterEqual(len(bindings), 1)
+                QTest.keySequence(main, bindings[0])
+            else:
+                self.assertFalse(standard.property("enabled"))
+                self.assertTrue(fallback.property("enabled"))
+                QTest.keySequence(main, fallback_sequence)
+            self.qapp.processEvents()
+            self.assertEqual(controller.action, "toggleFullScreen")
+
+            if standard_available:
+                controller.action = ""
+                self.assertTrue(standard.setProperty("sequences", []))
+                self.qapp.processEvents()
+                self.assertFalse(standard.property("enabled"))
+                self.assertTrue(fallback.property("enabled"))
+                QTest.keySequence(main, fallback_sequence)
+                self.qapp.processEvents()
+                self.assertEqual(controller.action, "toggleFullScreen")
+        finally:
+            self._dispose_qml(bridge, engine, root=main)
+
+    def test_window_controls_follow_platform_visual_focus_order(self):
+        _app, bridge, _controller, engine, main = self._load_main()
+        try:
+            main.show()
+            for _ in range(20):
+                self.qapp.processEvents()
+
+            chrome = main.findChild(QObject, "windowChrome")
+            controls = {
+                "minimize": main.findChild(QQuickItem, "minimizeWindowButton"),
+                "maximize": main.findChild(QQuickItem, "maximizeWindowButton"),
+                "close": main.findChild(QQuickItem, "closeWindowButton"),
+            }
+            self.assertTrue(all(control is not None for control in controls.values()))
+            expected = (
+                ["close", "minimize", "maximize"]
+                if bool(chrome.property("controlsOnLeft"))
+                else ["minimize", "maximize", "close"]
+            )
+
+            for current_name, next_name in zip(expected, expected[1:]):
+                current = controls[current_name]
+                following = current.nextItemInFocusChain(True)
+                self.assertEqual(following.objectName(), controls[next_name].objectName())
+                previous = controls[next_name].nextItemInFocusChain(False)
+                self.assertEqual(previous.objectName(), current.objectName())
+
+            first = controls[expected[0]]
+            last = controls[expected[-1]]
+            before = first.nextItemInFocusChain(False)
+            after = last.nextItemInFocusChain(True)
+            control_names = {control.objectName() for control in controls.values()}
+            self.assertNotIn(before.objectName(), control_names)
+            self.assertNotIn(after.objectName(), control_names)
+            self.assertTrue(before.isVisible())
+            self.assertTrue(after.isVisible())
+            self.assertEqual(
+                before.nextItemInFocusChain(True).objectName(), first.objectName()
+            )
+            self.assertEqual(
+                after.nextItemInFocusChain(False).objectName(), last.objectName()
+            )
+        finally:
+            self._dispose_qml(bridge, engine, root=main)
+
+    def test_main_visibility_handler_and_runtime_load_are_warning_free(self):
+        source = (self.qml / "Main.qml").read_text(encoding="utf-8")
+        self.assertIn("onVisibilityChanged: function()", source)
+        self.assertIn("root.visibility === Window.Hidden", source)
+        self.assertNotRegex(source, r"\bif\s*\(\s*visibility\s*===")
+
+        _app, bridge, _controller, engine, main = self._load_main()
+        try:
+            main.show()
+            self.qapp.processEvents()
+            main.hide()
+            self.qapp.processEvents()
+        finally:
+            self._dispose_qml(bridge, engine, root=main)
 
     def test_system_frame_fallback_hides_duplicate_custom_titlebar(self):
         _app, bridge, controller, engine, main = self._load_main()
@@ -231,9 +402,7 @@ class ShellHomeTests(unittest.TestCase):
             self.assertFalse(chrome.property("visible"))
             self.assertGreater(main.findChild(QObject, "pageContentSurface").height(), 0)
         finally:
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            self._dispose_qml(bridge, engine, root=main)
 
     def test_missing_native_controller_keeps_only_the_system_titlebar(self):
         app = _App()
@@ -244,6 +413,7 @@ class ShellHomeTests(unittest.TestCase):
         engine.warnings.connect(
             lambda values: warnings.extend(error.toString() for error in values)
         )
+        main = None
         try:
             engine.load(QUrl.fromLocalFile(str(self.qml / "Main.qml")))
             self.qapp.processEvents()
@@ -257,9 +427,9 @@ class ShellHomeTests(unittest.TestCase):
                 main.findChild(QObject, "pageContentSurface").height(), 0
             )
         finally:
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            self._dispose_qml(
+                bridge, engine, root=main, warnings=warnings
+            )
 
     def test_native_material_exposes_the_compositor_without_covering_fallbacks(self):
         _app, bridge, controller, engine, main = self._load_main()
@@ -276,9 +446,7 @@ class ShellHomeTests(unittest.TestCase):
             self.assertFalse(bool(backdrop.property("paintCanvas")))
             self.assertEqual(QColor(main.property("color")).alpha(), 0)
         finally:
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            self._dispose_qml(bridge, engine, root=main)
 
     def test_navigation_and_practice_cancel_untimed_hotkey_capture(self):
         app = _CaptureApp()
@@ -328,10 +496,7 @@ class ShellHomeTests(unittest.TestCase):
             self.assertEqual(app.cancel_count, 2)
         finally:
             bridge.cancelHotkeyCapture()
-            main.hide()
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            self._dispose_qml(bridge, engine, root=main)
 
     def test_real_native_controller_receives_shell_regions_for_snap_and_resize(self):
         app = _App()
@@ -401,14 +566,13 @@ class ShellHomeTests(unittest.TestCase):
             )
         finally:
             controller.detach()
-            bridge.close()
-            if main is not None:
-                main.close()
-                main.deleteLater()
-            if component is not None:
-                component.deleteLater()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            self._dispose_qml(
+                bridge,
+                engine,
+                root=main,
+                components=(component,),
+                warnings=warnings,
+            )
 
     def test_home_reflows_at_minimum_size_and_200_percent_text(self):
         _app, bridge, _controller, engine, main = self._load_main(text_scale=200)
@@ -460,10 +624,7 @@ class ShellHomeTests(unittest.TestCase):
                         origin.x() + item.width(), content_right + 0.5
                     )
         finally:
-            main.hide()
-            bridge.close()
-            engine.deleteLater()
-            self.qapp.processEvents()
+            self._dispose_qml(bridge, engine, root=main)
 
     def test_shell_uses_shared_tokens_and_accessible_window_copy(self):
         sources = {

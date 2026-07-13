@@ -97,6 +97,11 @@ ApplicationWindow {
         else if (currentPage === "help") helpPage.focusHeading()
     }
 
+    function toggleFullScreen() {
+        if (nativeController !== null)
+            nativeController.toggleFullScreen()
+    }
+
     function beginRepeatSetup() {
         if (currentPage === "practice") {
             bridge.stopPractice()
@@ -141,6 +146,22 @@ ApplicationWindow {
         onActivated: bridge.quitApp()
     }
     Shortcut {
+        id: standardFullScreenShortcut
+        objectName: "standardFullScreenShortcut"
+        sequences: [StandardKey.FullScreen]
+        context: Qt.WindowShortcut
+        enabled: root.nativeController !== null && nativeText.length > 0
+        onActivated: root.toggleFullScreen()
+    }
+    Shortcut {
+        objectName: "fallbackFullScreenShortcut"
+        sequence: Qt.platform.os === "osx" ? "Ctrl+Meta+F" : "F11"
+        context: Qt.WindowShortcut
+        enabled: root.nativeController !== null
+                 && standardFullScreenShortcut.nativeText.length === 0
+        onActivated: root.toggleFullScreen()
+    }
+    Shortcut {
         sequence: "Ctrl+1"
         enabled: !root.showingOnboarding
         onActivated: root.go("home")
@@ -182,8 +203,9 @@ ApplicationWindow {
         }
     }
 
-    onVisibilityChanged: {
-        if (visibility === Window.Hidden || visibility === Window.Minimized) {
+    onVisibilityChanged: function() {
+        if (root.visibility === Window.Hidden
+                || root.visibility === Window.Minimized) {
             bridge.stopPractice()
             bridge.clearPractice()
         }

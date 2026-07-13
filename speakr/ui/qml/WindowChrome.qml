@@ -11,6 +11,8 @@ Item {
     property var hostWindow: null
     readonly property bool controlsOnLeft: Qt.platform.os === "osx"
     readonly property bool maximized: controller !== null && Boolean(controller.maximized)
+    readonly property var firstControl: controlRow.firstControl
+    readonly property var lastControl: controlRow.lastControl
 
     implicitHeight: Math.max(tokens.metric(64), controlRow.implicitHeight + tokens.space16)
     Accessible.role: Accessible.Pane
@@ -24,10 +26,13 @@ Item {
     function reportHitRegions() {
         if (controller === null || !Boolean(controller.customChromeEnabled))
             return
+        if (controlRow.minimizeButton === null
+                || controlRow.maximizeButton === null
+                || controlRow.closeButton === null) return
         controller.setHitRegions(sceneRect(dragRegion),
-                                 sceneRect(minimizeButton),
-                                 sceneRect(maximizeButton),
-                                 sceneRect(closeButton),
+                                 sceneRect(controlRow.minimizeButton),
+                                 sceneRect(controlRow.maximizeButton),
+                                 sceneRect(controlRow.closeButton),
                                  tokens.space8)
     }
 
@@ -147,12 +152,21 @@ Item {
     Item {
         id: controlRow
         objectName: "windowControlGroup"
-        readonly property real buttonStep: minimizeButton.implicitWidth
-                                                + root.tokens.space4
-        implicitWidth: minimizeButton.implicitWidth * 3 + root.tokens.space8
-        implicitHeight: Math.max(minimizeButton.implicitHeight,
-                                 maximizeButton.implicitHeight,
-                                 closeButton.implicitHeight)
+        readonly property real buttonWidth: root.tokens.controlHeight
+        readonly property real buttonStep: buttonWidth + root.tokens.space4
+        readonly property var firstControl: firstControlLoader.item
+        readonly property var lastControl: lastControlLoader.item
+        readonly property var minimizeButton: root.controlsOnLeft
+                                              ? middleControlLoader.item
+                                              : firstControlLoader.item
+        readonly property var maximizeButton: root.controlsOnLeft
+                                              ? lastControlLoader.item
+                                              : middleControlLoader.item
+        readonly property var closeButton: root.controlsOnLeft
+                                           ? firstControlLoader.item
+                                           : lastControlLoader.item
+        implicitWidth: buttonWidth * 3 + root.tokens.space8
+        implicitHeight: buttonWidth
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.left: root.controlsOnLeft ? parent.left : undefined
@@ -162,37 +176,70 @@ Item {
         Accessible.role: Accessible.Grouping
         Accessible.name: qsTr("Window controls")
 
-        ChromeButton {
-            id: minimizeButton
-            objectName: "minimizeWindowButton"
-            x: root.controlsOnLeft ? controlRow.buttonStep : 0
+        Loader {
+            id: firstControlLoader
+            x: 0
             anchors.verticalCenter: parent.verticalCenter
+            sourceComponent: root.controlsOnLeft ? closeControl : minimizeControl
+        }
+        Loader {
+            id: middleControlLoader
+            x: controlRow.buttonStep
+            anchors.verticalCenter: parent.verticalCenter
+            sourceComponent: root.controlsOnLeft ? minimizeControl : maximizeControl
+        }
+        Loader {
+            id: lastControlLoader
+            x: controlRow.buttonStep * 2
+            anchors.verticalCenter: parent.verticalCenter
+            sourceComponent: root.controlsOnLeft ? maximizeControl : closeControl
+        }
+    }
+
+    Component {
+        id: minimizeControl
+
+        ChromeButton {
+            objectName: "minimizeWindowButton"
             tokens: root.tokens
             windowAction: "minimize"
             accessibleDescription: qsTr("Minimize Speakr to the taskbar or Dock")
+            KeyNavigation.tab: controlRow.maximizeButton
+            KeyNavigation.backtab: root.controlsOnLeft
+                                   ? controlRow.closeButton : null
             onActionRequested: function(action) { root.invokeAction(action) }
         }
+    }
+
+    Component {
+        id: maximizeControl
+
         ChromeButton {
-            id: maximizeButton
             objectName: "maximizeWindowButton"
-            x: root.controlsOnLeft ? controlRow.buttonStep * 2
-                                   : controlRow.buttonStep
-            anchors.verticalCenter: parent.verticalCenter
             tokens: root.tokens
             windowAction: root.maximized ? "restore" : "maximize"
             accessibleDescription: root.maximized
                                    ? qsTr("Restore the Speakr window")
                                    : qsTr("Maximize the Speakr window")
+            KeyNavigation.tab: root.controlsOnLeft
+                               ? null : controlRow.closeButton
+            KeyNavigation.backtab: controlRow.minimizeButton
             onActionRequested: function(action) { root.invokeAction(action) }
         }
+    }
+
+    Component {
+        id: closeControl
+
         ChromeButton {
-            id: closeButton
             objectName: "closeWindowButton"
-            x: root.controlsOnLeft ? 0 : controlRow.buttonStep * 2
-            anchors.verticalCenter: parent.verticalCenter
             tokens: root.tokens
             windowAction: "close"
             accessibleDescription: qsTr("Hide Speakr to the tray; use Quit to stop dictation")
+            KeyNavigation.tab: root.controlsOnLeft
+                               ? controlRow.minimizeButton : null
+            KeyNavigation.backtab: root.controlsOnLeft
+                                   ? null : controlRow.maximizeButton
             onActionRequested: function(action) { root.invokeAction(action) }
         }
     }
