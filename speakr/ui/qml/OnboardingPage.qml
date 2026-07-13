@@ -622,16 +622,21 @@ Item {
                                         Rectangle {
                                             objectName: "onboardingPracticeMeterSegment"
                                             required property int index
+                                            readonly property bool filled: index < root.levelCount()
+                                            readonly property color edgeColor: root.tokens.highContrast
+                                                                                 ? root.tokens.text
+                                                                                 : (filled ? root.tokens.accent
+                                                                                           : root.tokens.border)
                                             Layout.preferredWidth: root.tokens.metric(28)
                                             Layout.preferredHeight: root.tokens.space12
                                             radius: root.tokens.radiusSmall
-                                            color: index < root.levelCount()
-                                                   ? root.tokens.accent
-                                                   : root.tokens.surfaceRaised
+                                            color: root.tokens.highContrast
+                                                   ? (filled ? root.tokens.text
+                                                             : root.tokens.surface)
+                                                   : (filled ? root.tokens.accent
+                                                             : root.tokens.surfaceRaised)
                                             border.width: root.tokens.borderWidth
-                                            border.color: index < root.levelCount()
-                                                          ? root.tokens.accent
-                                                          : root.tokens.border
+                                            border.color: edgeColor
 
                                             Behavior on color {
                                                 ColorAnimation { duration: root.tokens.motionFast }

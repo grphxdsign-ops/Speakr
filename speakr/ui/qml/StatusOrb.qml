@@ -26,6 +26,9 @@ RowLayout {
 
     Rectangle {
         objectName: "statusOrbBadge"
+        readonly property color edgeColor: root.tokens.highContrast
+                                              ? root.tokens.accentText
+                                              : root.stateColor
         Layout.preferredWidth: root.tokens.metric(root.compact ? 24 : 30)
         Layout.preferredHeight: Layout.preferredWidth
         Layout.alignment: Qt.AlignVCenter
@@ -34,7 +37,7 @@ RowLayout {
                ? root.tokens.accent
                : root.tokens.withAlpha(root.stateColor, 0.16)
         border.width: root.tokens.highContrast ? 2 : 1
-        border.color: root.stateColor
+        border.color: edgeColor
 
         PlainText {
             objectName: "statusOrbGlyph"

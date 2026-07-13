@@ -10,11 +10,13 @@ TextField {
     property bool error: false
     property string errorMessage: ""
     readonly property color resolvedBackgroundColor: error ? tokens.dangerSurface
-                                                            : (hovered ? tokens.surfaceRaised
-                                                                       : tokens.contentSurface)
+                                                            : (hovered && !tokens.highContrast
+                                                               ? tokens.surfaceRaised
+                                                               : tokens.contentSurface)
     readonly property color resolvedBorderColor: error ? tokens.danger
-                                                        : (hovered ? tokens.accent
-                                                                   : tokens.border)
+                                                        : (hovered && !tokens.highContrast
+                                                           ? tokens.accent
+                                                           : tokens.border)
 
     implicitHeight: tokens.controlHeight
     implicitWidth: tokens.metric(220)

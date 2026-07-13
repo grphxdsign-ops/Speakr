@@ -12,6 +12,16 @@ ComboBox {
     readonly property string selectedValueDescription: displayText.length === 0
                                                        ? ""
                                                        : qsTr("Selected: %1").arg(displayText)
+    readonly property bool usesHighlightSurface: enabled && (down || hovered)
+    readonly property color resolvedBackgroundColor: !enabled
+                                                      ? tokens.contentSurface
+                                                      : (down ? tokens.pressed
+                                                              : (hovered ? tokens.hover
+                                                                         : tokens.contentSurface))
+    readonly property color resolvedBorderColor: tokens.highContrast
+                                                  && usesHighlightSurface
+                                                  ? tokens.accentText
+                                                  : tokens.border
 
     implicitHeight: Math.max(tokens.controlHeight,
                              selectedLabel.implicitHeight
@@ -64,13 +74,12 @@ ComboBox {
 
     background: Item {
         Rectangle {
+            objectName: "comboBackground"
             anchors.fill: parent
             radius: control.tokens.radiusControl
-            color: control.down ? control.tokens.pressed
-                                : (control.hovered ? control.tokens.hover
-                                                   : control.tokens.contentSurface)
+            color: control.resolvedBackgroundColor
             border.width: control.tokens.borderWidth
-            border.color: control.tokens.border
+            border.color: control.resolvedBorderColor
 
             Behavior on color {
                 ColorAnimation { duration: control.tokens.motionHover }
@@ -121,7 +130,8 @@ ComboBox {
         background: Rectangle {
             color: option.highlighted ? control.tokens.hover : control.tokens.surface
             border.width: option.visualFocus ? control.tokens.focusWidth : 0
-            border.color: control.tokens.focus
+            border.color: control.tokens.highContrast && option.highlighted
+                          ? control.tokens.accentText : control.tokens.focus
         }
     }
 

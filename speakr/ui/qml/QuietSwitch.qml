@@ -17,11 +17,18 @@ Switch {
         return tokens.surfaceRaised
     }
     readonly property color resolvedKnobColor: !enabled
-                                                ? tokens.disabledControlText
-                                                : ((checked
-                                                    || (tokens.highContrast
-                                                        && (hovered || down)))
-                                                   ? tokens.accentText : tokens.text)
+                                               ? tokens.disabledControlText
+                                               : ((checked
+                                                   || (tokens.highContrast
+                                                       && (hovered || down)))
+                                                   ? tokens.accentText : tokens.buttonText)
+    readonly property color resolvedTrackBorderColor: {
+        if (!tokens.highContrast)
+            return checked || hovered || down ? tokens.accent : tokens.border
+        if (!enabled)
+            return tokens.disabledControlText
+        return checked || hovered || down ? tokens.accentText : tokens.buttonText
+    }
 
     text: checked ? qsTr("On") : qsTr("Off")
     hoverEnabled: true
@@ -45,8 +52,7 @@ Switch {
         radius: height / 2
         color: control.resolvedTrackColor
         border.width: control.tokens.borderWidth
-        border.color: control.checked || control.hovered || control.down
-                      ? control.tokens.accent : control.tokens.border
+        border.color: control.resolvedTrackBorderColor
 
         Behavior on color {
             ColorAnimation { duration: control.tokens.motionHover }

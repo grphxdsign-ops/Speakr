@@ -8,7 +8,7 @@ Button {
     property string kind: "secondary" // primary | secondary | quiet | danger
     property string accessibleDescription: ""
     readonly property color resolvedContentColor: {
-        if (!enabled) return tokens.disabledText
+        if (!enabled) return tokens.disabledButtonText
         if (kind === "primary") return tokens.accentText
         if (kind === "danger")
             return down || hovered ? tokens.dangerStrongText : tokens.danger
@@ -26,6 +26,17 @@ Button {
         if (down) return tokens.pressed
         if (hovered) return tokens.hover
         return kind === "quiet" ? "transparent" : tokens.contentSurface
+    }
+    readonly property color resolvedBorderColor: {
+        if (!tokens.highContrast)
+            return kind === "danger" ? tokens.danger : tokens.border
+        if (!enabled)
+            return tokens.disabledButtonText
+        if (kind === "primary")
+            return tokens.accentText
+        if (kind === "danger")
+            return hovered || down ? tokens.dangerStrongText : tokens.danger
+        return hovered || down ? tokens.accentText : tokens.border
     }
 
     hoverEnabled: true
@@ -63,8 +74,7 @@ Button {
             color: control.resolvedBackgroundColor
             border.width: control.kind === "quiet" && !control.hovered
                           ? 0 : control.tokens.borderWidth
-            border.color: control.kind === "danger" ? control.tokens.danger
-                                                     : control.tokens.border
+            border.color: control.resolvedBorderColor
 
             Behavior on color {
                 ColorAnimation { duration: control.tokens.motionHover }

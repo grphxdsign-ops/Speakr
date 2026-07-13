@@ -83,10 +83,11 @@ Rectangle {
             spacing: root.tokens.space4
 
             PlainText {
+                objectName: "settingCategoryLabel"
                 Layout.fillWidth: true
                 visible: root.showCategory
                 text: root.category
-                color: root.tokens.accent
+                color: root.tokens.accentForeground
                 font.family: root.tokens.fontFamily
                 font.pixelSize: root.tokens.secondary
                 font.weight: Font.DemiBold

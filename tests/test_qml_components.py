@@ -11,10 +11,11 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import QMetaObject, QObject, QUrl
+from PySide6.QtCore import QMetaObject, QObject, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import QAccessible, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickWindow
+from PySide6.QtTest import QTest
 
 from speakr import qt_ui
 from tests.qml_lifecycle import qml_test_application
@@ -39,6 +40,16 @@ class QmlComponentContractTests(unittest.TestCase):
         )
         theme.setParent(engine)
         return theme
+
+    @staticmethod
+    def _visual_items(item):
+        result = []
+        pending = list(item.childItems())
+        while pending:
+            child = pending.pop()
+            result.append(child)
+            pending.extend(child.childItems())
+        return result
 
     def _run_font_probe(self, qpa):
         script = textwrap.dedent(
@@ -191,6 +202,658 @@ class QmlComponentContractTests(unittest.TestCase):
                     )
                 self.assertAlmostEqual(
                     QColor(theme.property("surface")).alphaF(), 1.0, places=5
+                )
+        finally:
+            theme.deleteLater()
+            engine.deleteLater()
+            self.qapp.processEvents()
+
+    def test_system_high_contrast_overrides_every_saved_theme_and_effect_choice(self):
+        engine = QQmlApplicationEngine()
+        theme = self._theme(engine)
+        try:
+            palette = theme.findChild(QObject, "themeSystemPalette")
+            self.assertIsNotNone(palette)
+            role_map = {
+                "canvas": "window",
+                "windowText": "windowText",
+                "surfaceStrong": "base",
+                "surfaceRaised": "button",
+                "buttonText": "buttonText",
+                "textPrimary": "text",
+                "textSecondary": "text",
+                "borderMeaningful": "text",
+                "accent": "highlight",
+                "accentText": "highlightedText",
+                "accentForeground": "text",
+                "success": "text",
+                "successSurface": "base",
+                "warning": "text",
+                "warningSurface": "base",
+                "danger": "text",
+                "dangerSurface": "base",
+                "info": "text",
+                "infoSurface": "base",
+                "focus": "text",
+                "disabledControlSurface": "button",
+                "disabledControlText": "buttonText",
+                "disabledButtonText": "buttonText",
+                "disabledText": "text",
+            }
+            material_roles = (
+                "shellSurface",
+                "navigationSurface",
+                "majorSurface",
+                "noticeSurface",
+                "contentSurface",
+                "hudSurface",
+            )
+            for mode in ("system", "light", "dark", "high_contrast"):
+                for effects in ("system", "full", "reduced", "off"):
+                    with self.subTest(mode=mode, effects=effects):
+                        theme.setProperty("mode", mode)
+                        theme.setProperty("visualEffects", effects)
+                        theme.setProperty("systemHighContrast", True)
+                        theme.setProperty("systemReduceTransparency", False)
+                        theme.setProperty("softwareRenderer", False)
+                        self.qapp.processEvents()
+
+                        self.assertTrue(theme.property("systemHighContrastActive"))
+                        self.assertTrue(theme.property("highContrast"))
+                        self.assertFalse(theme.property("manualHighContrast"))
+                        self.assertEqual(theme.property("effectTier"), "off")
+                        for token_role, system_role in role_map.items():
+                            self.assertEqual(
+                                QColor(theme.property(token_role)),
+                                QColor(palette.property(system_role)),
+                                token_role,
+                            )
+                        for role in material_roles:
+                            self.assertAlmostEqual(
+                                QColor(theme.property(role)).alphaF(), 1.0, places=5
+                            )
+                        for role in (
+                            "atmosphereViolet",
+                            "atmosphereCyan",
+                            "atmosphereBlush",
+                            "orbitLine",
+                            "shadow",
+                        ):
+                            self.assertAlmostEqual(
+                                QColor(theme.property(role)).alphaF(), 0.0, places=5
+                            )
+        finally:
+            theme.deleteLater()
+            engine.deleteLater()
+            self.qapp.processEvents()
+
+    def test_divergent_system_palette_uses_canonical_pairs_in_rendered_components(self):
+        divergent = {
+            "window": "#000000",
+            "windowText": "#FFFFFF",
+            "base": "#FFFFFF",
+            "text": "#000000",
+            "button": "#000000",
+            "buttonText": "#FFFFFF",
+            "highlight": "#FFD400",
+            "highlightedText": "#000000",
+        }
+        for scale in (1.0, 2.0):
+            with self.subTest(scale=scale):
+                engine = QQmlApplicationEngine()
+                theme = self._theme(engine)
+                components = []
+                objects = []
+                window = QQuickWindow()
+                try:
+                    theme.setProperty("mode", "dark")
+                    theme.setProperty("systemPaletteOverride", divergent)
+                    theme.setProperty("systemHighContrast", True)
+                    theme.setProperty("visualEffects", "full")
+                    theme.setProperty("textScale", scale)
+                    theme.setProperty("reduceMotion", True)
+                    self.qapp.processEvents()
+
+                    def create(name, properties):
+                        component = self._component(engine, name)
+                        components.append(component)
+                        item = component.createWithInitialProperties(
+                            {"tokens": theme, **properties}
+                        )
+                        self.assertIsNotNone(
+                            item, [error.toString() for error in component.errors()]
+                        )
+                        objects.append(item)
+                        item.setParentItem(window.contentItem())
+                        return item
+
+                    primary = create(
+                        "QuietButton.qml",
+                        {"kind": "primary", "text": "Continue"},
+                    )
+                    primary.setX(32)
+                    primary.setY(32)
+                    primary.setWidth(220)
+                    primary.setHeight(primary.implicitHeight())
+
+                    disabled = create(
+                        "QuietButton.qml",
+                        {"enabled": False, "text": "Unavailable"},
+                    )
+                    disabled.setX(290)
+                    disabled.setY(32)
+                    disabled.setWidth(220)
+                    disabled.setHeight(disabled.implicitHeight())
+
+                    selected_nav = create(
+                        "NavigationButton.qml",
+                        {"selected": True, "text": "Home"},
+                    )
+                    selected_nav.setX(32)
+                    selected_nav.setY(130)
+                    selected_nav.setWidth(220)
+                    selected_nav.setHeight(selected_nav.implicitHeight())
+
+                    notices = []
+                    for index, kind in enumerate(("warning", "danger")):
+                        notice = create(
+                            "InlineNotice.qml",
+                            {
+                                "kind": kind,
+                                "title": kind.title(),
+                                "message": "Local recovery remains available.",
+                            },
+                        )
+                        notice.setX(32 + index * 330)
+                        notice.setY(230)
+                        notice.setWidth(300)
+                        notice.setHeight(notice.implicitHeight())
+                        notices.append(notice)
+
+                    status = create(
+                        "StatusOrb.qml",
+                        {"statusKind": "danger", "label": "Needs attention"},
+                    )
+                    status.setX(290)
+                    status.setY(130)
+                    status.setWidth(260)
+                    status.setHeight(status.implicitHeight())
+
+                    disabled_switch = create(
+                        "QuietSwitch.qml",
+                        {"checked": True, "enabled": False},
+                    )
+                    disabled_switch.setX(550)
+                    disabled_switch.setY(32)
+                    disabled_switch.setWidth(disabled_switch.implicitWidth())
+                    disabled_switch.setHeight(disabled_switch.implicitHeight())
+
+                    combo = create(
+                        "QuietComboBox.qml",
+                        {"model": ["System"], "currentIndex": 0},
+                    )
+                    combo.setX(550)
+                    combo.setY(105)
+                    combo.setWidth(220)
+                    combo.setHeight(combo.implicitHeight())
+
+                    chrome = create("WindowChrome.qml", {})
+                    chrome.setX(32)
+                    chrome.setY(390)
+                    chrome.setWidth(780)
+                    chrome.setHeight(chrome.implicitHeight())
+
+                    signal_path = create(
+                        "SignalPath.qml",
+                        {"activeStage": 2},
+                    )
+                    signal_path.setX(32)
+                    signal_path.setY(500)
+                    signal_path.setWidth(640)
+                    signal_path.setHeight(signal_path.implicitHeight())
+
+                    setting_row = create(
+                        "SettingRow.qml",
+                        {
+                            "showCategory": True,
+                            "category": "Dictation",
+                            "label": "Dictation mode",
+                            "description": "Choose how capture begins and ends.",
+                            "currentValue": False,
+                        },
+                    )
+                    setting_row.setX(32)
+                    setting_row.setY(610)
+                    setting_row.setWidth(780)
+                    setting_row.setHeight(setting_row.implicitHeight())
+
+                    window.setColor(theme.property("surface"))
+                    window.setWidth(900)
+                    window.setHeight(820)
+                    window.show()
+                    window.requestActivate()
+                    self.qapp.processEvents()
+                    primary.forceActiveFocus(Qt.FocusReason.TabFocusReason)
+                    QTest.mouseMove(
+                        window,
+                        QPoint(
+                            round(combo.x() + combo.width() / 2),
+                            round(combo.y() + combo.height() / 2),
+                        ),
+                    )
+                    self.qapp.processEvents()
+
+                    self.assertTrue(theme.property("systemHighContrastActive"))
+                    self.assertEqual(theme.property("effectTier"), "off")
+                    self.assertEqual(self._hex(theme.property("canvas")), "#000000")
+                    self.assertEqual(
+                        self._hex(theme.property("windowText")), "#FFFFFF"
+                    )
+                    self.assertEqual(self._hex(theme.property("surface")), "#FFFFFF")
+                    self.assertEqual(self._hex(theme.property("text")), "#000000")
+                    self.assertEqual(self._hex(theme.property("buttonText")), "#FFFFFF")
+                    self.assertEqual(
+                        self._hex(theme.property("accentForeground")), "#000000"
+                    )
+
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            theme.property("textPrimary"), theme.property("surface")
+                        ),
+                        7.0,
+                    )
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            theme.property("borderMeaningful"),
+                            theme.property("surface"),
+                        ),
+                        3.0,
+                    )
+                    for notice in notices:
+                        self.assertEqual(
+                            QColor(notice.property("color")),
+                            QColor(theme.property("surface")),
+                        )
+                        self.assertGreaterEqual(
+                            self._contrast(
+                                notice.property("semanticColor"),
+                                notice.property("color"),
+                            ),
+                            7.0,
+                        )
+                        notice_icon = notice.findChild(QObject, "noticeIcon")
+                        self.assertEqual(
+                            QColor(notice_icon.property("edgeColor")),
+                            QColor(theme.property("accentText")),
+                        )
+
+                    disabled_background = disabled.findChild(
+                        QObject, "buttonBackground"
+                    )
+                    disabled_label = disabled.findChild(QObject, "buttonLabel")
+                    self.assertEqual(
+                        self._hex(disabled_background.property("color")), "#000000"
+                    )
+                    self.assertEqual(
+                        self._hex(disabled_label.property("color")), "#FFFFFF"
+                    )
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            disabled_label.property("color"),
+                            disabled_background.property("color"),
+                        ),
+                        7.0,
+                    )
+                    self.assertEqual(
+                        QColor(disabled.property("resolvedBorderColor")),
+                        QColor(theme.property("buttonText")),
+                    )
+
+                    primary_background = primary.findChild(
+                        QObject, "buttonBackground"
+                    )
+                    primary_label = primary.findChild(QObject, "buttonLabel")
+                    self.assertEqual(
+                        self._hex(primary_background.property("color")), "#FFD400"
+                    )
+                    self.assertEqual(
+                        self._hex(primary_label.property("color")), "#000000"
+                    )
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            primary_label.property("color"),
+                            primary_background.property("color"),
+                        ),
+                        7.0,
+                    )
+                    self.assertEqual(
+                        QColor(primary.property("resolvedBorderColor")),
+                        QColor(theme.property("accentText")),
+                    )
+
+                    nav_background = selected_nav.findChild(
+                        QObject, "navigationBackground"
+                    )
+                    nav_label = next(
+                        item
+                        for item in self._visual_items(selected_nav)
+                        if item.property("text") == "Home"
+                    )
+                    self.assertEqual(self._hex(nav_background.property("color")), "#FFD400")
+                    self.assertEqual(
+                        QColor(nav_background.property("edgeColor")),
+                        QColor(theme.property("accentText")),
+                    )
+                    self.assertEqual(self._hex(nav_label.property("color")), "#000000")
+                    nav_marker = selected_nav.findChild(
+                        QObject, "navigationSelectionMarker"
+                    )
+                    self.assertIsNotNone(nav_marker)
+                    self.assertEqual(
+                        QColor(nav_marker.property("color")),
+                        QColor(theme.property("accentText")),
+                    )
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            nav_label.property("color"),
+                            nav_background.property("color"),
+                        ),
+                        7.0,
+                    )
+
+                    status_badge = status.findChild(QObject, "statusOrbBadge")
+                    status_glyph = status.findChild(QObject, "statusOrbGlyph")
+                    self.assertEqual(
+                        QColor(status_badge.property("color")),
+                        QColor(theme.property("accent")),
+                    )
+                    self.assertEqual(
+                        QColor(status_badge.property("edgeColor")),
+                        QColor(theme.property("accentText")),
+                    )
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            status_glyph.property("color"),
+                            status_badge.property("color"),
+                        ),
+                        7.0,
+                    )
+
+                    switch_track = disabled_switch.findChild(
+                        QObject, "switchTrack"
+                    )
+                    switch_knob = disabled_switch.findChild(
+                        QObject, "switchKnob"
+                    )
+                    self.assertEqual(
+                        QColor(switch_track.property("color")),
+                        QColor(theme.property("disabledControlSurface")),
+                    )
+                    self.assertEqual(
+                        QColor(switch_knob.property("color")),
+                        QColor(theme.property("buttonText")),
+                    )
+                    self.assertEqual(
+                        QColor(
+                            disabled_switch.property("resolvedTrackBorderColor")
+                        ),
+                        QColor(theme.property("buttonText")),
+                    )
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            switch_knob.property("color"),
+                            switch_track.property("color"),
+                        ),
+                        7.0,
+                    )
+
+                    combo_background = combo.findChild(QObject, "comboBackground")
+                    combo_label = combo.findChild(QObject, "comboSelectedLabel")
+                    self.assertTrue(bool(combo.property("usesHighlightSurface")))
+                    self.assertEqual(
+                        QColor(combo_background.property("color")),
+                        QColor(theme.property("accent")),
+                    )
+                    self.assertEqual(
+                        QColor(combo_label.property("color")),
+                        QColor(theme.property("accentText")),
+                    )
+                    self.assertEqual(
+                        QColor(combo.property("resolvedBorderColor")),
+                        QColor(theme.property("accentText")),
+                    )
+
+                    chrome_nodes = [
+                        item
+                        for item in self._visual_items(chrome)
+                        if item.objectName() == "chromeSignalNode"
+                    ]
+                    self.assertEqual(len(chrome_nodes), 3)
+                    for node in chrome_nodes:
+                        self.assertEqual(
+                            QColor(node.property("color")),
+                            QColor(theme.property("text")),
+                        )
+
+                    category_label = setting_row.findChild(
+                        QObject, "settingCategoryLabel"
+                    )
+                    self.assertEqual(
+                        QColor(category_label.property("color")),
+                        QColor(theme.property("text")),
+                    )
+
+                    connector_surfaces = sorted(
+                        (
+                            item
+                            for item in self._visual_items(signal_path)
+                            if item.objectName() == "signalConnector"
+                        ),
+                        key=lambda item: item.mapToScene(QPointF(0, 0)).x(),
+                    )
+                    connector_fills = [
+                        item
+                        for item in self._visual_items(signal_path)
+                        if item.objectName() == "signalConnectorFill"
+                    ]
+                    self.assertEqual(len(connector_surfaces), 2)
+                    self.assertEqual(len(connector_fills), 2)
+                    for connector in connector_surfaces:
+                        self.assertEqual(
+                            QColor(connector.property("color")),
+                            QColor(theme.property("surface")),
+                        )
+                        self.assertEqual(
+                            QColor(connector.property("edgeColor")),
+                            QColor(theme.property("text")),
+                        )
+                    for fill in connector_fills:
+                        self.assertEqual(
+                            QColor(fill.property("color")),
+                            QColor(theme.property("text")),
+                        )
+
+                    signal_surfaces = sorted(
+                        (
+                            item
+                            for item in self._visual_items(signal_path)
+                            if item.objectName() == "signalNodeSurface"
+                        ),
+                        key=lambda item: item.mapToScene(QPointF(0, 0)).x(),
+                    )
+                    signal_glyphs = sorted(
+                        (
+                            item
+                            for item in self._visual_items(signal_path)
+                            if item.objectName() == "signalNodeGlyph"
+                        ),
+                        key=lambda item: item.mapToScene(QPointF(0, 0)).x(),
+                    )
+                    self.assertEqual(len(signal_surfaces), 3)
+                    self.assertEqual(len(signal_glyphs), 3)
+                    self.assertEqual(
+                        QColor(signal_surfaces[0].property("color")),
+                        QColor(theme.property("accent")),
+                    )
+                    self.assertEqual(
+                        QColor(signal_surfaces[0].property("edgeColor")),
+                        QColor(theme.property("accentText")),
+                    )
+                    self.assertEqual(
+                        QColor(signal_glyphs[0].property("color")),
+                        QColor(theme.property("accentText")),
+                    )
+                    self.assertEqual(
+                        QColor(signal_surfaces[1].property("color")),
+                        QColor(theme.property("surface")),
+                    )
+                    self.assertEqual(
+                        QColor(signal_surfaces[1].property("edgeColor")),
+                        QColor(theme.property("text")),
+                    )
+                    self.assertEqual(
+                        QColor(signal_glyphs[1].property("color")),
+                        QColor(theme.property("text")),
+                    )
+
+                    focus_rings = [
+                        item
+                        for item in self._visual_items(primary)
+                        if "FocusRing" in item.metaObject().className()
+                    ]
+                    self.assertEqual(len(focus_rings), 1)
+                    self.assertTrue(focus_rings[0].isVisible())
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            theme.property("focus"), window.color()
+                        ),
+                        3.0,
+                    )
+                    image = window.grabWindow()
+                    self.assertFalse(image.isNull())
+                    ratio = image.devicePixelRatio()
+                    connector_centers = []
+                    for connector in connector_surfaces:
+                        center = connector.mapToScene(
+                            QPointF(connector.width() / 2, connector.height() / 2)
+                        )
+                        connector_centers.append(
+                            image.pixelColor(
+                                round(center.x() * ratio),
+                                round(center.y() * ratio),
+                            )
+                        )
+                    self.assertEqual(
+                        self._hex(connector_centers[0]),
+                        self._hex(theme.property("text")),
+                    )
+                    self.assertEqual(
+                        self._hex(connector_centers[1]),
+                        self._hex(theme.property("surface")),
+                    )
+                    clearance = int(theme.property("focusWidth")) + int(
+                        theme.property("focusClearance")
+                    )
+                    focus_x = round(
+                        (primary.x() + primary.width() / 2) * ratio
+                    )
+                    focus_y = round((primary.y() - clearance + 1) * ratio)
+                    rendered_focus = image.pixelColor(focus_x, focus_y)
+                    self.assertEqual(
+                        self._hex(rendered_focus), self._hex(theme.property("focus"))
+                    )
+                    self.assertGreaterEqual(
+                        self._contrast(rendered_focus, window.color()), 3.0
+                    )
+                finally:
+                    window.close()
+                    for item in objects:
+                        item.setParentItem(None)
+                        item.deleteLater()
+                    for component in components:
+                        component.deleteLater()
+                    theme.deleteLater()
+                    engine.deleteLater()
+                    self.qapp.processEvents()
+
+    def test_manual_high_contrast_roles_are_deterministic_and_audited(self):
+        engine = QQmlApplicationEngine()
+        theme = self._theme(engine)
+        try:
+            theme.setProperty("mode", "high_contrast")
+            theme.setProperty("systemHighContrast", False)
+            self.qapp.processEvents()
+            self.assertTrue(theme.property("manualHighContrast"))
+            self.assertFalse(theme.property("systemHighContrastActive"))
+
+            expected = {
+                "canvas": "#000000",
+                "windowText": "#FFFFFF",
+                "surfaceStrong": "#000000",
+                "surfaceRaised": "#303030",
+                "buttonText": "#FFFFFF",
+                "textPrimary": "#FFFFFF",
+                "textSecondary": "#E6E6E6",
+                "borderMeaningful": "#00E5FF",
+                "accent": "#FFD400",
+                "accentText": "#000000",
+                "accentForeground": "#FFD400",
+                "accentHoverSurface": "#FFE466",
+                "accentPressedSurface": "#E6B800",
+                "success": "#00E676",
+                "warning": "#FFD400",
+                "danger": "#FF7294",
+                "info": "#00D4FF",
+                "disabledControlSurface": "#303030",
+                "disabledControlText": "#D0D0D0",
+                "disabledButtonText": "#B8B8B8",
+                "disabledText": "#B8B8B8",
+            }
+            for role, value in expected.items():
+                self.assertEqual(self._hex(theme.property(role)), value, role)
+                self.assertAlmostEqual(
+                    QColor(theme.property(role)).alphaF(), 1.0, places=5
+                )
+
+            surface = theme.property("surfaceStrong")
+            self.assertGreaterEqual(
+                self._contrast(theme.property("textPrimary"), surface), 7.0
+            )
+            self.assertGreaterEqual(
+                self._contrast(theme.property("textSecondary"), surface), 4.5
+            )
+            for role in ("borderMeaningful", "focus"):
+                self.assertGreaterEqual(
+                    self._contrast(theme.property(role), surface), 3.0, role
+                )
+            for foreground, background in (
+                ("accentText", "accent"),
+                ("accentText", "accentHoverSurface"),
+                ("accentText", "accentPressedSurface"),
+                ("success", "successSurface"),
+                ("warning", "warningSurface"),
+                ("danger", "dangerSurface"),
+                ("info", "infoSurface"),
+            ):
+                self.assertGreaterEqual(
+                    self._contrast(
+                        theme.property(foreground), theme.property(background)
+                    ),
+                    7.0,
+                    f"{foreground}/{background}",
+                )
+            for foreground in (
+                "disabledControlText",
+                "disabledButtonText",
+                "disabledText",
+            ):
+                self.assertGreaterEqual(
+                    self._contrast(
+                        theme.property(foreground),
+                        theme.property("disabledControlSurface"),
+                    ),
+                    4.5,
+                    foreground,
                 )
         finally:
             theme.deleteLater()
@@ -672,10 +1335,9 @@ Item {
         try:
             theme.setProperty("mode", "high_contrast")
             self.qapp.processEvents()
-            self.assertIn(
-                "accentText: highContrast ? systemPalette.highlightedText",
-                (self.qml / "Theme.qml").read_text(encoding="utf-8"),
-            )
+            self.assertTrue(theme.property("manualHighContrast"))
+            self.assertEqual(self._hex(theme.property("accent")), "#FFD400")
+            self.assertEqual(self._hex(theme.property("accentText")), "#000000")
 
             for name, badge_name, glyph_name in (
                 ("InlineNotice.qml", "noticeIcon", "noticeIconGlyph"),
@@ -703,6 +1365,216 @@ Item {
             theme.deleteLater()
             engine.deleteLater()
             self.qapp.processEvents()
+
+    def test_manual_high_contrast_component_states_and_focus_render_at_100_and_200_percent(self):
+        for scale in (1.0, 2.0):
+            with self.subTest(scale=scale):
+                engine = QQmlApplicationEngine()
+                theme = self._theme(engine)
+                components = []
+                objects = []
+                window = QQuickWindow()
+                try:
+                    theme.setProperty("mode", "high_contrast")
+                    theme.setProperty("systemHighContrast", False)
+                    theme.setProperty("textScale", scale)
+                    theme.setProperty("reduceMotion", True)
+                    self.qapp.processEvents()
+
+                    def create(name, properties):
+                        component = self._component(engine, name)
+                        components.append(component)
+                        item = component.createWithInitialProperties(
+                            {"tokens": theme, **properties}
+                        )
+                        self.assertIsNotNone(
+                            item, [error.toString() for error in component.errors()]
+                        )
+                        objects.append(item)
+                        item.setParentItem(window.contentItem())
+                        return item
+
+                    primary = create(
+                        "QuietButton.qml",
+                        {"kind": "primary", "text": "Start Practice"},
+                    )
+                    primary.setX(32)
+                    primary.setY(32)
+                    primary.setWidth(220)
+                    primary.setHeight(primary.implicitHeight())
+
+                    selected_nav = create(
+                        "NavigationButton.qml",
+                        {"selected": True, "text": "Home"},
+                    )
+                    selected_nav.setX(32)
+                    selected_nav.setY(120)
+                    selected_nav.setWidth(220)
+                    selected_nav.setHeight(selected_nav.implicitHeight())
+
+                    checked_switch = create(
+                        "QuietSwitch.qml", {"checked": True, "text": "On"}
+                    )
+                    checked_switch.setX(32)
+                    checked_switch.setY(210)
+                    checked_switch.setWidth(220)
+                    checked_switch.setHeight(checked_switch.implicitHeight())
+
+                    disabled = create(
+                        "QuietButton.qml",
+                        {"enabled": False, "text": "Unavailable"},
+                    )
+                    disabled.setX(280)
+                    disabled.setY(32)
+                    disabled.setWidth(220)
+                    disabled.setHeight(disabled.implicitHeight())
+
+                    semantic = []
+                    for index, kind in enumerate(("success", "warning", "danger")):
+                        status = create(
+                            "StatusOrb.qml",
+                            {"statusKind": kind, "label": kind.title()},
+                        )
+                        status.setX(280)
+                        status.setY(120 + index * 70)
+                        status.setWidth(220)
+                        status.setHeight(status.implicitHeight())
+                        semantic.append(status)
+
+                    window.setColor(theme.property("canvas"))
+                    window.setWidth(540)
+                    window.setHeight(380)
+                    window.show()
+                    window.requestActivate()
+                    self.qapp.processEvents()
+                    primary.forceActiveFocus(Qt.FocusReason.TabFocusReason)
+                    self.qapp.processEvents()
+
+                    primary_background = primary.findChild(
+                        QObject, "buttonBackground"
+                    )
+                    primary_label = primary.findChild(QObject, "buttonLabel")
+                    self.assertEqual(
+                        QColor(primary_background.property("color")),
+                        QColor(theme.property("accent")),
+                    )
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            primary_label.property("color"),
+                            primary_background.property("color"),
+                        ),
+                        7.0,
+                    )
+
+                    nav_background = max(
+                        (
+                            item
+                            for item in self._visual_items(selected_nav)
+                            if "Rectangle" in item.metaObject().className()
+                            and item.isVisible()
+                            and QColor(item.property("color")).alpha() > 0
+                        ),
+                        key=lambda item: item.width() * item.height(),
+                    )
+                    nav_label = next(
+                        item
+                        for item in self._visual_items(selected_nav)
+                        if item.property("text") == "Home"
+                    )
+                    self.assertEqual(
+                        QColor(nav_background.property("color")),
+                        QColor(theme.property("accent")),
+                    )
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            nav_label.property("color"),
+                            nav_background.property("color"),
+                        ),
+                        7.0,
+                    )
+
+                    switch_track = checked_switch.findChild(QObject, "switchTrack")
+                    switch_knob = checked_switch.findChild(QObject, "switchKnob")
+                    self.assertEqual(
+                        QColor(switch_track.property("color")),
+                        QColor(theme.property("accent")),
+                    )
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            switch_knob.property("color"),
+                            switch_track.property("color"),
+                        ),
+                        7.0,
+                    )
+
+                    disabled_background = disabled.findChild(
+                        QObject, "buttonBackground"
+                    )
+                    disabled_label = disabled.findChild(QObject, "buttonLabel")
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            disabled_label.property("color"),
+                            disabled_background.property("color"),
+                        ),
+                        4.5,
+                    )
+
+                    symbols = set()
+                    for status in semantic:
+                        badge = status.findChild(QObject, "statusOrbBadge")
+                        glyph = status.findChild(QObject, "statusOrbGlyph")
+                        symbols.add(glyph.property("text"))
+                        self.assertEqual(
+                            QColor(badge.property("color")),
+                            QColor(theme.property("accent")),
+                        )
+                        self.assertGreaterEqual(
+                            self._contrast(
+                                glyph.property("color"), badge.property("color")
+                            ),
+                            7.0,
+                        )
+                    self.assertEqual(symbols, {"\u2713", "!", "\u00d7"})
+
+                    focus_rings = [
+                        item
+                        for item in self._visual_items(primary)
+                        if "FocusRing" in item.metaObject().className()
+                    ]
+                    self.assertEqual(len(focus_rings), 1)
+                    self.assertTrue(focus_rings[0].isVisible())
+                    self.assertEqual(theme.property("focusWidth"), 2)
+                    self.assertGreaterEqual(
+                        self._contrast(
+                            theme.property("focus"), theme.property("canvas")
+                        ),
+                        3.0,
+                    )
+
+                    image = window.grabWindow()
+                    self.assertFalse(image.isNull())
+                    ratio = image.devicePixelRatio()
+                    clearance = int(theme.property("focusWidth")) + int(
+                        theme.property("focusClearance")
+                    )
+                    focus_x = round(
+                        (primary.x() + primary.width() / 2) * ratio
+                    )
+                    focus_y = round((primary.y() - clearance + 1) * ratio)
+                    self.assertEqual(
+                        self._hex(image.pixelColor(focus_x, focus_y)),
+                        self._hex(theme.property("focus")),
+                    )
+                finally:
+                    window.close()
+                    for item in objects:
+                        item.setParentItem(None)
+                        item.deleteLater()
+                    for component in components:
+                        component.deleteLater()
+                    theme.deleteLater()
+                    engine.deleteLater()
+                    self.qapp.processEvents()
 
     def test_danger_button_pressed_pair_is_distinct_and_high_contrast_safe(self):
         engine = QQmlApplicationEngine()
@@ -836,7 +1708,7 @@ Item {
             )
             self.assertIn("hovered ? tokens.accentHoverSurface", switch_source)
             self.assertIn("if (hovered) return tokens.hover", switch_source)
-            self.assertIn("hovered ? tokens.surfaceRaised", field_source)
+            self.assertIn("hovered && !tokens.highContrast", field_source)
         finally:
             switch.deleteLater()
             field.deleteLater()

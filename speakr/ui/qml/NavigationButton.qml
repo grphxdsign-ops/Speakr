@@ -15,12 +15,14 @@ QuietButton {
         spacing: control.tokens.space8
 
         Rectangle {
+            objectName: "navigationSelectionMarker"
             Layout.preferredWidth: control.tokens.metric(8)
             Layout.preferredHeight: Layout.preferredWidth
             Layout.alignment: Qt.AlignVCenter
             radius: width / 2
             visible: control.selected
-            color: control.tokens.accent
+            color: control.tokens.highContrast ? control.tokens.accentText
+                                               : control.tokens.accent
             Accessible.ignored: true
         }
 
@@ -28,11 +30,13 @@ QuietButton {
             id: navLabel
             Layout.fillWidth: true
             text: control.text
-            color: !control.enabled
-                   ? control.tokens.disabledText
-                   : (control.tokens.highContrast
-                      && (control.selected || control.hovered || control.down)
-                      ? control.tokens.accentText : control.tokens.text)
+            color: control.tokens.highContrast && control.selected
+                   ? control.tokens.accentText
+                   : (!control.enabled
+                      ? control.tokens.disabledText
+                      : (control.tokens.highContrast
+                         && (control.hovered || control.down)
+                         ? control.tokens.accentText : control.tokens.text))
             font.family: control.tokens.fontFamily
             font.pixelSize: control.tokens.label
             font.weight: control.selected ? Font.DemiBold : Font.Medium
@@ -45,6 +49,12 @@ QuietButton {
 
     background: Item {
         Rectangle {
+            objectName: "navigationBackground"
+            readonly property color edgeColor:
+                control.selected
+                ? (control.tokens.highContrast
+                   ? control.tokens.accentText : control.tokens.accent)
+                : control.tokens.border
             anchors.fill: parent
             radius: control.tokens.radiusControl
             color: control.selected
@@ -54,8 +64,7 @@ QuietButton {
                                    : (control.hovered ? control.tokens.hover
                                                       : "transparent"))
             border.width: control.selected ? control.tokens.borderWidth : 0
-            border.color: control.selected ? control.tokens.accent
-                                           : control.tokens.border
+            border.color: edgeColor
 
             Behavior on color {
                 ColorAnimation { duration: control.tokens.motionHover }

@@ -8,7 +8,15 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import QObject, Property, QMetaObject, QUrl, Signal, Slot
+from PySide6.QtCore import (
+    QObject,
+    QPointF,
+    Property,
+    QMetaObject,
+    QUrl,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
 from PySide6.QtQuick import QQuickWindow
@@ -165,6 +173,102 @@ class SetupPracticeQmlTests(unittest.TestCase):
         for _ in range(4):
             self.qapp.processEvents()
             page.ensurePolished()
+
+    @staticmethod
+    def _visual_items(item):
+        result = []
+        pending = list(item.childItems())
+        while pending:
+            child = pending.pop()
+            result.append(child)
+            pending.extend(child.childItems())
+        return result
+
+    def test_divergent_system_palette_meters_use_filled_and_hollow_text_shapes(self):
+        divergent = {
+            "window": "#000000",
+            "windowText": "#FFFFFF",
+            "base": "#FFFFFF",
+            "text": "#000000",
+            "button": "#000000",
+            "buttonText": "#FFFFFF",
+            "highlight": "#FFD400",
+            "highlightedText": "#000000",
+        }
+        for page_name, segment_name in (
+            ("OnboardingPage.qml", "onboardingPracticeMeterSegment"),
+            ("PracticePage.qml", "practiceMeterSegment"),
+        ):
+            for scale in (1.0, 2.0):
+                with self.subTest(page=page_name, scale=scale):
+                    engine, bridge, theme, page, window, warnings = self._fixture(
+                        page_name, text_scale=scale
+                    )
+                    try:
+                        theme.setProperty("reduceMotion", True)
+                        theme.setProperty("systemPaletteOverride", divergent)
+                        theme.setProperty("systemHighContrast", True)
+                        window.setWidth(960)
+                        window.setHeight(1600)
+                        page.setWidth(960)
+                        page.setHeight(1600)
+                        if page_name == "OnboardingPage.qml":
+                            page.setProperty("currentStep", 4)
+                        page.setProperty(
+                            "practice",
+                            {"active": True, "mic_level_band": "good"},
+                        )
+                        self._settle(page)
+
+                        segments = sorted(
+                            (
+                                item
+                                for item in self._visual_items(page)
+                                if item.objectName() == segment_name
+                            ),
+                            key=lambda item: int(item.property("index")),
+                        )
+                        self.assertEqual(len(segments), 5)
+                        self.assertEqual(
+                            [bool(item.property("filled")) for item in segments],
+                            [True, True, True, True, False],
+                        )
+                        for segment in segments:
+                            expected_fill = theme.property(
+                                "text" if segment.property("filled") else "surface"
+                            )
+                            self.assertEqual(
+                                QColor(segment.property("color")),
+                                QColor(expected_fill),
+                            )
+                            self.assertEqual(
+                                QColor(segment.property("edgeColor")),
+                                QColor(theme.property("text")),
+                            )
+
+                        image = window.grabWindow()
+                        self.assertFalse(image.isNull())
+                        ratio = image.devicePixelRatio()
+                        for segment in segments:
+                            center = segment.mapToScene(
+                                QPointF(segment.width() / 2, segment.height() / 2)
+                            )
+                            self.assertGreaterEqual(center.x(), 0)
+                            self.assertGreaterEqual(center.y(), 0)
+                            self.assertLess(center.x(), window.width())
+                            self.assertLess(center.y(), window.height())
+                            rendered = image.pixelColor(
+                                round(center.x() * ratio),
+                                round(center.y() * ratio),
+                            )
+                            expected = theme.property(
+                                "text" if segment.property("filled") else "surface"
+                            )
+                            self.assertEqual(QColor(rendered), QColor(expected))
+                    finally:
+                        self._dispose(
+                            engine, bridge, theme, page, window, warnings
+                        )
 
     def test_onboarding_covers_all_steps_and_recovery_states(self):
         engine, bridge, theme, page, window, warnings = self._fixture(
