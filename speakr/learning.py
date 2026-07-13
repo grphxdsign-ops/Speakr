@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 
@@ -114,10 +115,46 @@ class VocabLearner:
                 if entry["count"] >= min_n and lower not in excluded
             ][:cap]
 
+    def entries(self) -> list[dict]:
+        """Safe UI view of locally learned terms, highest count first."""
+        with self._lock:
+            ranked = sorted(self._entries.items(), key=lambda kv: (-kv[1].get("count", 0), kv[0]))
+            return [
+                {
+                    "id": lower,
+                    "word": entry.get("form") or lower,
+                    "count": int(entry.get("count", 0)),
+                }
+                for lower, entry in ranked
+            ]
+
+    def forget(self, word: str) -> bool:
+        with self._lock:
+            key = str(word).lower()
+            removed = self._entries.pop(key, None)
+            if removed is None:
+                return False
+            if not self._save():
+                self._entries[key] = removed
+                return False
+            return True
+
     def _save(self):
         try:
-            self.path.write_text(
-                json.dumps(self._entries, indent=1, ensure_ascii=False), encoding="utf-8"
-            )
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            try:
+                tmp.write_text(
+                    json.dumps(self._entries, indent=1, ensure_ascii=False), encoding="utf-8"
+                )
+                os.replace(tmp, self.path)
+            except OSError:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
+            return True
         except OSError as exc:
             log.warning("Could not save %s: %s", self.path, exc)
+            return False

@@ -76,9 +76,8 @@ page): **Speakr-Setup.exe** on Windows (run it — per-user install, no admin,
 shortcuts created, launches when done) or **Speakr.dmg** on Mac (open, drag
 Speakr into Applications — Apple Silicon; Intel Macs use the source route
 below). Python is bundled — nothing to install first. Launching opens the
-control panel in your browser; first launch downloads the transcription
-model (the panel shows "Loading model…" until it's ready) — that's the only
-network call it ever makes. Grant the permissions macOS prompts for
+native Speakr window; first launch prepares the local transcription model and
+shows progress in the window. Grant the permissions macOS prompts for
 (Microphone, Input Monitoring, Accessibility) and you're dictating.
 
 The sections below are the from-source routes — for Intel Macs, development,
@@ -91,34 +90,42 @@ or if you just prefer it.
 2. Look for the round mic icon in the system tray.
 3. Focus any text field, **hold Right Ctrl**, speak, release.
 
-Tray icon colors: blue = idle, red = recording, orange = processing,
-gray = loading/disabled.
+The pointer-transparent HUD appears only while dictating by default and never
+shows transcript content. Its size, edge, visibility, and reduced-motion
+behavior are available in Settings.
 
 Use `run_debug.bat` to run with a console and live logs.
 
 ## Quick start — macOS (as a real app)
 
+This builds a self-contained app. Prepare a Python 3.11 build environment once
+before running the packager (the installed app itself never runs `pip`):
+
 ```
 git clone https://github.com/grphxdsign-ops/Speakr.git
 cd Speakr
-bash package_mac.sh
+python3.11 -m venv .venv-package
+source .venv-package/bin/activate
+python -m pip install -r requirements.txt pyinstaller
+PYTHON=.venv-package/bin/python bash package_mac.sh
 mv dist/Speakr.app /Applications/
 open /Applications/Speakr.app
 ```
 
-- First launch sets up its Python environment and downloads the model — give
-  it a few minutes; the mic icon appears in the menu bar when ready.
-  Progress logs: `~/Library/Application Support/Speakr/setup.log`.
+- First launch downloads only the local speech model — give it a few minutes;
+  the mic icon appears in the menu bar when ready. The app contains Python and
+  its dependencies and performs no package-manager or update-check requests.
 - Grant the permissions macOS prompts for — they're attributed to **Speakr**
   itself now (Microphone, Input Monitoring, Accessibility under System
   Settings → Privacy & Security). Quit and reopen Speakr after granting.
 - Your config, dictionary, learned words, and logs live in
   `~/Library/Application Support/Speakr/` — updating the app never touches
-  them, and the venv there is reused (no re-download unless requirements.txt
-  changed). To update:
+  them. To update:
   ```
   # Quit Speakr first (menu bar icon -> Quit)
-  cd Speakr && git pull && bash package_mac.sh
+  cd Speakr && git pull
+  source .venv-package/bin/activate
+  PYTHON=.venv-package/bin/python bash package_mac.sh
   rm -rf /Applications/Speakr.app && mv dist/Speakr.app /Applications/
   open /Applications/Speakr.app
   ```
@@ -156,17 +163,26 @@ runs on the CPU there (no CUDA) — `base`/`small` are comfortably fast on
 Apple Silicon. Ollama for the LLM polish: [ollama.com/download](https://ollama.com/download),
 then `ollama pull llama3.2` — Speakr auto-starts and auto-detects it.
 
-## Control panel
+## Quiet Signal interface
 
-Tray → **Open Speakr** (or double-click the tray icon on Windows) opens a
-small control panel in your browser — same look as
-[speakr.cloud](https://speakr.cloud) — with an on/off switch and a
-Settings area where clicking the key button rebinds the push-to-talk key:
-press the key you want (any key on Windows; a modifier-style key like fn,
-right ⌘, right ⌥, or caps lock on macOS) and it's saved to `config.json`
-and applied immediately. The panel is served from `127.0.0.1` only, and
-state-changing requests require a per-run token — nothing is exposed to
-the network.
+Tray → **Open Speakr** (or double-click the tray icon on Windows) opens the
+native PySide6/QML interface. Home shows readiness and truthful local pipeline
+states; Practice provides temporary, non-injecting transcription; Vocabulary
+keeps manual words, replacements, and learned words separate; Settings has
+plain-language categories plus searchable Advanced controls; Help contains
+local recovery and diagnostics. Practice content is cleared when you leave it
+and is never written to transcript logs or learning context.
+
+The window follows system light/dark and accessibility preferences, supports
+keyboard-complete navigation and visible focus, and reflows instead of hiding
+navigation labels at narrow sizes. The dictation HUD is non-focusable and
+pointer-transparent so it does not take the caret from the app receiving text.
+
+If Qt or QML cannot initialize, Speakr starts a deliberately limited browser
+recovery interface on `127.0.0.1`. It uses a per-run token, strict Host/Origin
+checks, no remote assets, and no transcript or Practice stream. The release
+smoke test fails if a packaged build selects this fallback, so normal releases
+must always start the native interface.
 
 ## Configuration (`config.json`)
 
@@ -281,6 +297,11 @@ Press `Win+R`, run `shell:startup`, and drop a shortcut to `run.bat` there.
 
 ## Troubleshooting
 
+- **Speakr is running but no window appears**: launch Speakr again; the
+  current native build raises its existing window. If a pre-native release
+  is still running only as a tray process, fully quit that copy and reinstall
+  the current `Speakr-Setup.exe`. Your config and vocabulary under
+  `%APPDATA%\Speakr` are preserved by reinstalling.
 - **No text appears**: some elevated (admin) windows ignore input from
   non-elevated processes — run Speakr as admin if you dictate into those.
 - **Mic not recording**: Windows Settings → Privacy → Microphone → allow
@@ -293,6 +314,27 @@ Press `Win+R`, run `shell:startup`, and drop a shortcut to `run.bat` there.
 
 ```
 .venv\Scripts\python.exe scripts\smoke_test.py path\to\16k-mono.wav
+.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 Runs unit checks plus an end-to-end transcription of the given wav.
+
+Release builds package `speakr/ui/qml/` and `assets/icon.png` as local data
+alongside the Qt Quick runtime. The build refuses to run when the
+`PySide6-Addons` distribution is installed, explicitly excludes the embedded
+browser modules, and scans the artifact for real Addons libraries such as
+QtCharts. Qt's QML binding itself requires `PySide6.QtNetwork` to import, but
+Speakr does not call its networking APIs; the shipped UI contains only local
+assets and the local-only Ollama address. Before signing or installer/DMG
+wrapping, CI runs:
+
+```
+python scripts/scan_artifact_privacy.py dist/Speakr
+# macOS: python scripts/scan_artifact_privacy.py dist/Speakr.app
+```
+
+The scan requires `Main.qml`, `Hud.qml`, and the icon; rejects WebView2,
+QtWebEngine, Chromium, Qt WebView/WebChannel, WebSockets, and concrete
+PySide6-Addons module/library families; and rejects non-loopback URLs in
+shipped UI assets. The packaged-app smoke test also fails if startup falls
+back to the browser recovery interface.

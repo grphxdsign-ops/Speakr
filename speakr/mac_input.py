@@ -136,13 +136,14 @@ _CAPTURE_NAMES = [
 ]
 
 
-def capture_next_key(timeout=10.0):
+def capture_next_key(timeout=10.0, cancel_event=None):
     """Wait for the next modifier-style key press (the only hotkeys the Mac
     backend supports) and return its config name, or None on timeout. Runs
     its own short-lived listen-only event tap, so the active HotkeyListener
     should be stopped first to keep the sampled press from also dictating."""
     result = {}
     done = threading.Event()
+    loop_ready = threading.Event()
     holder = {}
 
     def callback(proxy, type_, event, refcon):
@@ -169,19 +170,36 @@ def capture_next_key(timeout=10.0):
         )
         if tap is None:
             log.error("capture_next_key: could not create event tap (Input Monitoring permission?)")
+            loop_ready.set()
             done.set()
             return
         source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
         holder["loop"] = Quartz.CFRunLoopGetCurrent()
+        loop_ready.set()
         Quartz.CFRunLoopAddSource(holder["loop"], source, Quartz.kCFRunLoopCommonModes)
         Quartz.CGEventTapEnable(tap, True)
         Quartz.CFRunLoopRun()
 
     thread = threading.Thread(target=run, name="hotkey-capture", daemon=True)
     thread.start()
-    done.wait(timeout)
+    if timeout is None:
+        while not done.wait(0.05):
+            if cancel_event is not None and cancel_event.is_set():
+                break
+    else:
+        deadline = time.monotonic() + timeout
+        while not done.wait(min(0.05, max(0.0, deadline - time.monotonic()))):
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            if time.monotonic() >= deadline:
+                break
+    # Cancellation can arrive before the tap thread publishes its run loop.
+    # Wait briefly for that local setup so the tap never leaks in background.
+    loop_ready.wait(1.0)
     if holder.get("loop") is not None:
         Quartz.CFRunLoopStop(holder["loop"])
+    if cancel_event is not None and cancel_event.is_set():
+        return None
     return result.get("name")
 
 

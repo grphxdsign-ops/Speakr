@@ -1,91 +1,91 @@
 #!/usr/bin/env bash
-# Build Speakr.app — run ON the Mac from the repo root:  bash package_mac.sh
-# Produces dist/Speakr.app. Move it to /Applications and open it like any app.
-set -e
+# Build a self-contained Speakr.app on macOS from an already-prepared
+# Python 3.11 release environment. The installed app never runs pip.
+set -euo pipefail
 cd "$(dirname "$0")"
 
+PYTHON="${PYTHON:-python3}"
 APP="dist/Speakr.app"
+
+"$PYTHON" - <<'PY'
+import sys
+if sys.version_info[:2] != (3, 11):
+    raise SystemExit(
+        f"package_mac.sh requires Python 3.11, found {sys.version_info.major}.{sys.version_info.minor}"
+    )
+try:
+    import PyInstaller  # noqa: F401
+except ImportError as exc:
+    raise SystemExit("PyInstaller must be installed in the selected build environment") from exc
+PY
+"$PYTHON" scripts/check_qt_build_environment.py
+
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-# Bundle the code (user data does NOT live in the bundle — see SPEAKR_HOME)
-cp -R speakr "$APP/Contents/Resources/speakr"
-cp requirements.txt "$APP/Contents/Resources/"
-
-# Icon: png -> icns
+ICON_ARGS=()
 if [ -f assets/icon.png ] && command -v iconutil >/dev/null; then
-    ICONSET="$(mktemp -d)/speakr.iconset"
+    ICON_ROOT="$(mktemp -d)"
+    ICONSET="$ICON_ROOT/speakr.iconset"
     mkdir -p "$ICONSET"
     for s in 16 32 128 256 512; do
-        sips -z $s $s assets/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-        sips -z $((s * 2)) $((s * 2)) assets/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+        sips -z "$s" "$s" assets/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+        sips -z "$((s * 2))" "$((s * 2))" assets/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
     done
-    iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Speakr.icns" || true
+    iconutil -c icns "$ICONSET" -o "$ICON_ROOT/Speakr.icns"
+    ICON_ARGS=(--icon "$ICON_ROOT/Speakr.icns")
 fi
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-    <key>CFBundleName</key><string>Speakr</string>
-    <key>CFBundleDisplayName</key><string>Speakr</string>
-    <key>CFBundleIdentifier</key><string>com.speakr.dictation</string>
-    <key>CFBundleVersion</key><string>0.1.0</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleExecutable</key><string>Speakr</string>
-    <key>CFBundleIconFile</key><string>Speakr</string>
-    <key>LSUIElement</key><true/>
-    <key>NSMicrophoneUsageDescription</key><string>Speakr transcribes your dictation locally on this Mac. Audio never leaves the machine.</string>
-</dict></plist>
-PLIST
+"$PYTHON" -m PyInstaller --noconfirm --windowed \
+    --name Speakr \
+    --osx-bundle-identifier com.speakr.dictation \
+    "${ICON_ARGS[@]}" \
+    --paths . \
+    --collect-all ctranslate2 \
+    --collect-all faster_whisper \
+    --collect-all onnxruntime \
+    --hidden-import pystray._darwin \
+    --hidden-import PySide6.QtQuick \
+    --hidden-import PySide6.QtQuickControls2 \
+    --add-data "speakr/ui/qml:speakr/ui/qml" \
+    --add-data "assets/icon.png:assets" \
+    --exclude-module PySide6.QtWebEngine \
+    --exclude-module PySide6.QtWebEngineCore \
+    --exclude-module PySide6.QtWebEngineQuick \
+    --exclude-module PySide6.QtWebEngineWidgets \
+    --exclude-module PySide6.QtWebView \
+    --exclude-module PySide6.QtWebChannel \
+    scripts/frozen_entry.py
 
-cat > "$APP/Contents/MacOS/Speakr" <<'LAUNCH'
-#!/usr/bin/env bash
-# Speakr.app launcher. Code ships inside the bundle (Resources); the Python
-# environment and all user data live in ~/Library/Application Support/Speakr.
-RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
-SUP="$HOME/Library/Application Support/Speakr"
-mkdir -p "$SUP"
-export SPEAKR_HOME="$SUP"
-export PYTHONPATH="$RES"
-VENV="$SUP/venv"
+cat > "$APP/Contents/Resources/THIRD_PARTY_NOTICES.txt" <<'NOTICE'
+Speakr includes Qt for Python / PySide6-Essentials 6.11.1.
+Qt for Python is copyright The Qt Company Ltd. and contributors.
+The installed open-source package is offered under LGPL-3.0-only,
+GPL-2.0-only, or GPL-3.0-only, as described by its package metadata.
+Speakr does not modify Qt source files.
+NOTICE
 
-# Apple Silicon Macs' /usr/bin/python3 (from Xcode Command Line Tools) is a
-# universal binary — which slice actually executes depends on how the
-# PARENT process was launched (e.g. Terminal set to "Open using Rosetta"),
-# not the hardware. `sysctl hw.optional.arm64` reports the true hardware
-# capability regardless of any Rosetta translation already in effect on
-# this process, so pin the venv to it explicitly rather than leaving it to
-# ambient shell state — otherwise a venv built in one architecture crashes
-# on import when later launched in the other (mismatched .so files).
-if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
-    PY=(arch -arm64 python3)
-else
-    PY=(python3)
+PLIST="$APP/Contents/Info.plist"
+plutil -replace LSUIElement -bool true "$PLIST" 2>/dev/null \
+    || plutil -insert LSUIElement -bool true "$PLIST"
+plutil -replace NSMicrophoneUsageDescription \
+    -string "Speakr transcribes your dictation locally on this Mac. Audio never leaves the machine." \
+    "$PLIST" 2>/dev/null \
+    || plutil -insert NSMicrophoneUsageDescription \
+        -string "Speakr transcribes your dictation locally on this Mac. Audio never leaves the machine." \
+        "$PLIST"
+
+"$PYTHON" scripts/scan_artifact_privacy.py "$APP"
+
+# PyInstaller performs an ad-hoc sign, but Info.plist changed afterward.
+# Re-sign the final local bundle so Apple Silicon can launch it. Official
+# Developer ID signing and notarization remain in the release workflow.
+if command -v codesign >/dev/null; then
+    xattr -cr "$APP"
+    codesign --force --deep --sign - "$APP"
+    codesign --verify --deep --strict "$APP"
 fi
 
-# Self-heal a venv that was built for the wrong architecture (including
-# ones created before this fix existed) instead of crashing on import.
-if [ -x "$VENV/bin/python" ]; then
-    have_arch="$("$VENV/bin/python" -c 'import platform;print(platform.machine())' 2>/dev/null)"
-    want_arch="$("${PY[@]}" -c 'import platform;print(platform.machine())' 2>/dev/null)"
-    if [ -n "$want_arch" ] && [ "$have_arch" != "$want_arch" ]; then
-        rm -rf "$VENV"
-    fi
-fi
-
-if [ ! -x "$VENV/bin/python" ]; then
-    "${PY[@]}" -m venv "$VENV"
-    "$VENV/bin/python" -m pip install --upgrade pip >> "$SUP/setup.log" 2>&1
-    "$VENV/bin/python" -m pip install -r "$RES/requirements.txt" >> "$SUP/setup.log" 2>&1
-fi
-exec "$VENV/bin/python" -m speakr
-LAUNCH
-chmod +x "$APP/Contents/MacOS/Speakr"
-
-echo "Built $APP"
-echo "Install:  mv $APP /Applications/"
-echo "First launch installs Python packages + downloads the model (a few"
-echo "minutes, menu-bar icon appears when ready). Progress:"
-echo "  ~/Library/Application Support/Speakr/setup.log and speakr.log"
+echo "Built self-contained $APP"
+echo "Install: mv $APP /Applications/"
+echo "The installed app makes no package-manager or update-check requests."
+echo "Its only non-loopback runtime download is the first-run speech model."

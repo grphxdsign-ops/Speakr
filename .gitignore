@@ -21,6 +21,8 @@ training/smoke_out/
 config.json
 speakr.log
 .speakr.lock
+panel.url
+show.request
 
 # Personal data — never publish. Both regenerate empty on first run.
 # Copy them between your own machines by hand if you want them to follow you.
@@ -29,6 +31,9 @@ learned_words.json
 
 # Build output
 dist/
+build/
+*.spec
+icon.ico
 
 # Editor / tooling
 .claude/

@@ -57,6 +57,7 @@ class Transcriber:
         self._infer_lock = threading.Lock()
         self.device_in_use = None
         self.model_in_use = None
+        self.compute_type_in_use = None
 
     def load_async(self):
         threading.Thread(target=self.load, name="model-loader", daemon=True).start()
@@ -77,8 +78,16 @@ class Transcriber:
         attempts = []
         if device in ("auto", "cuda") and sys.platform != "darwin":  # no CUDA on macOS
             attempts.append(("cuda", "float16" if compute_type == "auto" else compute_type))
-        if device in ("auto", "cpu"):
-            attempts.append(("cpu", "int8" if compute_type == "auto" else compute_type))
+        # CUDA is a preference, never a load-bearing dependency. A missing or
+        # broken runtime always gets a CPU attempt with a CPU-safe compute
+        # type, including when the expert setting explicitly requested CUDA.
+        if device in ("auto", "cpu", "cuda"):
+            cpu_compute = (
+                "int8"
+                if compute_type in ("auto", "float16", "int8_float16")
+                else compute_type
+            )
+            attempts.append(("cpu", cpu_compute))
 
         _expose_nvidia_dlls()
         last_exc = None
@@ -93,6 +102,7 @@ class Transcriber:
                 list(segments)
                 self.device_in_use = dev
                 self.model_in_use = resolved
+                self.compute_type_in_use = ctype
                 log.info("Model %s ready on %s", resolved, dev)
                 return model
             except Exception as exc:
@@ -127,13 +137,21 @@ class Transcriber:
             return 5 if self.device_in_use == "cuda" else 1
         return int(configured)
 
-    def transcribe(self, audio, sample_rate=16000, extra_hints=None, prior_text="") -> str:
+    def transcribe(
+        self,
+        audio,
+        sample_rate=16000,
+        extra_hints=None,
+        prior_text="",
+        *,
+        allow_text_log=True,
+    ) -> str:
         self._ready.wait()
         prompt = self._initial_prompt(extra_hints, prior_text)
         with self._infer_lock:
-            return self._transcribe_locked(audio, sample_rate, prompt)
+            return self._transcribe_locked(audio, sample_rate, prompt, allow_text_log)
 
-    def _transcribe_locked(self, audio, sample_rate, prompt) -> str:
+    def _transcribe_locked(self, audio, sample_rate, prompt, allow_text_log=True) -> str:
         segments, info = self._model.transcribe(
             audio,
             language=self.config.get("language"),
@@ -149,7 +167,7 @@ class Transcriber:
             initial_prompt=prompt,
         )
         text = " ".join(seg.text.strip() for seg in segments).strip()
-        if self.config.get("log_transcripts"):
+        if allow_text_log and self.config.get("log_transcripts"):
             log.info("Transcribed %.1fs of audio (lang=%s): %r", len(audio) / sample_rate, info.language, text)
         else:
             log.info("Transcribed %.1fs of audio (lang=%s, %d chars)", len(audio) / sample_rate, info.language, len(text))

@@ -5,6 +5,10 @@ pystray>=0.19
 Pillow>=10
 pyperclip>=1.8
 requests>=2.31
+# Native Quiet Signal interface. Essentials contains Qt Core/Gui/Widgets/QML/
+# Quick without QtWebEngine or the Addons package. Older source Pythons keep
+# the independent browser recovery interface.
+PySide6-Essentials==6.11.1; python_version >= "3.10"
 keyboard>=0.13.5; sys_platform == "win32"
 comtypes>=1.2; sys_platform == "win32"
 pyobjc-framework-Quartz>=9.0; sys_platform == "darwin"

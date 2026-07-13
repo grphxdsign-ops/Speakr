@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 import keyboard
 
@@ -38,7 +39,7 @@ class HotkeyListener:
         keyboard.unhook_all()
 
 
-def capture_next_key(timeout=10.0):
+def capture_next_key(timeout=10.0, cancel_event=None):
     """Block until the next key-down anywhere and return its `keyboard`-style
     name — the same names hook_key accepts — or None on timeout. "esc" comes
     back as-is so callers can treat it as cancel. The active HotkeyListener
@@ -53,9 +54,21 @@ def capture_next_key(timeout=10.0):
 
     hook = keyboard.hook(on_event)
     try:
-        done.wait(timeout)
+        if timeout is None:
+            while not done.wait(0.05):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+        else:
+            deadline = time.monotonic() + timeout
+            while not done.wait(min(0.05, max(0.0, deadline - time.monotonic()))):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                if time.monotonic() >= deadline:
+                    break
     finally:
         keyboard.unhook(hook)
+    if cancel_event is not None and cancel_event.is_set():
+        return None
     return captured.get("name")
 
 

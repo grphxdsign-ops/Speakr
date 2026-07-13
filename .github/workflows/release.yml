@@ -50,6 +50,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
+      - name: Enforce Essentials-only Qt build environment
+        run: python scripts/check_qt_build_environment.py
+
+      - name: Run unit and interface contract tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+
       - name: Build icon (.icns)
         run: |
           mkdir speakr.iconset
@@ -80,7 +88,33 @@ jobs:
           --collect-all faster_whisper
           --collect-all onnxruntime
           --hidden-import pystray._darwin
+          --hidden-import PySide6.QtQuick
+          --hidden-import PySide6.QtQuickControls2
+          --add-data "speakr/ui/qml:speakr/ui/qml"
+          --add-data "assets/icon.png:assets"
+          --exclude-module PySide6.QtWebEngine
+          --exclude-module PySide6.QtWebEngineCore
+          --exclude-module PySide6.QtWebEngineQuick
+          --exclude-module PySide6.QtWebEngineWidgets
+          --exclude-module PySide6.QtWebView
+          --exclude-module PySide6.QtWebChannel
           scripts/frozen_entry.py
+
+      - name: Add Qt open-source notice
+        run: |
+          cat > dist/Speakr.app/Contents/Resources/THIRD_PARTY_NOTICES.txt <<'NOTICE'
+          Speakr includes Qt for Python / PySide6-Essentials 6.11.1.
+          Qt for Python is copyright The Qt Company Ltd. and contributors.
+          The installed open-source package is offered under LGPL-3.0-only,
+          GPL-2.0-only, or GPL-3.0-only, as described by its package metadata.
+          Speakr does not modify Qt source files.
+          NOTICE
+
+      - name: Audit native UI artifact
+        # Run before plist mutation, signing, and DMG wrapping. The scanner
+        # requires Main.qml, Hud.qml, and the local icon; rejects embedded
+        # browser/Addons filenames; and permits only loopback URLs in UI data.
+        run: python scripts/scan_artifact_privacy.py dist/Speakr.app
 
       - name: Menu-bar metadata + permission strings
         # LSUIElement: menu-bar app, no Dock icon (matches how Speakr runs).
@@ -137,18 +171,31 @@ jobs:
         # seconds later instead of trusting the build exit code alone.
         # Runs AFTER the plist edit + re-sign so it exercises the exact
         # bundle that ships — v0.1.1's smoke test passed on a bundle that a
-        # later step then broke.
+        # later step then broke. Hugging Face is forced offline here: the UI
+        # must remain usable in its truthful model-recovery state, and a
+        # packaging smoke test must not download model weights.
         run: |
-          dist/Speakr.app/Contents/MacOS/Speakr > smoke.log 2>&1 &
+          SMOKE_HOME="$RUNNER_TEMP/speakr-native-smoke"
+          rm -rf "$SMOKE_HOME"
+          mkdir -p "$SMOKE_HOME"
+          HF_HUB_OFFLINE=1 SPEAKR_HOME="$SMOKE_HOME" dist/Speakr.app/Contents/MacOS/Speakr > smoke.log 2>&1 &
           pid=$!
-          sleep 4
+          sleep 6
           if ! kill -0 "$pid" 2>/dev/null; then
-            echo "::error::Speakr exited within 4s of launch — the build is broken. Output:"
+            echo "::error::Speakr exited within 6s of launch — the build is broken. Output:"
             cat smoke.log
+            [ -f "$SMOKE_HOME/speakr.log" ] && cat "$SMOKE_HOME/speakr.log"
+            exit 1
+          fi
+          if { cat smoke.log; [ -f "$SMOKE_HOME/speakr.log" ] && cat "$SMOKE_HOME/speakr.log"; } | grep -Eiq "Native UI (unavailable|failed)|using recovery interface" || [ -f "$SMOKE_HOME/panel.url" ]; then
+            echo "::error::Speakr stayed alive only by selecting the browser recovery interface; the native QML release is broken."
+            cat smoke.log
+            [ -f "$SMOKE_HOME/speakr.log" ] && cat "$SMOKE_HOME/speakr.log"
+            kill "$pid" 2>/dev/null || true
             exit 1
           fi
           kill "$pid"
-          echo "Smoke test passed — process was still alive after 4s."
+          echo "Smoke test passed — process stayed alive with the native QML frontend."
 
       - name: Wrap into Speakr.dmg
         run: |
@@ -195,6 +242,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller pillow
 
+      - name: Enforce Essentials-only Qt build environment
+        run: python scripts/check_qt_build_environment.py
+
+      - name: Run unit and interface contract tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+
       - name: Convert icon to .ico
         run: python -c "from PIL import Image; Image.open('assets/icon.png').save('icon.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])"
 
@@ -214,26 +269,68 @@ jobs:
           --collect-all onnxruntime
           --hidden-import pystray._win32
           --hidden-import comtypes.stream
+          --hidden-import PySide6.QtQuick
+          --hidden-import PySide6.QtQuickControls2
+          --add-data "speakr/ui/qml:speakr/ui/qml"
+          --add-data "assets/icon.png:assets"
+          --exclude-module PySide6.QtWebEngine
+          --exclude-module PySide6.QtWebEngineCore
+          --exclude-module PySide6.QtWebEngineQuick
+          --exclude-module PySide6.QtWebEngineWidgets
+          --exclude-module PySide6.QtWebView
+          --exclude-module PySide6.QtWebChannel
           scripts/frozen_entry.py
+
+      - name: Add Qt open-source notice
+        shell: pwsh
+        run: |
+          @'
+          Speakr includes Qt for Python / PySide6-Essentials 6.11.1.
+          Qt for Python is copyright The Qt Company Ltd. and contributors.
+          The installed open-source package is offered under LGPL-3.0-only,
+          GPL-2.0-only, or GPL-3.0-only, as described by its package metadata.
+          Speakr does not modify Qt source files.
+          '@ | Set-Content -Encoding utf8 dist\Speakr\THIRD_PARTY_NOTICES.txt
+
+      - name: Audit native UI artifact
+        run: python scripts\scan_artifact_privacy.py dist\Speakr
 
       - name: Smoke-test the build
         # Same regression guard as the mac-dmg job: a PyInstaller build can
         # report success while being completely broken at runtime (exactly
         # what v0.1.0 shipped — missing --paths . above meant the speakr
         # package silently wasn't bundled at all). Actually launch it and
-        # confirm it's still alive a few seconds later.
+        # confirm it's still alive a few seconds later. Model downloads are
+        # disabled so this verifies the native UI's offline recovery state.
         shell: pwsh
         run: |
+          $smokeHome = Join-Path $env:RUNNER_TEMP "speakr-native-smoke"
+          Remove-Item -Recurse -Force $smokeHome -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $smokeHome | Out-Null
+          $env:SPEAKR_HOME = $smokeHome
+          $env:HF_HUB_OFFLINE = "1"
           $p = Start-Process -FilePath "dist\Speakr\Speakr.exe" `
                -RedirectStandardOutput smoke_out.log -RedirectStandardError smoke_err.log -PassThru
-          Start-Sleep -Seconds 4
+          Start-Sleep -Seconds 6
           if ($p.HasExited) {
-            Write-Host "::error::Speakr.exe exited within 4s of launch — the build is broken. Output:"
+            Write-Host "::error::Speakr.exe exited within 6s of launch — the build is broken. Output:"
             Get-Content smoke_out.log, smoke_err.log -ErrorAction SilentlyContinue
+            Get-Content (Join-Path $smokeHome "speakr.log") -ErrorAction SilentlyContinue
+            exit 1
+          }
+          $logText = @(
+            Get-Content smoke_out.log, smoke_err.log -ErrorAction SilentlyContinue
+            Get-Content (Join-Path $smokeHome "speakr.log") -ErrorAction SilentlyContinue
+          ) -join "`n"
+          if ($logText -match "Native UI (unavailable|failed)|using recovery interface" -or
+              (Test-Path (Join-Path $smokeHome "panel.url"))) {
+            Write-Host "::error::Speakr stayed alive only by selecting the browser recovery interface; the native QML release is broken."
+            Write-Host $logText
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             exit 1
           }
           Stop-Process -Id $p.Id -Force
-          Write-Host "Smoke test passed — process was still alive after 4s."
+          Write-Host "Smoke test passed — process stayed alive with the native QML frontend."
 
       - name: Build Speakr-Setup.exe (Inno Setup)
         shell: pwsh

@@ -1,0 +1,54 @@
+import QtQuick
+import QtQuick.Layouts
+
+ColumnLayout {
+    id: root
+
+    required property var tokens
+    property string label: ""
+    property bool reached: false
+    property bool active: false
+    property string accessibleDescription: ""
+
+    spacing: tokens.space4
+    Accessible.role: Accessible.StaticText
+    Accessible.name: label + (active ? qsTr(", current stage") : (reached ? qsTr(", complete") : ""))
+    Accessible.description: accessibleDescription
+
+    Rectangle {
+        Layout.alignment: Qt.AlignHCenter
+        implicitWidth: root.tokens.metric(18)
+        implicitHeight: implicitWidth
+        Layout.preferredWidth: implicitWidth
+        Layout.preferredHeight: implicitHeight
+        radius: implicitWidth / 2
+        color: root.reached || root.active ? root.tokens.accent : root.tokens.surface
+        border.width: root.active ? 3 : 2
+        border.color: root.reached || root.active ? root.tokens.accent : root.tokens.border
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: parent.width / 3
+            height: width
+            radius: width / 2
+            visible: root.active
+            color: root.tokens.accentText
+        }
+
+        Behavior on color {
+            ColorAnimation { duration: root.tokens.motionStandard }
+        }
+    }
+
+    PlainText {
+        Layout.alignment: Qt.AlignHCenter
+        Layout.fillWidth: true
+        text: root.label
+        color: root.active ? root.tokens.text : root.tokens.mutedText
+        font.family: root.tokens.fontFamily
+        font.pixelSize: root.tokens.secondary
+        font.weight: root.active ? Font.DemiBold : Font.Normal
+        horizontalAlignment: Text.AlignHCenter
+        elide: Text.ElideRight
+    }
+}
