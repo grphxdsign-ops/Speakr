@@ -10,6 +10,8 @@ Item {
     property var controller: null
     property var hostWindow: null
     readonly property bool controlsOnLeft: Qt.platform.os === "osx"
+    readonly property bool compactPrivacyCue: width < tokens.metric(720)
+                                               || tokens.textScale > 1.5
     readonly property bool maximized: controller !== null && Boolean(controller.maximized)
     readonly property var firstControl: controlRow.firstControl
     readonly property var lastControl: controlRow.lastControl
@@ -90,7 +92,8 @@ Item {
                             ? controlRow.width + root.tokens.space24 : root.tokens.space24
         anchors.rightMargin: root.controlsOnLeft
                              ? root.tokens.space24 : controlRow.width + root.tokens.space24
-        spacing: root.tokens.space16
+        spacing: root.compactPrivacyCue ? root.tokens.space8
+                                        : root.tokens.space16
 
         RowLayout {
             spacing: root.tokens.space8
@@ -118,7 +121,9 @@ Item {
                 text: qsTr("Speakr")
                 color: root.tokens.text
                 font.family: root.tokens.fontFamily
-                font.pixelSize: root.tokens.sectionHeading
+                font.pixelSize: root.compactPrivacyCue
+                                ? root.tokens.statusHeading
+                                : root.tokens.sectionHeading
                 font.weight: Font.DemiBold
                 Accessible.ignored: true
             }
@@ -127,8 +132,8 @@ Item {
         Item { Layout.fillWidth: true }
 
         RowLayout {
-            visible: root.width >= root.tokens.metric(720)
-                     && root.tokens.textScale <= 1.5
+            id: privacyCue
+            objectName: "windowPrivacyCue"
             spacing: root.tokens.space8
             Accessible.role: Accessible.Note
             Accessible.name: qsTr("Everything stays on this device")
@@ -141,7 +146,10 @@ Item {
                 Accessible.ignored: true
             }
             PlainText {
-                text: qsTr("Everything stays on this device")
+                objectName: "windowPrivacyCueText"
+                text: root.compactPrivacyCue
+                      ? qsTr("Local only")
+                      : qsTr("Everything stays on this device")
                 color: root.tokens.text
                 font.family: root.tokens.fontFamily
                 font.pixelSize: root.tokens.secondary

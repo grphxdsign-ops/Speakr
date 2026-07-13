@@ -15,7 +15,7 @@ GridLayout {
     columns: width >= tokens.metric(480) ? 2 : 1
     columnSpacing: tokens.space16
     rowSpacing: tokens.space8
-    Accessible.role: Accessible.Grouping
+    Accessible.role: Accessible.Heading
     Accessible.name: title
     Accessible.description: description
 

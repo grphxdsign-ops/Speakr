@@ -132,7 +132,9 @@ Window {
         if (pipeline === "success")
             return value(appState, "pipeline_mode", value(appState, "mode", "dictation")) === "edit" ? qsTr("Selection updated") : qsTr("Inserted");
         if (pipeline === "error")
-            return value(appState, "primary", qsTr("Nothing was inserted"));
+            return value(appState, "pipeline_mode", value(appState, "mode", "dictation")) === "edit"
+                    ? qsTr("Original selection unchanged")
+                    : qsTr("Nothing was inserted");
         return "";
     }
 
@@ -165,7 +167,10 @@ Window {
         if (pipeline === "error")
             return value(appState, "detail", qsTr("Nothing was changed. Try again when ready."));
         if (value(appState, "capture", "idle") === "listening")
-            return qsTr("Release your shortcut when you are finished");
+            return Boolean(setting("effective_toggle_mode",
+                                   setting("toggle_mode", false)))
+                    ? qsTr("Press your shortcut again to stop")
+                    : qsTr("Release your shortcut to stop");
         return qsTr("Everything stays on this device");
     }
 
@@ -283,10 +288,10 @@ Window {
         elevated: false
         fillColor: root.displayedKind === "danger" ? tokens.dangerSurface : tokens.hudSurface
         edgeColor: root.stateColor(root.displayedKind)
-        Accessible.role: Accessible.AlertMessage
-        Accessible.name: root.displayedPrimary
-        Accessible.description: root.displayedSecondary
-        Accessible.ignored: !Boolean(root.setting("ui.background_announcements", false))
+        // QAccessibleAnnouncementEvent in Bridge is the single opt-in live
+        // channel. The visual HUD remains outside the accessibility tree so
+        // pipeline stage changes cannot create duplicate announcements.
+        Accessible.ignored: true
         transform: [
             Scale {
                 id: panelScale
@@ -359,6 +364,7 @@ Window {
                 RowLayout {
                     id: statusRow
                     Layout.fillWidth: true
+                    Layout.fillHeight: !signalPath.visible
                     Layout.minimumHeight: statusCopy.implicitHeight
                     Layout.preferredHeight: Math.max(tokens.metric(root.large ? 48 : 36), statusCopy.implicitHeight)
                     Layout.maximumHeight: root.large ? Math.max(tokens.metric(48), statusCopy.implicitHeight) : statusCopy.implicitHeight
@@ -460,7 +466,8 @@ Window {
                             font.pixelSize: tokens.statusHeading
                             font.weight: Font.DemiBold
                             verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight
+                            wrapMode: Text.Wrap
+                            elide: Text.ElideNone
                             Accessible.ignored: true
                         }
 
@@ -475,19 +482,24 @@ Window {
                             font.family: tokens.fontFamily
                             font.pixelSize: tokens.secondary
                             verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight
+                            wrapMode: Text.Wrap
+                            elide: Text.ElideNone
                             Accessible.ignored: true
                         }
                     }
                 }
 
                 SignalPath {
+                    id: signalPath
                     objectName: "hudSignalPath"
+                    visible: root.displayedKind !== "danger"
+                             && root.displayedKind !== "warning"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.minimumHeight: implicitHeight
                     tokens: tokens
                     compact: true
+                    accessibilityEnabled: false
                     activeStage: root.stage()
                 }
             }

@@ -23,7 +23,7 @@ from PySide6.QtCore import (
     Qt,
     QUrl,
 )
-from PySide6.QtGui import QColor, QKeySequence
+from PySide6.QtGui import QAccessible, QColor, QGuiApplication, QKeySequence
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlExpression
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
@@ -171,6 +171,22 @@ class ShellHomeTests(unittest.TestCase):
             result.append(child)
             pending.extend(child.childItems())
         return result
+
+    @classmethod
+    def _visual_item(cls, item, object_name):
+        return next(
+            (
+                child
+                for child in cls._visual_items(item)
+                if child.objectName() == object_name
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _scene_rect(item):
+        origin = item.mapToScene(QPointF(0, 0))
+        return QRectF(origin.x(), origin.y(), item.width(), item.height())
 
     def _load_main(self, *, text_scale=100, app=None):
         app = app or _App(text_scale=text_scale)
@@ -674,34 +690,50 @@ Control {
                         )
 
                     visual_items = self._visual_items(main.contentItem())
-                    summary_surface = next(
+                    readiness_surface = main.findChild(
+                        QObject, "homeBoundedReadinessHero"
+                    )
+                    status_surface = main.findChild(
+                        QObject, "homeBoundedSummarySection"
+                    )
+                    status_badge = next(
                         (
                             item
                             for item in visual_items
-                            if item.objectName() == "homeSummarySymbolSurface"
+                            if item.objectName() == "statusOrbBadge"
                         ),
                         None,
                     )
-                    summary_glyph = next(
-                        (
-                            item
-                            for item in visual_items
-                            if item.objectName() == "homeSummarySymbolGlyph"
-                        ),
-                        None,
-                    )
-                    self.assertIsNotNone(summary_surface)
-                    self.assertIsNotNone(summary_glyph)
+                    self.assertIsNotNone(readiness_surface)
+                    self.assertIsNotNone(status_surface)
+                    self.assertIsNotNone(status_badge)
                     self.assertEqual(
-                        QColor(summary_surface.property("color")),
+                        QColor(readiness_surface.property("fillColor")),
+                        QColor(theme.property("majorSurface")),
+                    )
+                    self.assertEqual(
+                        QColor(readiness_surface.property("edgeColor")),
+                        QColor(theme.property("border")),
+                    )
+                    self.assertEqual(
+                        QColor(status_surface.property("fillColor")),
+                        QColor(theme.property("contentSurface")),
+                    )
+                    self.assertEqual(
+                        QColor(status_surface.property("edgeColor")),
+                        QColor(theme.property("border")),
+                    )
+                    self.assertAlmostEqual(
+                        QColor(status_surface.property("fillColor")).alphaF(),
+                        1.0,
+                        places=5,
+                    )
+                    self.assertEqual(
+                        QColor(status_badge.property("color")),
                         QColor(theme.property("accent")),
                     )
                     self.assertEqual(
-                        QColor(summary_surface.property("edgeColor")),
-                        QColor(theme.property("accentText")),
-                    )
-                    self.assertEqual(
-                        QColor(summary_glyph.property("color")),
+                        QColor(status_badge.property("edgeColor")),
                         QColor(theme.property("accentText")),
                     )
                     chrome_nodes = [
@@ -891,17 +923,27 @@ Control {
             home = main.findChild(QQuickItem, "homePage")
             viewport = main.findChild(QQuickItem, "homeBoundedViewport")
             hero = main.findChild(QQuickItem, "homeBoundedReadinessHero")
+            status_surface = main.findChild(
+                QQuickItem, "homeBoundedSummarySection"
+            )
             switch = main.findChild(QObject, "dictationSwitch")
-            summary_repeater = main.findChild(QObject, "summaryRepeater")
             self.assertIsNotNone(content)
             self.assertIsNotNone(home)
             self.assertIsNotNone(viewport)
             self.assertIsNotNone(hero)
+            self.assertIsNotNone(status_surface)
             self.assertGreater(hero.width(), 0)
             self.assertGreater(hero.height(), 0)
+            self.assertGreater(status_surface.width(), 0)
+            self.assertGreater(status_surface.height(), 0)
             self.assertGreaterEqual(switch.width(), 44)
-            self.assertIsNotNone(summary_repeater)
-            self.assertEqual(summary_repeater.property("count"), 4)
+            rows = [
+                self._visual_item(main.contentItem(), f"homeStatusRow{index}")
+                for index in range(5)
+            ]
+            self.assertTrue(all(row is not None for row in rows))
+            self.assertTrue(all(row.isVisible() for row in rows))
+            self.assertIsNone(main.findChild(QObject, "summaryRepeater"))
 
             content_origin = content.mapToScene(QPointF(0, 0))
             content_left = content_origin.x()
@@ -928,6 +970,231 @@ Control {
                     )
         finally:
             self._dispose_qml(bridge, engine, root=main)
+
+    def test_home_uses_five_flat_status_rows_and_latest_outcome_fits_at_960_by_700(self):
+        _app, bridge, _controller, engine, main = self._load_main()
+        try:
+            main.setWidth(960)
+            main.setHeight(700)
+            main.show()
+            for _ in range(30):
+                self.qapp.processEvents()
+
+            viewport = main.findChild(QQuickItem, "homeBoundedViewport")
+            status_surface = main.findChild(
+                QQuickItem, "homeBoundedSummarySection"
+            )
+            self.assertIsNotNone(viewport)
+            self.assertIsNotNone(status_surface)
+            self.assertIsNone(main.findChild(QObject, "summaryRepeater"))
+            self.assertIsNone(main.findChild(QObject, "homeBoundedSummaryCard"))
+
+            expected_names = (
+                "Microphone:",
+                "Speech model:",
+                "Text cleanup:",
+                "Privacy:",
+                "Latest outcome:",
+            )
+            rows = []
+            for index, prefix in enumerate(expected_names):
+                row = self._visual_item(
+                    main.contentItem(), f"homeStatusRow{index}"
+                )
+                self.assertIsNotNone(row, prefix)
+                self.assertTrue(row.isVisible(), prefix)
+                interface = QAccessible.queryAccessibleInterface(row)
+                self.assertIsNotNone(interface, prefix)
+                self.assertTrue(
+                    interface.text(QAccessible.Text.Name).startswith(prefix),
+                    interface.text(QAccessible.Text.Name),
+                )
+                rows.append(row)
+
+            viewport_rect = self._scene_rect(viewport)
+            latest_rect = self._scene_rect(rows[-1])
+            self.assertGreaterEqual(latest_rect.top(), viewport_rect.top())
+            self.assertLessEqual(latest_rect.bottom(), viewport_rect.bottom())
+        finally:
+            self._dispose_qml(bridge, engine, root=main)
+
+    def test_compact_title_privacy_cue_remains_visible_at_640_by_520_and_200_percent(self):
+        _app, bridge, _controller, engine, main = self._load_main(text_scale=200)
+        try:
+            main.setWidth(640)
+            main.setHeight(520)
+            main.show()
+            for _ in range(30):
+                self.qapp.processEvents()
+
+            chrome = main.findChild(QQuickItem, "windowChrome")
+            cue = main.findChild(QQuickItem, "windowPrivacyCue")
+            cue_text = main.findChild(QQuickItem, "windowPrivacyCueText")
+            controls = main.findChild(QQuickItem, "windowControlGroup")
+            self.assertIsNotNone(chrome)
+            self.assertIsNotNone(cue)
+            self.assertIsNotNone(cue_text)
+            self.assertIsNotNone(controls)
+            self.assertTrue(chrome.property("compactPrivacyCue"))
+            self.assertTrue(cue.isVisible())
+            self.assertTrue(cue_text.isVisible())
+            self.assertEqual(cue_text.property("text"), "Local only")
+            interface = QAccessible.queryAccessibleInterface(cue)
+            self.assertIsNotNone(interface)
+            self.assertEqual(
+                interface.text(QAccessible.Text.Name),
+                "Everything stays on this device",
+            )
+
+            chrome_rect = self._scene_rect(chrome)
+            cue_rect = self._scene_rect(cue)
+            self.assertGreaterEqual(cue_rect.top(), chrome_rect.top())
+            self.assertLessEqual(cue_rect.bottom(), chrome_rect.bottom())
+
+            # The offscreen QPA has no Windows font engine and reports every
+            # glyph as a 30 px tofu box at this scale. Native Windows metrics
+            # are the product geometry and are exercised by the Windows run.
+            if QGuiApplication.platformName() != "offscreen":
+                self.assertFalse(cue_rect.intersects(self._scene_rect(controls)))
+                for name in (
+                    "minimizeWindowButton",
+                    "maximizeWindowButton",
+                    "closeWindowButton",
+                ):
+                    control = main.findChild(QQuickItem, name)
+                    self.assertIsNotNone(control)
+                    self.assertFalse(cue_rect.intersects(self._scene_rect(control)))
+        finally:
+            self._dispose_qml(bridge, engine, root=main)
+
+    def test_home_shortcut_copy_tracks_hold_toggle_and_windows_forced_toggle_modes(self):
+        class _ModeApp(_App):
+            def __init__(
+                inner_self,
+                *,
+                hotkey,
+                toggle_mode,
+                effective_toggle_mode,
+                toggle_mode_forced=False,
+            ):
+                super().__init__()
+                inner_self._hotkey = hotkey
+                inner_self._toggle_mode = toggle_mode
+                inner_self._effective_toggle_mode = effective_toggle_mode
+                inner_self._toggle_mode_forced = toggle_mode_forced
+                inner_self.interface_state.update(hotkey=hotkey)
+
+            def settings_snapshot(inner_self):
+                settings = super().settings_snapshot()
+                settings.update(
+                    {
+                        "hotkey": inner_self._hotkey,
+                        "toggle_mode": inner_self._toggle_mode,
+                        "effective_toggle_mode": inner_self._effective_toggle_mode,
+                        "toggle_mode_forced": inner_self._toggle_mode_forced,
+                    }
+                )
+                return settings
+
+        cases = (
+            {
+                "name": "hold",
+                "hotkey": "right ctrl",
+                "toggle_mode": False,
+                "effective_toggle_mode": False,
+                "toggle_mode_forced": False,
+                "ready_prefix": "Hold Right Ctrl",
+                "ready_fragment": "speak, then release",
+                "listening_prefix": "Release Right Ctrl",
+                "listening_fragment": "when you are finished",
+            },
+            {
+                "name": "toggle",
+                "hotkey": "right ctrl",
+                "toggle_mode": True,
+                "effective_toggle_mode": True,
+                "toggle_mode_forced": False,
+                "ready_prefix": "Press Right Ctrl once",
+                "ready_fragment": "press again to stop",
+                "listening_prefix": "Press Right Ctrl again",
+                "listening_fragment": "to stop",
+            },
+            {
+                "name": "windows_combo_forced_toggle",
+                "hotkey": "ctrl+space",
+                "toggle_mode": False,
+                "effective_toggle_mode": True,
+                "toggle_mode_forced": True,
+                "ready_prefix": "Press Ctrl+",
+                "ready_fragment": "once to start; press again to stop",
+                "listening_prefix": "Press Ctrl+",
+                "listening_fragment": "again to stop",
+            },
+        )
+        for case in cases:
+            with self.subTest(case=case["name"]):
+                app = _ModeApp(
+                    hotkey=case["hotkey"],
+                    toggle_mode=case["toggle_mode"],
+                    effective_toggle_mode=case["effective_toggle_mode"],
+                    toggle_mode_forced=case["toggle_mode_forced"],
+                )
+                _app, bridge, _controller, engine, main = self._load_main(app=app)
+                try:
+                    main.show()
+                    for _ in range(20):
+                        self.qapp.processEvents()
+                    instruction = main.findChild(
+                        QQuickItem, "homeShortcutInstruction"
+                    )
+                    self.assertIsNotNone(instruction)
+                    ready_copy = str(instruction.property("text"))
+                    self.assertTrue(
+                        ready_copy.startswith(case["ready_prefix"]), ready_copy
+                    )
+                    self.assertIn(case["ready_fragment"], ready_copy)
+                    ready_matches = [
+                        item
+                        for item in self._visual_items(main.contentItem())
+                        if item.property("text") is not None
+                        and item.isVisible()
+                        and str(item.property("text")) == ready_copy
+                    ]
+                    self.assertEqual(len(ready_matches), 1, ready_copy)
+
+                    app.interface_state.update(
+                        capture="listening", capture_job_id=1
+                    )
+                    for _ in range(20):
+                        self.qapp.processEvents()
+                    visible_copy = [
+                        str(item.property("text"))
+                        for item in self._visual_items(main.contentItem())
+                        if item.property("text") is not None
+                        and item.isVisible()
+                    ]
+                    listening_matches = [
+                        text
+                        for text in visible_copy
+                        if (
+                            text.startswith(case["listening_prefix"])
+                            and case["listening_fragment"] in text
+                        )
+                    ]
+                    self.assertEqual(
+                        len(listening_matches),
+                        1,
+                        sorted(visible_copy),
+                    )
+
+                    if case["toggle_mode_forced"]:
+                        self.assertFalse(bool(bridge.settings["toggle_mode"]))
+                        self.assertTrue(
+                            bool(bridge.settings["effective_toggle_mode"])
+                        )
+                        self.assertNotIn("Hold Ctrl+space", ready_copy)
+                finally:
+                    self._dispose_qml(bridge, engine, root=main)
 
     def test_shell_uses_shared_tokens_and_accessible_window_copy(self):
         sources = {
@@ -956,8 +1223,11 @@ Control {
 
         home = sources["HomePage.qml"]
         self.assertIn("Everything stays on this device", chrome)
-        self.assertIn("Private by design", home)
-        self.assertIn("keeps no transcript history", home)
+        self.assertIn("No transcript history", home)
+        self.assertIn('objectName: "homeBoundedSummarySection"', home)
+        self.assertIn('objectName: "homeStatusRow" + index', home)
+        self.assertNotIn("homeBoundedSummaryCard", home)
+        self.assertNotIn("summaryRepeater", home)
 
 
 if __name__ == "__main__":

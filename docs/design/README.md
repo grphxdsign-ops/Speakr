@@ -17,6 +17,10 @@ Implementation verification is documented in
 the one-command warning, geometry, accessibility, privacy, and platform
 screenshot harness.
 
+Controller merge evidence and the repeated five-persona gate are recorded in
+[`luminous-orbit-ledger.md`](luminous-orbit-ledger.md) and
+[`luminous-orbit-consensus.md`](luminous-orbit-consensus.md).
+
 Generated text and small details are illustrative. `DESIGN.md` and
 `luminous-orbit-spec.md` are authoritative whenever a raster board differs
 from the product copy or accessibility contract.

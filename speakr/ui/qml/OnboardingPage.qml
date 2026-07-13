@@ -63,6 +63,10 @@ Item {
         return issue && issue.code !== undefined ? String(issue.code) : ""
     }
 
+    function shortcutForcesToggle() {
+        return Boolean(setting("toggle_mode_forced", false))
+    }
+
     function modelBusy() {
         return String(value(appState, "pipeline", "idle")) === "waiting_model"
                 || String(value(appState, "availability", "ready")) === "starting"
@@ -126,7 +130,7 @@ Item {
                 return
             return
         }
-        if (currentStep === 3
+        if (currentStep === 3 && !shortcutForcesToggle()
                 && !bridge.setSetting("toggle_mode", selectedToggleMode))
             return
         if (currentStep < stepNames.length - 1) {
@@ -157,9 +161,9 @@ Item {
     }
 
     function levelCount() {
+        if (!practiceActive()) return 0
         var level = String(value(practice, "mic_level_band",
-                                 value(practice, "level",
-                                       value(appState, "mic_level_band", "silent"))))
+                                 value(practice, "level", "silent")))
         if (level === "high") return 5
         if (level === "good") return 4
         if (level === "low") return 2
@@ -167,6 +171,11 @@ Item {
     }
 
     function levelLabel() {
+        if (!practiceActive()) {
+            if (practiceBusy()) return qsTr("Processing locally")
+            if (practiceAttemptExists()) return qsTr("Starts when you choose Try again")
+            return qsTr("Starts when you choose Start Practice")
+        }
         var level = String(value(practice, "mic_level_band",
                                  value(practice, "level", "silent")))
         if (level === "high") return qsTr("High")
@@ -179,6 +188,40 @@ Item {
         return String(value(practice, "text",
                             value(practice, "wouldType",
                                   value(practice, "heard", ""))))
+    }
+
+    function practiceMessage() {
+        return String(value(practice, "error",
+                            value(practice, "message", "")))
+    }
+
+    function practiceActive() {
+        return Boolean(value(practice, "active", false))
+    }
+
+    function practiceBusy() {
+        return Boolean(value(practice, "busy",
+                             value(practice, "processing", false)))
+    }
+
+    function practiceAttemptExists() {
+        return practiceText().length > 0 || practiceMessage().length > 0
+    }
+
+    function practiceHasResult() {
+        return practiceText().length > 0
+    }
+
+    function stepAccessibilityDescription(index) {
+        var number = index + 1
+        var total = stepNames.length
+        if (index < currentStep)
+            return qsTr("Completed setup step %1 of %2. Activate to return.")
+                    .arg(number).arg(total)
+        if (index === currentStep)
+            return qsTr("Current setup step %1 of %2.").arg(number).arg(total)
+        return qsTr("Upcoming setup step %1 of %2. Complete the current step first.")
+                .arg(number).arg(total)
     }
 
     Keys.onEscapePressed: function(event) {
@@ -254,6 +297,7 @@ Item {
                             spacing: root.tokens.space8
 
                             NavigationButton {
+                                objectName: "onboardingStepButton" + index
                                 tokens: root.tokens
                                 text: qsTr("%1. %2").arg(index + 1).arg(modelData)
                                 implicitWidth: Math.max(root.tokens.controlHeight,
@@ -261,9 +305,7 @@ Item {
                                                         + root.tokens.space32)
                                 selected: root.currentStep === index
                                 enabled: index <= root.currentStep
-                                Accessible.description: root.currentStep === index
-                                                        ? qsTr("Current setup step")
-                                                        : qsTr("Return to setup step %1").arg(index + 1)
+                                Accessible.description: root.stepAccessibilityDescription(index)
                                 onClicked: root.goTo(index)
                             }
 
@@ -511,12 +553,14 @@ Item {
                                     tokens: root.tokens
                                     kind: bridge.capturingHotkey ? "info" : "success"
                                     title: bridge.capturingHotkey
-                                           ? qsTr("Press your new shortcut")
+                                           ? qsTr("Press one key")
                                            : qsTr("Current shortcut")
                                     message: bridge.capturingHotkey
                                              ? (String(root.value(root.appState, "pending_hotkey", "")).length > 0
                                                 ? qsTr("Captured: %1").arg(root.value(root.appState, "pending_hotkey", ""))
-                                                : qsTr("Press the key or key combination you want to use."))
+                                                : (String(root.setting("platform", "windows")) === "mac"
+                                                   ? qsTr("Press one modifier key, such as Fn, Control, Option, or Command.")
+                                                   : qsTr("Press one key.")))
                                              : String(root.value(root.appState, "hotkey",
                                                                 root.setting("hotkey", "right ctrl")))
                                     detail: qsTr("There is no time limit. Choose Cancel or press Escape to stop capture.")
@@ -562,7 +606,9 @@ Item {
                                     Layout.fillWidth: true
                                     tokens: root.tokens
                                     title: qsTr("Shortcut behavior")
-                                    description: qsTr("Hold is familiar; Toggle can help when holding a key is difficult.")
+                                    description: root.shortcutForcesToggle()
+                                                 ? qsTr("Windows key combinations always use Press to start and stop. Change to a single-key shortcut to choose Hold to speak.")
+                                                 : qsTr("Hold is familiar; Press to start and stop can help when holding a key is difficult.")
                                 }
 
                                 QuietComboBox {
@@ -570,8 +616,13 @@ Item {
                                     tokens: root.tokens
                                     model: [qsTr("Hold to speak"),
                                             qsTr("Press to start and stop")]
-                                    currentIndex: root.selectedToggleMode ? 1 : 0
+                                    currentIndex: root.shortcutForcesToggle()
+                                                  || root.selectedToggleMode ? 1 : 0
+                                    enabled: !root.shortcutForcesToggle()
                                     accessibleName: qsTr("Shortcut behavior")
+                                    accessibleDescription: root.shortcutForcesToggle()
+                                                           ? qsTr("This Windows key combination always uses Press to start and stop")
+                                                           : qsTr("Choose Hold or Press to start and stop")
                                     onActivated: root.selectedToggleMode = currentIndex === 1
                                 }
                             }
@@ -582,20 +633,38 @@ Item {
                                 StatusOrb {
                                     Layout.fillWidth: true
                                     tokens: root.tokens
-                                    statusKind: root.value(root.practice, "active", false)
+                                    statusKind: root.practiceActive()
                                                 ? "active"
-                                                : (root.value(root.practice, "busy", false)
-                                                   ? "active" : "neutral")
-                                    symbol: root.value(root.practice, "active", false)
-                                            ? "\u2022" : "\u2713"
-                                    label: root.value(root.practice, "active", false)
+                                                : (root.practiceBusy()
+                                                   ? "active"
+                                                   : (root.practiceHasResult()
+                                                      ? "success"
+                                                      : (root.practiceMessage().length > 0
+                                                         ? "warning" : "neutral")))
+                                    symbol: root.practiceActive()
+                                            || root.practiceBusy()
+                                            ? "\u2022"
+                                            : (root.practiceMessage().length > 0
+                                               && !root.practiceHasResult()
+                                               ? "!" : "\u2713")
+                                    label: root.practiceActive()
                                            ? qsTr("Listening")
-                                           : (root.value(root.practice, "busy", false)
+                                           : (root.practiceBusy()
                                               ? qsTr("Transcribing locally")
-                                              : qsTr("Practice is optional"))
-                                    description: root.value(root.practice, "active", false)
+                                              : (root.practiceHasResult()
+                                                 ? qsTr("Practice result ready")
+                                                 : (root.practiceMessage().length > 0
+                                                    ? qsTr("Ready to try again")
+                                                    : qsTr("Practice is optional"))))
+                                    description: root.practiceActive()
                                                  ? qsTr("Microphone input: %1").arg(root.levelLabel())
-                                                 : qsTr("You can finish setup without recording")
+                                                 : (root.practiceBusy()
+                                                    ? qsTr("Temporary audio is being processed on this device")
+                                                    : (root.practiceHasResult()
+                                                       ? qsTr("Try again or finish setup")
+                                                       : (root.practiceMessage().length > 0
+                                                          ? qsTr("Review the message, then try again or finish setup")
+                                                          : qsTr("You can skip Practice and finish setup"))))
                                 }
 
                                 InlineNotice {
@@ -610,10 +679,12 @@ Item {
                                 RowLayout {
                                     id: practiceMeter
                                     objectName: "onboardingPracticeMeter"
+                                    visible: root.practiceActive()
                                     Layout.fillWidth: true
                                     spacing: root.tokens.space8
                                     Accessible.role: Accessible.ProgressBar
                                     Accessible.name: qsTr("Microphone input level: %1").arg(root.levelLabel())
+                                    Accessible.ignored: !root.practiceActive()
 
                                     Repeater {
                                         objectName: "onboardingPracticeMeterSegments"
@@ -661,16 +732,25 @@ Item {
                                     QuietButton {
                                         objectName: "onboardingPracticeStartButton"
                                         tokens: root.tokens
-                                        text: root.value(root.practice, "active", false)
-                                              ? qsTr("Stop Practice") : qsTr("Start Practice")
-                                        kind: root.value(root.practice, "active", false)
+                                        text: root.practiceActive()
+                                              ? qsTr("Stop Practice")
+                                              : (root.practiceBusy()
+                                                 ? qsTr("Processing…")
+                                                 : (root.practiceAttemptExists()
+                                                    ? qsTr("Try again")
+                                                    : qsTr("Start Practice")))
+                                        kind: root.practiceBusy()
+                                              || root.practiceAttemptExists()
                                               ? "secondary" : "primary"
-                                        enabled: root.value(root.practice, "active", false)
-                                                 || !root.value(root.practice, "busy", false)
-                                        accessibleDescription: root.value(root.practice, "active", false)
+                                        enabled: !root.practiceBusy()
+                                        accessibleDescription: root.practiceActive()
                                                                ? qsTr("Stop this temporary practice recording")
-                                                               : qsTr("Start a temporary practice recording")
-                                        onClicked: root.value(root.practice, "active", false)
+                                                               : (root.practiceBusy()
+                                                                  ? qsTr("Temporary practice is processing locally")
+                                                                  : (root.practiceAttemptExists()
+                                                                  ? qsTr("Start another temporary practice recording")
+                                                                  : qsTr("Start a temporary practice recording")))
+                                        onClicked: root.practiceActive()
                                                    ? bridge.stopPractice()
                                                    : bridge.startPractice()
                                     }
@@ -679,7 +759,7 @@ Item {
                                         objectName: "onboardingPracticeClearButton"
                                         tokens: root.tokens
                                         text: qsTr("Clear")
-                                        enabled: root.practiceText().length > 0
+                                        enabled: root.practiceAttemptExists()
                                         accessibleDescription: qsTr("Clear temporary practice text from memory")
                                         onClicked: bridge.clearPractice()
                                     }
@@ -687,11 +767,11 @@ Item {
 
                                 InlineNotice {
                                     Layout.fillWidth: true
-                                    visible: String(root.value(root.practice, "error", "")).length > 0
+                                    visible: root.practiceMessage().length > 0
                                     tokens: root.tokens
                                     kind: "warning"
                                     title: qsTr("Practice did not finish")
-                                    message: String(root.value(root.practice, "error", ""))
+                                    message: root.practiceMessage()
                                 }
 
                                 PlainTextArea {
@@ -777,6 +857,11 @@ Item {
 
                     QuietButton {
                         objectName: "onboardingContinueButton"
+                        visible: root.currentStep < root.stepNames.length - 1
+                                 || (root.currentStep === root.stepNames.length - 1
+                                     && root.practiceAttemptExists()
+                                     && !root.practiceActive()
+                                     && !root.practiceBusy())
                         tokens: root.tokens
                         text: root.currentStep === root.stepNames.length - 1
                               ? qsTr("Finish setup") : qsTr("Continue")
@@ -795,8 +880,10 @@ Item {
                         id: skipPracticeButton
                         objectName: "skipPracticeButton"
                         visible: root.currentStep === root.stepNames.length - 1
+                                 && !root.practiceAttemptExists()
                         tokens: root.tokens
-                        text: qsTr("Skip Practice")
+                        text: qsTr("Skip Practice and finish setup")
+                        enabled: !root.practiceActive() && !root.practiceBusy()
                         accessibleDescription: qsTr("Finish setup without a practice dictation")
                         onClicked: root.finishSetup()
                     }

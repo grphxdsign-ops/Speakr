@@ -7,11 +7,13 @@ Item {
     required property var tokens
     property int activeStage: 0 // 0 idle, 1 transcribe, 2 clean up, 3 insert, 4 complete
     property bool compact: false
+    property bool accessibilityEnabled: true
 
     implicitWidth: tokens.metric(360)
     implicitHeight: compact ? tokens.metric(38) : tokens.metric(52)
     Accessible.role: Accessible.List
     Accessible.name: qsTr("Processing stages")
+    Accessible.ignored: !accessibilityEnabled
 
     RowLayout {
         anchors.fill: parent
@@ -22,6 +24,7 @@ Item {
             Layout.minimumWidth: 0
             Layout.preferredWidth: root.tokens.metric(root.compact ? 72 : 100)
             tokens: root.tokens
+            accessibilityEnabled: root.accessibilityEnabled
             label: root.compact ? qsTr("Transcribe") : qsTr("Transcribe")
             active: root.activeStage === 1
             reached: root.activeStage > 1
@@ -69,6 +72,7 @@ Item {
             Layout.minimumWidth: 0
             Layout.preferredWidth: root.tokens.metric(root.compact ? 72 : 100)
             tokens: root.tokens
+            accessibilityEnabled: root.accessibilityEnabled
             label: qsTr("Clean up")
             active: root.activeStage === 2
             reached: root.activeStage > 2
@@ -116,6 +120,7 @@ Item {
             Layout.minimumWidth: 0
             Layout.preferredWidth: root.tokens.metric(root.compact ? 72 : 100)
             tokens: root.tokens
+            accessibilityEnabled: root.accessibilityEnabled
             label: qsTr("Insert")
             active: root.activeStage === 3
             reached: root.activeStage > 3

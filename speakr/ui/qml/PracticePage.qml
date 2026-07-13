@@ -39,10 +39,14 @@ Item {
                 || heardText().length > 0 || wouldTypeText().length > 0
     }
 
+    function attemptExists() {
+        return hasResult() || practiceMessage().length > 0
+    }
+
     function levelCount() {
+        if (!isActive()) return 0
         var level = String(value(practice, "mic_level_band",
-                                 value(practice, "level",
-                                       value(appState, "mic_level_band", "silent"))))
+                                 value(practice, "level", "silent")))
         if (level === "high") return 5
         if (level === "good") return 4
         if (level === "low") return 2
@@ -50,9 +54,14 @@ Item {
     }
 
     function levelLabel() {
+        if (!isActive()) {
+            if (isBusy()) return qsTr("Processing locally")
+            return attemptExists()
+                    ? qsTr("Starts when you choose Retry")
+                    : qsTr("Starts when you choose Start")
+        }
         var level = String(value(practice, "mic_level_band",
-                                 value(practice, "level",
-                                       value(appState, "mic_level_band", "silent"))))
+                                 value(practice, "level", "silent")))
         if (level === "high") return qsTr("High")
         if (level === "good") return qsTr("Good")
         if (level === "low") return qsTr("Low")
@@ -66,6 +75,8 @@ Item {
             return qsTr("Transcribing locally")
         if (hasResult())
             return qsTr("Ready to review")
+        if (practiceMessage().length > 0)
+            return qsTr("Ready to try again")
         return qsTr("Ready to practice")
     }
 
@@ -79,6 +90,8 @@ Item {
             return qsTr("Your temporary recording is being processed on this device")
         if (hasResult())
             return qsTr("Review the temporary result, retry, or clear it")
+        if (practiceMessage().length > 0)
+            return qsTr("Review the message, then retry or clear it")
         return qsTr("Start when you are ready. Nothing is timed.")
     }
 
@@ -224,8 +237,13 @@ Item {
                             Layout.fillWidth: true
                             tokens: root.tokens
                             statusKind: root.isActive() || root.isBusy() ? "active"
-                                        : (root.hasResult() ? "success" : "neutral")
-                            symbol: root.hasResult() && !root.isBusy() ? "\u2713" : "\u2022"
+                                        : (root.hasResult() ? "success"
+                                           : (root.practiceMessage().length > 0
+                                              ? "warning" : "neutral"))
+                            symbol: root.hasResult() && !root.isBusy()
+                                    ? "\u2713"
+                                    : (root.practiceMessage().length > 0
+                                       && !root.isBusy() ? "!" : "\u2022")
                             label: root.stateLabel()
                             description: root.stateDescription()
                         }
@@ -237,13 +255,19 @@ Item {
 
                             QuietButton {
                                 objectName: "practiceStartStopButton"
+                                visible: root.isActive() || root.isBusy()
+                                         || !root.attemptExists()
                                 tokens: root.tokens
-                                text: root.isActive() ? qsTr("Stop") : qsTr("Start")
-                                kind: root.isActive() ? "secondary" : "primary"
+                                text: root.isActive() ? qsTr("Stop")
+                                      : (root.isBusy() ? qsTr("Processing…")
+                                                       : qsTr("Start"))
+                                kind: root.isBusy() ? "secondary" : "primary"
                                 enabled: root.isActive() || !root.isBusy()
                                 accessibleDescription: root.isActive()
                                                        ? qsTr("Stop this temporary practice recording")
-                                                       : qsTr("Start a temporary practice recording")
+                                                       : (root.isBusy()
+                                                          ? qsTr("Temporary practice is processing locally")
+                                                          : qsTr("Start a temporary practice recording"))
                                 onClicked: root.isActive()
                                            ? bridge.stopPractice() : bridge.startPractice()
                             }
@@ -253,13 +277,17 @@ Item {
                     RowLayout {
                         id: meter
                         objectName: "practiceMicrophoneMeter"
+                        visible: root.isActive()
                         Layout.fillWidth: true
                         spacing: root.tokens.space8
                         Accessible.role: Accessible.ProgressBar
                         Accessible.name: qsTr("Microphone input level: %1").arg(root.levelLabel())
-                        Accessible.description: root.levelCount() > 0
-                                                ? qsTr("Sound detected")
-                                                : qsTr("Waiting for sound")
+                        Accessible.ignored: !root.isActive()
+                        Accessible.description: root.isActive()
+                                                ? (root.levelCount() > 0
+                                                   ? qsTr("Sound detected")
+                                                   : qsTr("Waiting for sound"))
+                                                : root.levelLabel()
 
                         Repeater {
                             objectName: "practiceMeterSegments"
@@ -441,6 +469,7 @@ Item {
 
                         QuietButton {
                             objectName: "practiceRetryButton"
+                            visible: root.attemptExists()
                             tokens: root.tokens
                             text: qsTr("Retry")
                             enabled: !root.isActive() && !root.isBusy()

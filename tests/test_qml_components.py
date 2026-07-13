@@ -1028,6 +1028,111 @@ class QmlComponentContractTests(unittest.TestCase):
             engine.deleteLater()
             self.qapp.processEvents()
 
+    def test_section_heading_exposes_heading_semantics(self):
+        engine = QQmlApplicationEngine()
+        theme = self._theme(engine)
+        component = self._component(engine, "SectionHeading.qml")
+        heading = component.createWithInitialProperties(
+            {
+                "tokens": theme,
+                "title": "Microphone and language",
+                "description": "Choose the local input and speech language.",
+            }
+        )
+        self.assertIsNotNone(
+            heading, [error.toString() for error in component.errors()]
+        )
+        try:
+            self.qapp.processEvents()
+            accessible = QAccessible.queryAccessibleInterface(heading)
+            self.assertIsNotNone(accessible)
+            self.assertEqual(accessible.role(), QAccessible.Role.Heading)
+            self.assertEqual(
+                accessible.text(QAccessible.Text.Name),
+                "Microphone and language",
+            )
+            self.assertEqual(
+                accessible.text(QAccessible.Text.Description),
+                "Choose the local input and speech language.",
+            )
+        finally:
+            heading.deleteLater()
+            component.deleteLater()
+            theme.deleteLater()
+            engine.deleteLater()
+            self.qapp.processEvents()
+
+    def test_signal_path_accessibility_defaults_on_and_can_be_suppressed(self):
+        engine = QQmlApplicationEngine()
+        theme = self._theme(engine)
+        component = self._component(engine, "SignalPath.qml")
+        window = QQuickWindow()
+        visible_path = component.createWithInitialProperties(
+            {"tokens": theme}
+        )
+        suppressed_path = component.createWithInitialProperties(
+            {"tokens": theme, "accessibilityEnabled": False}
+        )
+        self.assertIsNotNone(
+            visible_path, [error.toString() for error in component.errors()]
+        )
+        self.assertIsNotNone(
+            suppressed_path,
+            [error.toString() for error in component.errors()],
+        )
+        try:
+            window.setWidth(800)
+            window.setHeight(160)
+            visible_path.setParentItem(window.contentItem())
+            visible_path.setWidth(360)
+            visible_path.setHeight(60)
+            suppressed_path.setParentItem(window.contentItem())
+            suppressed_path.setX(400)
+            suppressed_path.setWidth(360)
+            suppressed_path.setHeight(60)
+            window.show()
+            self.qapp.processEvents()
+
+            root_accessible = QAccessible.queryAccessibleInterface(window)
+            self.assertIsNotNone(root_accessible)
+
+            def descendants(interface):
+                result = []
+                for index in range(interface.childCount()):
+                    child = interface.child(index)
+                    result.append(child)
+                    result.extend(descendants(child))
+                return result
+
+            accessible_items = descendants(root_accessible)
+            processing_paths = [
+                item
+                for item in accessible_items
+                if item.role() == QAccessible.Role.List
+                and item.text(QAccessible.Text.Name) == "Processing stages"
+            ]
+            signal_nodes = [
+                item
+                for item in accessible_items
+                if item.role() == QAccessible.Role.StaticText
+                and item.text(QAccessible.Text.Name)
+                in {"Transcribe", "Clean up", "Insert"}
+            ]
+            self.assertEqual(len(processing_paths), 1)
+            self.assertEqual(len(signal_nodes), 3)
+            self.assertTrue(visible_path.property("accessibilityEnabled"))
+            self.assertFalse(suppressed_path.property("accessibilityEnabled"))
+        finally:
+            window.close()
+            visible_path.setParentItem(None)
+            suppressed_path.setParentItem(None)
+            visible_path.deleteLater()
+            suppressed_path.deleteLater()
+            component.deleteLater()
+            theme.deleteLater()
+            engine.deleteLater()
+            self.qapp.processEvents()
+
     def test_interactive_components_keep_44_pixel_targets(self):
         engine = QQmlApplicationEngine()
         theme = self._theme(engine)

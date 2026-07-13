@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from speakr import config as cfg_mod
+from speakr.hotkey import resolve_hotkey_mode
 
 log = logging.getLogger("speakr.webui")
 
@@ -87,7 +88,8 @@ class WebUI:
 
     def settings(self):
         config = self.app.config
-        return {
+        platform_name = "mac" if sys.platform == "darwin" else "windows"
+        settings = {
             "hotkey": config.get("hotkey"),
             "toggle_mode": bool(config.get("toggle_mode")),
             "keep_mic_stream_open": bool(config.get("keep_mic_stream_open")),
@@ -97,10 +99,18 @@ class WebUI:
             "recent_context": bool(config.get("formatting", "include_recent_context", default=True)),
             "log_transcripts": bool(config.get("log_transcripts", default=False)),
             "log_path": str(cfg_mod.LOG_PATH),
-            "platform": "mac" if sys.platform == "darwin" else "windows",
+            "platform": platform_name,
             "capturing_hotkey": bool(getattr(self.app, "capturing_hotkey", False)),
             "pending_hotkey": getattr(self.app, "pending_hotkey", None) or "",
         }
+        settings.update(
+            resolve_hotkey_mode(
+                settings["hotkey"],
+                settings["toggle_mode"],
+                platform=platform_name,
+            )
+        )
+        return settings
 
     def wait_state(self, after: int, timeout: float = 20.0):
         state = getattr(self.app, "interface_state", None)
@@ -363,7 +373,7 @@ h2{margin:30px 0 7px;font-size:1.15rem;letter-spacing:-.01em}
     <section id="home">
       <div class="status" role="status" aria-live="polite" aria-atomic="true"><div class="stateicon" id="stateicon" aria-hidden="true">✓</div><div><h1 id="primary" tabindex="-1">Getting Speakr ready</h1><p id="secondary">Preparing the local speech model.</p></div><button class="primary" id="toggle">Turn dictation off</button></div>
       <div id="issue" class="issue" hidden role="alert"><strong id="issueTitle"></strong><p id="issueDetail" class="fine"></p><div class="actions"><button id="issueAction" hidden>Open system settings</button><button id="recheckIssue" hidden>Recheck setup</button><button id="dismissIssue">Dismiss</button></div></div>
-      <div class="setting"><div><strong>Activation shortcut</strong><small>Use Hold to talk or Tap to start and stop. Shortcut capture has no hidden background access.</small></div><div><span class="hotkey" id="hotkey">...</span><div class="actions"><button id="captureKey">Change</button><button id="cancelKey" hidden>Cancel</button><button id="confirmKey" hidden class="primary">Confirm</button></div></div></div>
+      <div class="setting"><div><strong>Activation shortcut</strong><small id="shortcutHelp">Choose Change, then press one key. Speakr listens system-wide until you choose Cancel or press Escape. This browser page never receives the key.</small></div><div><span class="hotkey" id="hotkey">...</span><div class="actions"><button id="captureKey">Change</button><button id="cancelKey" hidden>Cancel</button><button id="confirmKey" hidden class="primary">Confirm</button></div></div></div>
       <div class="actions"><button id="openSettings">Open system privacy settings</button><button id="openConfig">Open local config</button><button id="openLog">Open local log</button></div>
     </section>
     <section id="privacy" hidden>
@@ -374,15 +384,15 @@ h2{margin:30px 0 7px;font-size:1.15rem;letter-spacing:-.01em}
         <li><b>Edit mode</b><span>May inspect selected text locally so a spoken edit instruction can replace it.</span></li>
         <li><b>Recent cleanup context</b><span>Keeps the last few inserted results in memory only to improve local cleanup.</span></li>
       </ul>
-      <div class="setting"><div><strong>Keep microphone ready</strong><small id="prerollText"></small></div><label class="switch"><input type="checkbox" id="keepMic"><span>Enabled</span></label></div>
-      <div class="setting"><div><strong>Screen context</strong><small>Focused text is read locally and discarded after the dictation.</small></div><label class="switch"><input type="checkbox" id="screenContext"><span>Enabled</span></label></div>
-      <div class="setting"><div><strong>Edit selected text</strong><small>The original stays unchanged if local editing fails.</small></div><label class="switch"><input type="checkbox" id="editMode"><span>Enabled</span></label></div>
-      <div class="setting"><div><strong>Recent in-memory context</strong><small>Never written by this feature.</small></div><label class="switch"><input type="checkbox" id="recentContext"><span>Enabled</span></label></div>
-      <div class="setting"><div><strong>Write transcripts to the local log</strong><small id="logWarning">Off is recommended. Enabling writes dictated text to speakr.log on this device.</small></div><label class="switch"><input type="checkbox" id="logTranscripts"><span>Enabled</span></label></div>
+      <div class="setting"><div><strong id="keepMicLabel">Keep microphone ready</strong><small id="prerollText"></small></div><label class="switch" for="keepMic"><input type="checkbox" id="keepMic" aria-labelledby="keepMicLabel" aria-describedby="prerollText"><span id="keepMicState" aria-hidden="true">Off</span></label></div>
+      <div class="setting"><div><strong id="screenContextLabel">Screen context</strong><small id="screenContextHelp">Focused text is read locally and discarded after the dictation.</small></div><label class="switch" for="screenContext"><input type="checkbox" id="screenContext" aria-labelledby="screenContextLabel" aria-describedby="screenContextHelp"><span id="screenContextState" aria-hidden="true">Off</span></label></div>
+      <div class="setting"><div><strong id="editModeLabel">Edit selected text</strong><small id="editModeHelp">The original stays unchanged if local editing fails.</small></div><label class="switch" for="editMode"><input type="checkbox" id="editMode" aria-labelledby="editModeLabel" aria-describedby="editModeHelp"><span id="editModeState" aria-hidden="true">Off</span></label></div>
+      <div class="setting"><div><strong id="recentContextLabel">Recent in-memory context</strong><small id="recentContextHelp">Never written by this feature.</small></div><label class="switch" for="recentContext"><input type="checkbox" id="recentContext" aria-labelledby="recentContextLabel" aria-describedby="recentContextHelp"><span id="recentContextState" aria-hidden="true">Off</span></label></div>
+      <div class="setting"><div><strong id="logTranscriptsLabel">Write transcripts to the local log</strong><small id="logWarning">Off is recommended. Enabling writes dictated text to speakr.log on this device.</small></div><label class="switch" for="logTranscripts"><input type="checkbox" id="logTranscripts" aria-labelledby="logTranscriptsLabel" aria-describedby="logWarning"><span id="logTranscriptsState" aria-hidden="true">Off</span></label></div>
     </section>
     <section id="help" hidden>
       <h1 tabindex="-1">Help</h1><p>This recovery panel is a local fallback. The normal interface is the native Speakr window.</p>
-      <h2>Dictate</h2><p class="fine">Hold your shortcut, speak, then release. In Tap mode, press once to start and again to stop.</p>
+      <h2>Dictate</h2><p class="fine" id="dictateHelp">Hold your shortcut, speak, then release.</p>
       <h2>Nothing was inserted</h2><p class="fine">Check microphone access, make sure the target field still has focus, then try again. Speakr never displays dictated content in this recovery panel.</p>
       <h2>Local cleanup</h2><p class="fine">If Ollama is not available, Speakr continues with its built-in rule-based cleanup.</p>
     </section>
@@ -395,29 +405,35 @@ var TOKEN="__TOKEN__", state={}, settings={}, stopped=false, issueCommand="";
 history.replaceState(null,"","/");
 function api(path, options){options=options||{};options.headers=Object.assign({"X-Speakr-Token":TOKEN,"Content-Type":"application/json"},options.headers||{});return fetch(path,options).then(function(r){if(!r.ok)throw new Error("request failed");return r.json();});}
 function action(name, extra){return api("/api/action",{method:"POST",body:JSON.stringify(Object.assign({action:name},extra||{}))}).then(function(v){if(v.state)state=v.state;if(v.settings)settings=v.settings;render();return v;});}
-function setSetting(path,value){return api("/api/setting",{method:"POST",body:JSON.stringify({path:path,value:value})}).then(function(v){settings=v.settings||settings;state=v.state||state;render();});}
+function setSetting(path,value){return api("/api/setting",{method:"POST",body:JSON.stringify({path:path,value:value})}).then(function(v){settings=v.settings||settings;state=v.state||state;render();return v;}).catch(function(error){render();throw error;});}
 function $(id){return document.getElementById(id);}
+function hotkeyName(){return settings.hotkey||state.hotkey||"your shortcut";}
+function toggleInstruction(listening){if(settings.effective_toggle_mode)return listening?"Press "+hotkeyName()+" again to stop.":"Press "+hotkeyName()+" once to start; press again to stop.";return listening?"Release "+hotkeyName()+" when you are finished.":"Hold "+hotkeyName()+", speak, then release.";}
+function renderSwitch(inputId,stateId,value){var checked=!!value;$(inputId).checked=checked;$(stateId).textContent=checked?"On":"Off";}
 function render(){
  var enabled=state.enabled!==false, capture=state.capture, pipeline=state.pipeline;
  $("primary").textContent=state.primary_text||state.primaryText||(capture==="listening"?"Listening":pipeline&&pipeline!=="idle"?"Processing locally":enabled?"Ready":"Dictation is off");
- $("secondary").textContent=state.secondary_text||state.secondaryText||(enabled?"Hold "+(settings.hotkey||state.hotkey||"your shortcut")+", speak, then release.":"The shortcut is paused and microphone audio is cleared.");
+ $("secondary").textContent=capture==="listening"?toggleInstruction(true):(state.secondary_text||state.secondaryText||(enabled?toggleInstruction(false):"The shortcut is paused and microphone audio is cleared."));
  $("toggle").textContent=enabled?"Turn dictation off":"Turn dictation on";$("stateicon").textContent=capture==="listening"?"●":pipeline==="error"?"!":enabled?"✓":"Ⅱ";
  $("hotkey").textContent=(settings.pending_hotkey||settings.hotkey||state.hotkey||"Not set");
  $("captureKey").hidden=!!settings.capturing_hotkey;$("cancelKey").hidden=!settings.capturing_hotkey;$("confirmKey").hidden=!settings.pending_hotkey;
+ var captureDisclosure="Choose Change, then press one key. Speakr listens system-wide until you choose Cancel or press Escape. This browser page never receives the key.";
+ if(settings.toggle_mode_forced)captureDisclosure+=" This Windows key combination always uses press-to-start and press-to-stop.";
+ $("shortcutHelp").textContent=captureDisclosure;$("dictateHelp").textContent=toggleInstruction(false);
  var issue=state.last_issue||state.lastIssue, issueAction=issue&&String(issue.action||""), issueChoice=null;
  if(issueAction==="open_system_settings")issueChoice={command:"open_system_settings",label:"Open system settings"};
  else if(issueAction==="retry_model")issueChoice={command:"retry_model",label:"Retry speech model"};
  else if(issueAction==="retry_setup")issueChoice={command:"retry_setup",label:"Recheck setup"};
  issueCommand=issueChoice?issueChoice.command:"";$("issue").hidden=!issue;$("issueAction").hidden=!issueChoice;$("recheckIssue").hidden=!(issue&&issueAction==="open_system_settings");
  if(issue){$("issueTitle").textContent=issue.message||"Speakr needs attention";$("issueDetail").textContent=issue.detail||"";if(issueChoice)$("issueAction").textContent=issueChoice.label;}
- $("keepMic").checked=!!settings.keep_mic_stream_open;$("screenContext").checked=!!settings.screen_context;$("editMode").checked=!!settings.edit_mode;$("recentContext").checked=!!settings.recent_context;$("logTranscripts").checked=!!settings.log_transcripts;
+ renderSwitch("keepMic","keepMicState",settings.keep_mic_stream_open);renderSwitch("screenContext","screenContextState",settings.screen_context);renderSwitch("editMode","editModeState",settings.edit_mode);renderSwitch("recentContext","recentContextState",settings.recent_context);renderSwitch("logTranscripts","logTranscriptsState",settings.log_transcripts);
  var seconds=Number(settings.preroll_seconds||0).toFixed(1);$("prerollText").textContent="Keeps "+seconds+" seconds of rolling audio in RAM and continuously replaces it.";$("micDisclosure").textContent=settings.keep_mic_stream_open?"The microphone connection stays open while Ready. Only "+seconds+" seconds are held in RAM and continuously replaced.":"The microphone opens only when recording starts.";
 }
 function refresh(){return Promise.all([api("/api/state"),api("/api/settings")]).then(function(v){state=v[0];settings=v[1];render();});}
  function wait(){if(stopped)return;var after=Number(state.version||0);api("/api/wait?after="+after).then(function(v){if(v)state=v;render();return api("/api/settings");}).then(function(v){if(v)settings=v;render();wait();}).catch(function(){setTimeout(wait,1200);});}
 document.querySelectorAll(".navbtn").forEach(function(btn){btn.addEventListener("click",function(){document.querySelectorAll(".navbtn").forEach(function(n){n.removeAttribute("aria-current");});btn.setAttribute("aria-current","page");document.querySelectorAll("main section").forEach(function(s){s.hidden=s.id!==btn.dataset.page;});document.querySelector("#"+btn.dataset.page+" h1, #"+btn.dataset.page+" .status h1").focus&&document.querySelector("#"+btn.dataset.page+" h1, #"+btn.dataset.page+" .status h1").focus();});});
 $("toggle").onclick=function(){action("toggle_dictation");};$("captureKey").onclick=function(){action("begin_hotkey_capture");};$("cancelKey").onclick=function(){action("cancel_hotkey_capture");};$("confirmKey").onclick=function(){action("confirm_hotkey");};$("dismissIssue").onclick=function(){action("dismiss_issue");};$("issueAction").onclick=function(){if(issueCommand)action(issueCommand);};$("recheckIssue").onclick=function(){action("retry_setup");};$("openSettings").onclick=function(){action("open_system_settings");};$("openConfig").onclick=function(){action("open_local",{kind:"config"});};$("openLog").onclick=function(){action("open_local",{kind:"log"});};
-[["keepMic","keep_mic_stream_open"],["screenContext","screen_context.enabled"],["editMode","edit_mode.enabled"],["recentContext","formatting.include_recent_context"],["logTranscripts","log_transcripts"]].forEach(function(pair){$(pair[0]).onchange=function(){if(pair[1]==="log_transcripts"&&this.checked&&!confirm("Dictated text will be written to the local file:\n"+(settings.log_path||"speakr.log")+"\n\nContinue?")){this.checked=false;return;}setSetting(pair[1],this.checked);};});
+[["keepMic","keep_mic_stream_open"],["screenContext","screen_context.enabled"],["editMode","edit_mode.enabled"],["recentContext","formatting.include_recent_context"],["logTranscripts","log_transcripts"]].forEach(function(pair){$(pair[0]).onchange=function(){if(pair[1]==="log_transcripts"&&this.checked&&!confirm("Dictated text will be written to the local file:\n"+(settings.log_path||"speakr.log")+"\n\nContinue?")){this.checked=false;renderSwitch("logTranscripts","logTranscriptsState",false);return;}setSetting(pair[1],this.checked).catch(function(){render();});};});
 refresh().then(wait).catch(wait);window.addEventListener("beforeunload",function(){stopped=true;});
 })();
 </script>

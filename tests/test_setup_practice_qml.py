@@ -13,13 +13,15 @@ from PySide6.QtCore import (
     QPointF,
     Property,
     QMetaObject,
+    Qt,
     QUrl,
     Signal,
     Slot,
 )
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QAccessible, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
 from PySide6.QtQuick import QQuickWindow
+from PySide6.QtTest import QTest
 
 from tests.qml_lifecycle import dispose_qml_fixture, qml_test_application
 
@@ -173,6 +175,36 @@ class SetupPracticeQmlTests(unittest.TestCase):
         for _ in range(4):
             self.qapp.processEvents()
             page.ensurePolished()
+
+    @staticmethod
+    def _find_by_property(root, name, expected):
+        for item in [root, *root.findChildren(QObject)]:
+            if item.property(name) == expected:
+                return item
+        return None
+
+    @staticmethod
+    def _accessible_description(item):
+        accessible = QAccessible.queryAccessibleInterface(item)
+        if accessible is None:
+            return ""
+        return accessible.text(QAccessible.Text.Description)
+
+    @staticmethod
+    def _accessible_name(item):
+        accessible = QAccessible.queryAccessibleInterface(item)
+        if accessible is None:
+            return ""
+        return accessible.text(QAccessible.Text.Name)
+
+    @staticmethod
+    def _accessible_descendants(interface):
+        result = []
+        for index in range(interface.childCount()):
+            child = interface.child(index)
+            result.append(child)
+            result.extend(SetupPracticeQmlTests._accessible_descendants(child))
+        return result
 
     @staticmethod
     def _visual_items(item):
@@ -332,10 +364,13 @@ class SetupPracticeQmlTests(unittest.TestCase):
             self.assertEqual(model.property("actionText"), "Retry")
 
             page.setProperty("currentStep", 3)
-            page.setProperty("appState", {"hotkey": "right ctrl", "pending_hotkey": "ctrl+space"})
+            page.setProperty(
+                "appState",
+                {"hotkey": "right ctrl", "pending_hotkey": "right ctrl"},
+            )
             bridge.set_capturing_hotkey(True)
             self._settle(page)
-            self.assertEqual(capture.property("title"), "Press your new shortcut")
+            self.assertEqual(capture.property("title"), "Press one key")
             self.assertIn("Captured", capture.property("message"))
 
             page.setProperty("currentStep", 4)
@@ -345,6 +380,153 @@ class SetupPracticeQmlTests(unittest.TestCase):
             segments = page.findChild(QObject, "onboardingPracticeMeterSegments")
             self.assertIsNotNone(segments)
             self.assertEqual(segments.property("count"), 5)
+            self.assertEqual(warnings, [])
+        finally:
+            self._dispose(engine, bridge, theme, page, window, warnings)
+
+    def test_shortcut_capture_is_one_key_untimed_and_cancelable(self):
+        engine, bridge, theme, page, window, warnings = self._fixture(
+            "OnboardingPage.qml"
+        )
+        try:
+            page.setProperty("currentStep", 3)
+            page.setProperty(
+                "appState", {"hotkey": "right ctrl", "pending_hotkey": ""}
+            )
+            self._settle(page)
+
+            capture = page.findChild(QObject, "onboardingHotkeyCaptureNotice")
+            capture_button = page.findChild(QObject, "onboardingCaptureButton")
+            self.assertIsNotNone(capture)
+            self.assertIsNotNone(capture_button)
+            self.assertEqual(capture_button.property("text"), "Change shortcut")
+
+            self.assertTrue(QMetaObject.invokeMethod(capture_button, "click"))
+            self._settle(page)
+            self.assertTrue(bridge.capturingHotkey)
+            self.assertEqual(capture.property("title"), "Press one key")
+            self.assertEqual(capture.property("message"), "Press one key.")
+            self.assertIn("There is no time limit", capture.property("detail"))
+            self.assertIn("Cancel", capture.property("detail"))
+            self.assertIn("Escape", capture.property("detail"))
+            self.assertEqual(capture_button.property("text"), "Cancel")
+            self.assertEqual(
+                capture_button.property("accessibleDescription"),
+                "Cancel shortcut capture",
+            )
+
+            capture_status = self._find_by_property(
+                page, "label", "Waiting for a shortcut"
+            )
+            self.assertIsNotNone(capture_status)
+            self.assertEqual(
+                capture_status.property("description"), "Capture never times out"
+            )
+
+            capture_button.forceActiveFocus(Qt.FocusReason.TabFocusReason)
+            QTest.keyClick(window, Qt.Key.Key_Escape)
+            self._settle(page)
+            self.assertFalse(bridge.capturingHotkey)
+            self.assertIn(("cancelHotkeyCapture", None), bridge.calls)
+
+            bridge.calls.clear()
+            self.assertTrue(QMetaObject.invokeMethod(capture_button, "click"))
+            self._settle(page)
+            self.assertTrue(QMetaObject.invokeMethod(capture_button, "click"))
+            self._settle(page)
+            self.assertFalse(bridge.capturingHotkey)
+            self.assertEqual(bridge.calls[-1], ("cancelHotkeyCapture", None))
+            self.assertEqual(warnings, [])
+        finally:
+            self._dispose(engine, bridge, theme, page, window, warnings)
+
+    def test_windows_combo_forces_press_without_changing_raw_hold_preference(self):
+        engine, bridge, theme, page, window, warnings = self._fixture(
+            "OnboardingPage.qml"
+        )
+        try:
+            settings = {
+                "platform": "windows",
+                "hotkey": "ctrl+space",
+                "toggle_mode": False,
+                "effective_toggle_mode": True,
+                "toggle_mode_forced": True,
+            }
+            page.setProperty("settings", settings)
+            page.setProperty("currentStep", 3)
+            self._settle(page)
+
+            behavior = self._find_by_property(
+                page, "accessibleName", "Shortcut behavior"
+            )
+            continue_button = page.findChild(QObject, "onboardingContinueButton")
+            self.assertIsNotNone(behavior)
+            self.assertIsNotNone(continue_button)
+            self.assertFalse(behavior.property("enabled"))
+            self.assertEqual(behavior.property("currentIndex"), 1)
+            self.assertEqual(behavior.property("displayText"), "Press to start and stop")
+            self.assertFalse(page.property("selectedToggleMode"))
+            self.assertIn(
+                "always uses Press to start and stop",
+                behavior.property("accessibleDescription"),
+            )
+
+            self.assertTrue(QMetaObject.invokeMethod(continue_button, "click"))
+            self._settle(page)
+            self.assertEqual(page.property("currentStep"), 4)
+            self.assertFalse(settings["toggle_mode"])
+            self.assertFalse(page.property("selectedToggleMode"))
+            self.assertNotIn(
+                ("setSetting", ("toggle_mode", False)), bridge.calls
+            )
+            self.assertFalse(
+                any(
+                    name == "setSetting" and value[0] == "toggle_mode"
+                    for name, value in bridge.calls
+                )
+            )
+            self.assertEqual(warnings, [])
+        finally:
+            self._dispose(engine, bridge, theme, page, window, warnings)
+
+    def test_onboarding_step_accessibility_describes_completed_current_and_upcoming(self):
+        engine, bridge, theme, page, window, warnings = self._fixture(
+            "OnboardingPage.qml"
+        )
+        try:
+            page.setProperty("currentStep", 2)
+            self._settle(page)
+            visual_items = self._visual_items(page)
+            buttons = [
+                next(
+                    (
+                        item
+                        for item in visual_items
+                        if item.objectName() == f"onboardingStepButton{index}"
+                    ),
+                    None,
+                )
+                for index in range(5)
+            ]
+            self.assertTrue(all(button is not None for button in buttons))
+
+            expected = (
+                "Completed setup step 1 of 5. Activate to return.",
+                "Completed setup step 2 of 5. Activate to return.",
+                "Current setup step 3 of 5.",
+                "Upcoming setup step 4 of 5. Complete the current step first.",
+                "Upcoming setup step 5 of 5. Complete the current step first.",
+            )
+            self.assertEqual(
+                [self._accessible_description(button) for button in buttons],
+                list(expected),
+            )
+            self.assertEqual(
+                [bool(button.property("enabled")) for button in buttons],
+                [True, True, True, False, False],
+            )
+            self.assertNotIn("return", expected[3].casefold())
+            self.assertNotIn("return", expected[4].casefold())
             self.assertEqual(warnings, [])
         finally:
             self._dispose(engine, bridge, theme, page, window, warnings)
@@ -375,6 +557,175 @@ class SetupPracticeQmlTests(unittest.TestCase):
         ):
             self.assertNotIn(jargon, source.casefold())
 
+    def test_onboarding_practice_action_meter_and_finish_state_table(self):
+        engine, bridge, theme, page, window, warnings = self._fixture(
+            "OnboardingPage.qml"
+        )
+        try:
+            page.setProperty("currentStep", 4)
+            start = page.findChild(QObject, "onboardingPracticeStartButton")
+            clear = page.findChild(QObject, "onboardingPracticeClearButton")
+            continue_button = page.findChild(QObject, "onboardingContinueButton")
+            skip = page.findChild(QObject, "skipPracticeButton")
+            meter = page.findChild(QObject, "onboardingPracticeMeter")
+            self.assertTrue(
+                all(
+                    item is not None
+                    for item in (start, clear, continue_button, skip, meter)
+                )
+            )
+
+            def primary_count():
+                return sum(
+                    bool(button.property("visible"))
+                    and bool(button.property("enabled"))
+                    and button.property("kind") == "primary"
+                    for button in (start, clear, continue_button, skip)
+                )
+
+            cases = (
+                (
+                    "initial",
+                    {"mic_level_band": "high"},
+                    ("Start Practice", True, "primary"),
+                    (False, "Finish setup"),
+                    (True, True, "Skip Practice and finish setup"),
+                    False,
+                    "Starts when you choose Start Practice",
+                    1,
+                ),
+                (
+                    "active",
+                    {"active": True, "mic_level_band": "silent"},
+                    ("Stop Practice", True, "primary"),
+                    (False, "Finish setup"),
+                    (True, False, "Skip Practice and finish setup"),
+                    False,
+                    "Waiting for sound",
+                    1,
+                ),
+                (
+                    "busy",
+                    {"processing": True, "mic_level_band": "high"},
+                    ("Processing…", False, "secondary"),
+                    (False, "Finish setup"),
+                    (True, False, "Skip Practice and finish setup"),
+                    False,
+                    "Processing locally",
+                    0,
+                ),
+                (
+                    "outcome",
+                    {"text": "Hello Speakr", "mic_level_band": "high"},
+                    ("Try again", True, "secondary"),
+                    (True, "Finish setup"),
+                    (False, None, "Skip Practice and finish setup"),
+                    True,
+                    "Starts when you choose Try again",
+                    1,
+                ),
+            )
+            for (
+                name,
+                practice,
+                start_state,
+                continue_state,
+                skip_state,
+                clear_enabled,
+                meter_label,
+                expected_primaries,
+            ) in cases:
+                with self.subTest(state=name):
+                    page.setProperty("practice", practice)
+                    self._settle(page)
+                    self.assertTrue(start.property("visible"))
+                    self.assertEqual(start.property("text"), start_state[0])
+                    self.assertEqual(bool(start.property("enabled")), start_state[1])
+                    self.assertEqual(start.property("kind"), start_state[2])
+                    if name == "busy":
+                        self.assertEqual(
+                            start.property("accessibleDescription"),
+                            "Temporary practice is processing locally",
+                        )
+                        busy_status = self._find_by_property(
+                            page, "label", "Transcribing locally"
+                        )
+                        self.assertIsNotNone(busy_status)
+                        self.assertEqual(busy_status.property("symbol"), "\u2022")
+                    self.assertEqual(
+                        bool(continue_button.property("visible")), continue_state[0]
+                    )
+                    self.assertEqual(continue_button.property("text"), continue_state[1])
+                    self.assertEqual(bool(skip.property("visible")), skip_state[0])
+                    if skip_state[0]:
+                        self.assertEqual(
+                            bool(skip.property("enabled")), skip_state[1]
+                        )
+                    self.assertEqual(skip.property("text"), skip_state[2])
+                    self.assertEqual(bool(clear.property("enabled")), clear_enabled)
+                    self.assertEqual(bool(meter.property("visible")), name == "active")
+                    if name == "active":
+                        self.assertIn(meter_label, self._accessible_name(meter))
+                    accessible_window = QAccessible.queryAccessibleInterface(window)
+                    progress_bars = [
+                        interface
+                        for interface in self._accessible_descendants(
+                            accessible_window
+                        )
+                        if interface.role() == QAccessible.Role.ProgressBar
+                        and "Microphone input level"
+                        in interface.text(QAccessible.Text.Name)
+                    ]
+                    self.assertEqual(len(progress_bars), 1 if name == "active" else 0)
+                    self.assertEqual(primary_count(), expected_primaries)
+
+            for band, expected_count, expected_label in (
+                ("silent", 0, "Waiting for sound"),
+                ("low", 2, "Low"),
+                ("good", 4, "Good"),
+                ("high", 5, "High"),
+            ):
+                with self.subTest(active_level=band):
+                    page.setProperty(
+                        "practice", {"active": True, "mic_level_band": band}
+                    )
+                    self._settle(page)
+                    self.assertTrue(meter.property("visible"))
+                    segments = [
+                        item
+                        for item in self._visual_items(page)
+                        if item.objectName()
+                        == "onboardingPracticeMeterSegment"
+                    ]
+                    self.assertEqual(
+                        sum(bool(segment.property("filled")) for segment in segments),
+                        expected_count,
+                    )
+                    self.assertIn(expected_label, self._accessible_name(meter))
+
+            page.setProperty("practice", {"message": "No speech was detected."})
+            self._settle(page)
+            self.assertFalse(skip.property("visible"))
+            self.assertTrue(continue_button.property("visible"))
+            self.assertEqual(continue_button.property("text"), "Finish setup")
+            self.assertEqual(start.property("text"), "Try again")
+            self.assertEqual(start.property("kind"), "secondary")
+            self.assertEqual(primary_count(), 1)
+
+            self.assertTrue(QMetaObject.invokeMethod(continue_button, "click"))
+            self._settle(page)
+            self.assertEqual(
+                bridge.calls[-3:],
+                [
+                    ("stopPractice", None),
+                    ("clearPractice", None),
+                    ("completeOnboarding", None),
+                ],
+            )
+            self.assertEqual(warnings, [])
+        finally:
+            self._dispose(engine, bridge, theme, page, window, warnings)
+
     def test_practice_states_actions_and_temporary_results(self):
         engine, bridge, theme, page, window, warnings = self._fixture(
             "PracticePage.qml"
@@ -394,18 +745,73 @@ class SetupPracticeQmlTests(unittest.TestCase):
             self.assertIsNotNone(segments)
             self.assertEqual(segments.property("count"), 5)
 
-            page.setProperty("practice", {"active": True, "mic_level_band": "good"})
+            meter = page.findChild(QObject, "practiceMicrophoneMeter")
+            self.assertIsNotNone(meter)
+
+            page.setProperty("practice", {"mic_level_band": "high"})
+            self._settle(page)
+            self.assertEqual(status.property("label"), "Ready to practice")
+            self.assertIn("Nothing is timed", status.property("description"))
+            self.assertTrue(start_stop.property("visible"))
+            self.assertEqual(start_stop.property("text"), "Start")
+            self.assertEqual(start_stop.property("kind"), "primary")
+            self.assertTrue(start_stop.property("enabled"))
+            self.assertFalse(retry.property("visible"))
+            self.assertFalse(clear.property("enabled"))
+            self.assertFalse(meter.property("visible"))
+            accessible_window = QAccessible.queryAccessibleInterface(window)
+            self.assertFalse(
+                any(
+                    interface.role() == QAccessible.Role.ProgressBar
+                    and "Microphone input level"
+                    in interface.text(QAccessible.Text.Name)
+                    for interface in self._accessible_descendants(
+                        accessible_window
+                    )
+                )
+            )
+
+            page.setProperty("practice", {"active": True, "mic_level_band": "silent"})
             self._settle(page)
             self.assertEqual(status.property("label"), "Listening")
-            self.assertIn("Sound detected", status.property("description"))
+            self.assertEqual(status.property("description"), "Waiting for sound")
+            self.assertTrue(meter.property("visible"))
+            self.assertTrue(
+                any(
+                    interface.role() == QAccessible.Role.ProgressBar
+                    and "Microphone input level"
+                    in interface.text(QAccessible.Text.Name)
+                    for interface in self._accessible_descendants(
+                        QAccessible.queryAccessibleInterface(window)
+                    )
+                )
+            )
+            self.assertIn("Waiting for sound", self._accessible_name(meter))
             self.assertEqual(start_stop.property("text"), "Stop")
+            self.assertEqual(start_stop.property("kind"), "primary")
+            self.assertFalse(retry.property("visible"))
+
+            page.setProperty("practice", {"active": True, "mic_level_band": "good"})
+            self._settle(page)
+            self.assertIn("Sound detected", status.property("description"))
+            self.assertIn("Good", self._accessible_name(meter))
             self.assertTrue(QMetaObject.invokeMethod(start_stop, "click"))
             self.assertIn(("stopPractice", None), bridge.calls)
 
             page.setProperty("practice", {"processing": True, "level": "silent"})
             self._settle(page)
             self.assertEqual(status.property("label"), "Transcribing locally")
+            self.assertTrue(start_stop.property("visible"))
+            self.assertEqual(start_stop.property("text"), "Processing…")
+            self.assertEqual(start_stop.property("kind"), "secondary")
+            self.assertFalse(start_stop.property("enabled"))
+            self.assertEqual(
+                start_stop.property("accessibleDescription"),
+                "Temporary practice is processing locally",
+            )
+            self.assertFalse(retry.property("visible"))
             self.assertFalse(retry.property("enabled"))
+            self.assertFalse(meter.property("visible"))
 
             page.setProperty(
                 "practice",
@@ -418,6 +824,10 @@ class SetupPracticeQmlTests(unittest.TestCase):
             )
             self._settle(page)
             self.assertEqual(status.property("label"), "Ready to review")
+            self.assertFalse(start_stop.property("visible"))
+            self.assertTrue(retry.property("visible"))
+            self.assertTrue(retry.property("enabled"))
+            self.assertFalse(meter.property("visible"))
             self.assertEqual(heard.property("text"), "hello speakr")
             self.assertEqual(would_type.property("text"), "Hello Speakr")
             self.assertTrue(clear.property("enabled"))
@@ -432,6 +842,9 @@ class SetupPracticeQmlTests(unittest.TestCase):
             notice = page.findChild(QObject, "practiceResultNotice")
             self.assertTrue(notice.property("visible"))
             self.assertEqual(notice.property("kind"), "info")
+            self.assertFalse(start_stop.property("visible"))
+            self.assertTrue(retry.property("visible"))
+            self.assertFalse(meter.property("visible"))
             self.assertTrue(retry.property("enabled"))
             self.assertTrue(QMetaObject.invokeMethod(retry, "click"))
             self.assertIn(("startPractice", None), bridge.calls)

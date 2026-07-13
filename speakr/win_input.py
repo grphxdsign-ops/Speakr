@@ -9,6 +9,8 @@ import time
 
 import keyboard
 
+from speakr.hotkey import resolve_hotkey_mode
+
 log = logging.getLogger("speakr.win_input")
 
 
@@ -16,7 +18,9 @@ class HotkeyListener:
     def __init__(self, hotkey, toggle_mode, on_press, on_release, on_toggle):
         self.hotkey = hotkey
         # Combos can't be held-to-talk reliably; they force toggle mode.
-        self.toggle_mode = toggle_mode or "+" in hotkey
+        self.toggle_mode = resolve_hotkey_mode(
+            hotkey, toggle_mode, platform="windows"
+        )["effective_toggle_mode"]
         self.on_press = on_press
         self.on_release = on_release
         self.on_toggle = on_toggle

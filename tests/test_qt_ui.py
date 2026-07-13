@@ -274,6 +274,266 @@ class BridgeTests(unittest.TestCase):
             finally:
                 bridge.close()
 
+    def test_background_announcements_are_job_keyed_and_capture_wins(self):
+        class App:
+            def __init__(self):
+                self.interface_state = InterfaceState(
+                    {"availability": "ready"}
+                )
+                self.enabled = True
+
+            @staticmethod
+            def settings_snapshot():
+                return {"ui": {"background_announcements": True}}
+
+            @staticmethod
+            def practice_snapshot():
+                return {}
+
+        bridge = qt_ui.Bridge(App())
+        announcements = []
+        bridge._announce = lambda message, **options: announcements.append(
+            (message, options)
+        )
+        try:
+            def announce(snapshot):
+                bridge._announce_state({}, snapshot)
+
+            bridge._settings["ui"]["background_announcements"] = False
+            announce(
+                {
+                    "capture": "listening",
+                    "capture_job_id": 19,
+                    "pipeline": "idle",
+                    "pipeline_job_id": 0,
+                }
+            )
+            self.assertEqual(announcements, [])
+            bridge._settings["ui"]["background_announcements"] = True
+
+            # Capture B owns the foreground. Processing job A remains visual
+            # secondary state but must not speak into the active microphone.
+            announce(
+                {
+                    "capture": "listening",
+                    "capture_job_id": 20,
+                    "pipeline": "transcribing",
+                    "pipeline_job_id": 10,
+                }
+            )
+            announce(
+                {
+                    "capture": "listening",
+                    "capture_job_id": 20,
+                    "pipeline": "formatting",
+                    "pipeline_job_id": 10,
+                }
+            )
+            self.assertEqual(
+                announcements, [("Listening", {"assertive": True})]
+            )
+
+            # Once capture is idle, job A gets one processing announcement,
+            # regardless of how many local pipeline stages it visits.
+            announce(
+                {
+                    "capture": "idle",
+                    "capture_job_id": 0,
+                    "pipeline": "formatting",
+                    "pipeline_job_id": 10,
+                }
+            )
+            announce(
+                {
+                    "capture": "idle",
+                    "capture_job_id": 0,
+                    "pipeline": "injecting",
+                    "pipeline_job_id": 10,
+                }
+            )
+            announce(
+                {
+                    "capture": "idle",
+                    "capture_job_id": 0,
+                    "pipeline": "success",
+                    "pipeline_job_id": 10,
+                    "pipeline_mode": "dictation",
+                    "status_code": "success",
+                }
+            )
+            announce(
+                {
+                    "capture": "idle",
+                    "capture_job_id": 0,
+                    "pipeline": "success",
+                    "pipeline_job_id": 10,
+                    "pipeline_mode": "dictation",
+                    "status_code": "success",
+                }
+            )
+
+            # A later edit job has its own processing and truthful final copy.
+            announce(
+                {
+                    "capture": "idle",
+                    "capture_job_id": 0,
+                    "pipeline": "transcribing",
+                    "pipeline_job_id": 11,
+                }
+            )
+            announce(
+                {
+                    "capture": "idle",
+                    "capture_job_id": 0,
+                    "pipeline": "success",
+                    "pipeline_job_id": 11,
+                    "pipeline_mode": "edit",
+                    "status_code": "edit_success",
+                }
+            )
+
+            self.assertEqual(
+                announcements,
+                [
+                    ("Listening", {"assertive": True}),
+                    ("Processing locally", {}),
+                    ("Inserted", {}),
+                    ("Processing locally", {}),
+                    ("Selection updated", {}),
+                ],
+            )
+        finally:
+            bridge.close()
+
+    def test_attempt_final_is_not_reannounced_when_attempt_id_retires(self):
+        class App:
+            def __init__(self):
+                self.interface_state = InterfaceState(
+                    {"availability": "ready"}
+                )
+                self.enabled = True
+
+            @staticmethod
+            def settings_snapshot():
+                return {"ui": {"background_announcements": True}}
+
+            @staticmethod
+            def practice_snapshot():
+                return {}
+
+        bridge = qt_ui.Bridge(App())
+        announcements = []
+        bridge._announce = lambda message, **_options: announcements.append(
+            message
+        )
+        try:
+            final = {
+                "capture": "idle",
+                "capture_job_id": 31,
+                "pipeline": "idle",
+                "pipeline_job_id": 0,
+                "status_code": "mic_recovery",
+            }
+            bridge._announce_state({}, final)
+            bridge._announce_state(
+                final,
+                {**final, "capture_job_id": 0},
+            )
+            bridge._announce_state(
+                {},
+                {
+                    "capture": "idle",
+                    "capture_job_id": 0,
+                    "pipeline": "idle",
+                    "pipeline_job_id": 0,
+                    "status_code": "no_speech",
+                },
+            )
+            self.assertEqual(
+                announcements,
+                ["Microphone reconnected. Please try again."],
+            )
+        finally:
+            bridge.close()
+
+    def test_final_announcement_coalesces_one_edit_job_and_covers_mic_failure(self):
+        class App:
+            def __init__(self):
+                self.interface_state = InterfaceState(
+                    {"availability": "ready"}
+                )
+                self.enabled = True
+
+            @staticmethod
+            def settings_snapshot():
+                return {"ui": {"background_announcements": True}}
+
+            @staticmethod
+            def practice_snapshot():
+                return {}
+
+        bridge = qt_ui.Bridge(App())
+        announcements = []
+        bridge._announce = lambda message, **_options: announcements.append(
+            message
+        )
+        try:
+            processing = {
+                "capture": "idle",
+                "capture_job_id": 0,
+                "pipeline": "formatting",
+                "pipeline_job_id": 42,
+                "pipeline_mode": "edit",
+                "status_code": "edit_formatting",
+            }
+            bridge._announce_state({}, processing)
+            first_final = {
+                **processing,
+                "pipeline": "error",
+                "status_code": "pipeline_error",
+            }
+            bridge._announce_state(processing, first_final)
+            bridge._announce_state(
+                first_final,
+                {
+                    **first_final,
+                    "pipeline": "idle",
+                    "status_code": "edit_failure",
+                    "last_issue": {
+                        "code": "edit_failed",
+                        "message": "The original selection was not changed.",
+                    },
+                },
+            )
+
+            mic_failure = {
+                "capture": "idle",
+                "capture_job_id": 77,
+                "pipeline": "idle",
+                "pipeline_job_id": 0,
+                "status_code": "needs_attention",
+                "last_issue": {
+                    "code": "microphone_unavailable",
+                    "message": "Microphone access is needed.",
+                },
+            }
+            bridge._announce_state({}, mic_failure)
+            bridge._announce_state(
+                mic_failure,
+                {**mic_failure, "capture_job_id": 0},
+            )
+
+            self.assertEqual(
+                announcements,
+                [
+                    "Processing locally",
+                    "The original selection was not changed.",
+                    "Microphone access is needed.",
+                ],
+            )
+        finally:
+            bridge.close()
+
 
 if __name__ == "__main__":
     unittest.main()

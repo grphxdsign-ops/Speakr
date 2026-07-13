@@ -177,6 +177,13 @@ them; they are routed verbatim to their product owners for PR-12 integration:
 10. **Onboarding/Practice:** Future onboarding steps are disabled but announced as 'Return to…' — setup a11y.
 11. **HUD:** HUD opt-in background announcements expose every pipeline stage instead of coalesced Listening / Processing locally / final — HUD a11y/privacy.
 
+PR-12 implements resolutions for all eleven findings. Their owning contracts,
+executable regression tests, repeated persona vote, and exact-source completion
+rule are recorded in
+[`luminous-orbit-consensus.md`](luminous-orbit-consensus.md). This historical
+section remains the PR-11 routing record; it is not itself evidence that the
+later fixes passed.
+
 ## Manual platform gates
 
 The following require an interactive platform and are never inferred from an
