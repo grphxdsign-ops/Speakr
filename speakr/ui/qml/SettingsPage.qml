@@ -587,53 +587,49 @@ Item {
                     anchors.fill: parent
                     spacing: 0
 
-                    ListView {
+                    Column {
                         id: settingsRowsList
                         objectName: "settingsRowsRepeater"
                         width: parent.width
-                        height: root.selectedCategory !== qsTr("All")
-                                || searchField.text.trim().length > 0
-                                ? Math.max(root.tokens.rowHeight, contentHeight)
-                                : Math.max(root.rows.length * root.tokens.rowHeight,
-                                           contentHeight)
-                        model: root.rows
-                        interactive: false
-                        clip: false
-                        cacheBuffer: height
+                        spacing: 0
 
-                        delegate: SettingRow {
-                            required property var modelData
-                            readonly property string resolvedDescription: modelData.path === "__effective_appearance"
-                                                                         ? root.effectiveAppearanceSummary()
-                                                                         : modelData.description
-                            objectName: "settingRow_" + modelData.path
-                            width: ListView.view.width
-                            visible: root.matches(modelData)
-                            height: visible ? implicitHeight : 0
-                            tokens: root.tokens
-                            label: modelData.label
-                            description: resolvedDescription
-                            category: modelData.category
-                            path: modelData.path
-                            controlType: modelData.type
-                            options: modelData.options || []
-                            values: modelData.values || []
-                            currentValue: modelData.type === "hotkey"
-                                          ? (root.appState.hotkey || root.setting(modelData.path, modelData.fallback))
-                                          : root.setting(modelData.path, modelData.fallback)
-                            showCategory: root.selectedCategory === qsTr("All")
-                                          || searchField.text.trim().length > 0
-                                          || (root.selectedCategory === qsTr("Advanced")
-                                              && modelData.category !== qsTr("Advanced"))
-                            capturingHotkey: bridge.capturingHotkey
-                            pendingHotkey: String(root.appState.pending_hotkey || "")
-                            actionText: modelData.actionText || qsTr("Open")
-                            actionKind: modelData.actionKind || "config"
-                            allowEmpty: Boolean(modelData.allowEmpty || false)
-                            onChangeRequested: function(path, value, previousValue) {
-                                root.applyChange(path, value, previousValue)
+                        Repeater {
+                            model: root.rows
+
+                            delegate: SettingRow {
+                                required property var modelData
+                                readonly property string resolvedDescription: modelData.path === "__effective_appearance"
+                                                                             ? root.effectiveAppearanceSummary()
+                                                                             : modelData.description
+                                objectName: "settingRow_" + modelData.path
+                                width: settingsRowsList.width
+                                visible: root.matches(modelData)
+                                height: visible ? implicitHeight : 0
+                                tokens: root.tokens
+                                label: modelData.label
+                                description: resolvedDescription
+                                category: modelData.category
+                                path: modelData.path
+                                controlType: modelData.type
+                                options: modelData.options || []
+                                values: modelData.values || []
+                                currentValue: modelData.type === "hotkey"
+                                              ? (root.appState.hotkey || root.setting(modelData.path, modelData.fallback))
+                                              : root.setting(modelData.path, modelData.fallback)
+                                showCategory: root.selectedCategory === qsTr("All")
+                                              || searchField.text.trim().length > 0
+                                              || (root.selectedCategory === qsTr("Advanced")
+                                                  && modelData.category !== qsTr("Advanced"))
+                                capturingHotkey: bridge.capturingHotkey
+                                pendingHotkey: String(root.appState.pending_hotkey || "")
+                                actionText: modelData.actionText || qsTr("Open")
+                                actionKind: modelData.actionKind || "config"
+                                allowEmpty: Boolean(modelData.allowEmpty || false)
+                                onChangeRequested: function(path, value, previousValue) {
+                                    root.applyChange(path, value, previousValue)
+                                }
+                                onActionRequested: function(kind) { bridge.openLocal(kind) }
                             }
-                            onActionRequested: function(kind) { bridge.openLocal(kind) }
                         }
                     }
 
