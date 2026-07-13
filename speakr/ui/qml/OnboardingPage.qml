@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 Item {
     id: root
+    objectName: "onboardingPage"
 
     required property var tokens
     property var appState: ({})
@@ -13,8 +14,10 @@ Item {
     property int transitionDirection: 1
     property string selectedModel: String(setting("model", "auto"))
     property bool selectedToggleMode: Boolean(setting("toggle_mode", false))
+    readonly property int pageMargin: width < tokens.metric(760)
+                                      ? tokens.space16 : tokens.space32
     readonly property var stepNames: [
-        qsTr("Privacy"), qsTr("Microphone"), qsTr("Model"),
+        qsTr("Privacy"), qsTr("Permissions"), qsTr("Speech model"),
         qsTr("Shortcut"), qsTr("Practice")
     ]
 
@@ -33,7 +36,8 @@ Item {
             return source[path]
         var parts = path.split(".")
         for (var i = 0; i < parts.length; ++i) {
-            if (source === null || source === undefined || source[parts[i]] === undefined)
+            if (source === null || source === undefined
+                    || source[parts[i]] === undefined)
                 return fallbackValue
             source = source[parts[i]]
         }
@@ -89,7 +93,6 @@ Item {
         if (action === "open_system_settings") return qsTr("Open system settings")
         if (action === "reload_dictionary") return qsTr("Reload Vocabulary")
         if (action === "start_practice") return qsTr("Start Practice")
-        if (action === "open_speakr") return qsTr("Dismiss")
         if (action === "retry_model") return qsTr("Retry")
         if (action === "try_again") return qsTr("Try again")
         return qsTr("Dismiss")
@@ -104,9 +107,7 @@ Item {
         else if (action === "open_system_settings") bridge.openSystemSettings()
         else if (action === "reload_dictionary") bridge.reloadLocalState()
         else if (action === "start_practice") goTo(4)
-        else if (action === "open_speakr") bridge.dismissIssue()
         else if (action === "retry_model") bridge.retrySetup()
-        else if (action === "try_again") bridge.dismissIssue()
         else bridge.dismissIssue()
     }
 
@@ -117,44 +118,65 @@ Item {
             return
         if (currentStep === 2 && (modelBusy() || modelFailed()))
             return
-        if (currentStep === 2 && selectedModel !== String(setting("model", "auto"))) {
+        if (currentStep === 2
+                && selectedModel !== String(setting("model", "auto"))) {
             if (!bridge.setSetting("model", selectedModel))
                 return
-            // Applying a different model begins a truthful local loading
-            // state. Stay here until it is ready or exposes Retry.
             return
         }
-        if (currentStep === 3) {
-            if (!bridge.setSetting("toggle_mode", selectedToggleMode))
-                return
-        }
+        if (currentStep === 3
+                && !bridge.setSetting("toggle_mode", selectedToggleMode))
+            return
         if (currentStep < stepNames.length - 1) {
             goTo(currentStep + 1)
             return
         }
+        finishSetup()
+    }
+
+    function finishSetup() {
         bridge.stopPractice()
         bridge.clearPractice()
         if (bridge.completeOnboarding())
             completed()
     }
 
-    function modelIndex(value) {
-        var options = ["auto", "tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"]
-        var index = options.indexOf(String(value))
+    function modelIndex(modelName) {
+        var options = ["auto", "tiny", "base", "small", "medium",
+                       "large-v3-turbo", "large-v3"]
+        var index = options.indexOf(String(modelName))
         return index < 0 ? 0 : index
     }
 
     function modelValue(index) {
-        var options = ["auto", "tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"]
+        var options = ["auto", "tiny", "base", "small", "medium",
+                       "large-v3-turbo", "large-v3"]
         return options[Math.max(0, Math.min(options.length - 1, index))]
     }
 
     function levelCount() {
-        var level = String(value(practice, "mic_level_band", value(appState, "mic_level_band", "silent")))
+        var level = String(value(practice, "mic_level_band",
+                                 value(practice, "level",
+                                       value(appState, "mic_level_band", "silent"))))
         if (level === "high") return 5
         if (level === "good") return 4
         if (level === "low") return 2
         return 0
+    }
+
+    function levelLabel() {
+        var level = String(value(practice, "mic_level_band",
+                                 value(practice, "level", "silent")))
+        if (level === "high") return qsTr("High")
+        if (level === "good") return qsTr("Good")
+        if (level === "low") return qsTr("Low")
+        return qsTr("Waiting for sound")
+    }
+
+    function practiceText() {
+        return String(value(practice, "text",
+                            value(practice, "wouldType",
+                                  value(practice, "heard", ""))))
     }
 
     Keys.onEscapePressed: function(event) {
@@ -170,9 +192,11 @@ Item {
 
         ScrollView {
             id: scroll
+            objectName: "onboardingScroll"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            contentWidth: availableWidth
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
             ColumnLayout {
@@ -183,8 +207,8 @@ Item {
 
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Layout.leftMargin: root.tokens.space32
-                    Layout.rightMargin: root.tokens.space32
+                    Layout.leftMargin: root.pageMargin
+                    Layout.rightMargin: root.pageMargin
                     spacing: root.tokens.space8
 
                     PlainText {
@@ -194,13 +218,14 @@ Item {
                         font.family: root.tokens.fontFamily
                         font.pixelSize: root.tokens.pageHeading
                         font.weight: Font.DemiBold
+                        wrapMode: Text.Wrap
                         Accessible.role: Accessible.Heading
                         Accessible.name: text
                     }
 
                     PlainText {
                         Layout.fillWidth: true
-                        text: qsTr("Set up private voice-to-text in five short steps. Nothing here is timed.")
+                        text: qsTr("Set up private voice-to-text in five calm steps. Nothing here is timed.")
                         color: root.tokens.mutedText
                         font.family: root.tokens.fontFamily
                         font.pixelSize: root.tokens.body
@@ -209,10 +234,12 @@ Item {
                 }
 
                 Flow {
+                    id: stepRail
+                    objectName: "onboardingStepRail"
                     Layout.fillWidth: true
-                    Layout.leftMargin: root.tokens.space32
-                    Layout.rightMargin: root.tokens.space32
-                    spacing: root.tokens.space4
+                    Layout.leftMargin: root.pageMargin
+                    Layout.rightMargin: root.pageMargin
+                    spacing: root.tokens.space8
                     Accessible.role: Accessible.PageTabList
                     Accessible.name: qsTr("Setup steps")
 
@@ -222,23 +249,26 @@ Item {
                         delegate: Row {
                             required property int index
                             required property string modelData
-                            spacing: root.tokens.space4
+                            spacing: root.tokens.space8
 
                             NavigationButton {
                                 tokens: root.tokens
                                 text: qsTr("%1. %2").arg(index + 1).arg(modelData)
+                                implicitWidth: Math.max(root.tokens.controlHeight,
+                                                        contentItem.implicitWidth
+                                                        + root.tokens.space32)
                                 selected: root.currentStep === index
                                 enabled: index <= root.currentStep
                                 Accessible.description: root.currentStep === index
                                                         ? qsTr("Current setup step")
-                                                        : qsTr("Go to setup step %1").arg(index + 1)
+                                                        : qsTr("Return to setup step %1").arg(index + 1)
                                 onClicked: root.goTo(index)
                             }
 
                             PlainText {
                                 anchors.verticalCenter: parent.verticalCenter
                                 visible: index < root.stepNames.length - 1
-                                text: "→"
+                                text: "\u2192"
                                 color: root.tokens.mutedText
                                 font.family: root.tokens.fontFamily
                                 font.pixelSize: root.tokens.body
@@ -248,315 +278,274 @@ Item {
                     }
                 }
 
-                Rectangle {
+                InlineNotice {
                     Layout.fillWidth: true
-                    Layout.leftMargin: root.tokens.space32
-                    Layout.rightMargin: root.tokens.space32
+                    Layout.leftMargin: root.pageMargin
+                    Layout.rightMargin: root.pageMargin
                     visible: root.issueCode().length > 0
                              && !root.modelFailed() && !root.permissionBlocked()
-                    implicitHeight: setupIssueContent.implicitHeight + root.tokens.space24
-                    radius: root.tokens.radius
-                    color: root.tokens.dangerSurface
-                    border.width: 1
-                    border.color: root.tokens.danger
-                    Accessible.role: Accessible.AlertMessage
-                    Accessible.name: root.issueMessage()
-
-                    GridLayout {
-                        id: setupIssueContent
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.margins: root.tokens.space12
-                        columns: width >= root.tokens.metric(520) ? 2 : 1
-                        columnSpacing: root.tokens.space16
-                        rowSpacing: root.tokens.space8
-
-                        PlainText {
-                            Layout.fillWidth: true
-                            text: root.issueMessage()
-                            color: root.tokens.danger
-                            font.family: root.tokens.fontFamily
-                            font.pixelSize: root.tokens.body
-                            wrapMode: Text.Wrap
-                        }
-
-                        QuietButton {
-                            tokens: root.tokens
-                            text: root.issueActionLabel()
-                            kind: "primary"
-                            accessibleDescription: qsTr("Recommended recovery action for the setup issue")
-                            onClicked: root.runIssueAction()
-                        }
-                    }
+                    tokens: root.tokens
+                    kind: "danger"
+                    title: qsTr("Setup needs attention")
+                    message: root.issueMessage()
+                    actionText: root.issueActionLabel()
+                    actionDescription: qsTr("Recommended recovery action")
+                    onActionRequested: root.runIssueAction()
                 }
 
-                ColumnLayout {
-                    id: animatedContent
+                GlassSurface {
+                    id: setupCard
+                    objectName: "onboardingSetupCard"
                     Layout.fillWidth: true
-                    Layout.leftMargin: root.tokens.space32
-                    Layout.rightMargin: root.tokens.space32
-                    spacing: root.tokens.space16
-                    transform: Translate { id: pageShift }
+                    Layout.leftMargin: root.pageMargin
+                    Layout.rightMargin: root.pageMargin
+                    implicitHeight: cardLayout.implicitHeight + padding * 2
+                    tokens: root.tokens
+                    role: "major"
+                    padding: root.tokens.space24
 
-                    PlainText {
-                        id: stepHeading
-                        Layout.fillWidth: true
-                        text: root.stepNames[root.currentStep]
-                        color: root.tokens.text
-                        font.family: root.tokens.fontFamily
-                        font.pixelSize: root.tokens.sectionHeading
-                        font.weight: Font.DemiBold
-                        Accessible.role: Accessible.Heading
-                        Accessible.name: qsTr("Setup step %1 of %2: %3")
-                                         .arg(root.currentStep + 1)
+                    ColumnLayout {
+                        id: cardLayout
+                        anchors.fill: parent
+                        spacing: root.tokens.space16
+                        transform: Translate { id: pageShift }
+
+                        SectionHeading {
+                            id: stepHeading
+                            objectName: "onboardingStepHeading"
+                            Layout.fillWidth: true
+                            tokens: root.tokens
+                            title: root.stepNames[root.currentStep]
+                            description: qsTr("Step %1 of %2").arg(root.currentStep + 1)
                                          .arg(root.stepNames.length)
-                                         .arg(text)
-                    }
-
-                    StackLayout {
-                        Layout.fillWidth: true
-                        // The implementation keeps the detailed frames grouped by
-                        // concern while presenting the explicit setup order:
-                        // Privacy → Microphone → Model → Shortcut → Practice.
-                        currentIndex: root.currentStep === 1 ? 2
-                                      : (root.currentStep === 2 ? 1 : root.currentStep)
-
-                        ColumnLayout {
-                            spacing: root.tokens.space16
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: privacyBody.implicitHeight + root.tokens.space32
-                                radius: root.tokens.radiusLarge
-                                color: root.tokens.successSurface
-                                border.width: 1
-                                border.color: root.tokens.success
-
-                                ColumnLayout {
-                                    id: privacyBody
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.margins: root.tokens.space16
-                                    spacing: root.tokens.space12
-
-                                    PlainText {
-                                        Layout.fillWidth: true
-                                        text: qsTr("Voice to text, on this device")
-                                        color: root.tokens.text
-                                        font.family: root.tokens.fontFamily
-                                        font.pixelSize: root.tokens.statusHeading
-                                        font.weight: Font.DemiBold
-                                        wrapMode: Text.Wrap
-                                        Accessible.role: Accessible.Heading
-                                    }
-
-                                    PlainText {
-                                        Layout.fillWidth: true
-                                        text: qsTr("Audio stays in memory. Transcripts, screen context, vocabulary, and diagnostics stay on this computer. Speakr has no accounts, telemetry, analytics, or cloud fallback.")
-                                        color: root.tokens.text
-                                        font.family: root.tokens.fontFamily
-                                        font.pixelSize: root.tokens.body
-                                        wrapMode: Text.Wrap
-                                    }
-
-                                    PlainText {
-                                        Layout.fillWidth: true
-                                        text: qsTr("The only non-loopback network activity is a one-time speech-model download from Hugging Face. Optional Ollama cleanup uses 127.0.0.1 and is never required.")
-                                        color: root.tokens.mutedText
-                                        font.family: root.tokens.fontFamily
-                                        font.pixelSize: root.tokens.secondary
-                                        wrapMode: Text.Wrap
-                                    }
-                                }
-                            }
-
-                            SignalPath {
-                                Layout.fillWidth: true
-                                Layout.maximumWidth: root.tokens.metric(520)
-                                tokens: root.tokens
-                                activeStage: 0
-                            }
+                            Accessible.role: Accessible.Heading
+                            Accessible.name: qsTr("Setup step %1 of %2: %3")
+                                             .arg(root.currentStep + 1)
+                                             .arg(root.stepNames.length)
+                                             .arg(root.stepNames[root.currentStep])
                         }
 
-                        ColumnLayout {
-                            spacing: root.tokens.space16
+                        StackLayout {
+                            id: stepStack
+                            Layout.fillWidth: true
+                            currentIndex: root.currentStep
 
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: qsTr("Choose a local speech model")
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.statusHeading
-                                font.weight: Font.DemiBold
-                                wrapMode: Text.Wrap
-                                Accessible.role: Accessible.Heading
-                            }
+                            ColumnLayout {
+                                spacing: root.tokens.space16
 
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: qsTr("Automatic is recommended. It selects a model for the available local hardware and safely falls back to CPU.")
-                                color: root.tokens.mutedText
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.body
-                                wrapMode: Text.Wrap
-                            }
-
-                            QuietComboBox {
-                                tokens: root.tokens
-                                model: [qsTr("Automatic"), "tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"]
-                                currentIndex: root.modelIndex(root.selectedModel)
-                                accessibleName: qsTr("Local speech model")
-                                accessibleDescription: qsTr("The selection is applied when you continue")
-                                onActivated: root.selectedModel = root.modelValue(currentIndex)
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: modelStatus.implicitHeight + root.tokens.space24
-                                radius: root.tokens.radius
-                                color: root.tokens.surface
-                                border.width: 1
-                                border.color: root.tokens.border
-
-                                PlainText {
-                                    id: modelStatus
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.margins: root.tokens.space12
-                                    text: root.modelFailed()
-                                          ? qsTr("The local speech model could not be prepared. Retry before continuing.")
-                                          : (root.modelBusy()
-                                             ? qsTr("Getting the local speech model ready. This step has no time limit.")
-                                             : qsTr("Local model setting is ready."))
-                                    color: root.tokens.mutedText
-                                    font.family: root.tokens.fontFamily
-                                    font.pixelSize: root.tokens.secondary
-                                    wrapMode: Text.Wrap
-                                    Accessible.name: text
-                                }
-                            }
-
-                            QuietButton {
-                                visible: root.modelFailed()
-                                tokens: root.tokens
-                                text: qsTr("Retry")
-                                kind: "primary"
-                                accessibleDescription: qsTr("Try preparing the local speech model again")
-                                onClicked: bridge.retrySetup()
-                            }
-                        }
-
-                        ColumnLayout {
-                            spacing: root.tokens.space16
-
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: qsTr("Check microphone access")
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.statusHeading
-                                font.weight: Font.DemiBold
-                                wrapMode: Text.Wrap
-                                Accessible.role: Accessible.Heading
-                            }
-
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: root.permissionBlocked()
-                                      ? qsTr("Microphone or accessibility permission needs attention. Open system settings, make the change, then recheck.")
-                                      : qsTr("Speakr can use the system microphone locally. On macOS, text insertion may also require Accessibility and Input Monitoring permissions.")
-                                color: root.permissionBlocked()
-                                       ? root.tokens.danger : root.tokens.mutedText
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.body
-                                wrapMode: Text.Wrap
-                                Accessible.role: root.permissionBlocked()
-                                                 ? Accessible.AlertMessage : Accessible.StaticText
-                                Accessible.name: text
-                            }
-
-                            Flow {
-                                Layout.fillWidth: true
-                                spacing: root.tokens.space12
-
-                                QuietButton {
+                                StatusOrb {
+                                    Layout.fillWidth: true
                                     tokens: root.tokens
-                                    text: qsTr("Open system settings")
-                                    kind: root.permissionBlocked()
-                                          ? "primary" : "secondary"
-                                    accessibleDescription: qsTr("Open operating system privacy and permission settings")
-                                    onClicked: bridge.openSystemSettings()
+                                    statusKind: "success"
+                                    symbol: "\u2713"
+                                    label: qsTr("Voice to text, on this device")
+                                    description: qsTr("Speakr processes dictation locally")
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: privacyCopy.implicitHeight + root.tokens.space32
+                                    radius: root.tokens.radiusControl
+                                    color: root.tokens.contentSurface
+                                    border.width: root.tokens.borderWidth
+                                    border.color: root.tokens.border
+
+                                    ColumnLayout {
+                                        id: privacyCopy
+                                        anchors.fill: parent
+                                        anchors.margins: root.tokens.space16
+                                        spacing: root.tokens.space12
+
+                                        PlainText {
+                                            Layout.fillWidth: true
+                                            text: qsTr("Audio stays in memory. Transcripts, screen context, vocabulary, and diagnostics stay on this computer. Speakr has no accounts, telemetry, analytics, or cloud fallback.")
+                                            color: root.tokens.text
+                                            font.family: root.tokens.fontFamily
+                                            font.pixelSize: root.tokens.body
+                                            wrapMode: Text.Wrap
+                                        }
+
+                                        PlainText {
+                                            Layout.fillWidth: true
+                                            text: qsTr("The only non-loopback activity is the one-time speech-model download. Optional Ollama cleanup stays on 127.0.0.1 and is never required.")
+                                            color: root.tokens.mutedText
+                                            font.family: root.tokens.fontFamily
+                                            font.pixelSize: root.tokens.secondary
+                                            wrapMode: Text.Wrap
+                                        }
+                                    }
+                                }
+
+                                SignalPath {
+                                    Layout.fillWidth: true
+                                    Layout.maximumWidth: root.tokens.metric(560)
+                                    tokens: root.tokens
+                                    activeStage: 0
+                                }
+                            }
+
+                            ColumnLayout {
+                                spacing: root.tokens.space16
+
+                                StatusOrb {
+                                    Layout.fillWidth: true
+                                    tokens: root.tokens
+                                    statusKind: root.permissionBlocked() ? "danger" : "success"
+                                    symbol: root.permissionBlocked() ? "!" : "\u2713"
+                                    label: root.permissionBlocked()
+                                           ? qsTr("Permission is needed")
+                                           : qsTr("Microphone access is ready")
+                                    description: root.permissionBlocked()
+                                                 ? qsTr("Open system settings, make the change, then recheck")
+                                                 : qsTr("Audio remains local and in memory")
+                                }
+
+                                InlineNotice {
+                                    id: permissionNotice
+                                    objectName: "onboardingPermissionNotice"
+                                    Layout.fillWidth: true
+                                    tokens: root.tokens
+                                    kind: root.permissionBlocked() ? "danger" : "info"
+                                    title: root.permissionBlocked()
+                                           ? qsTr("Speakr cannot use the microphone yet")
+                                           : qsTr("Operating-system permissions")
+                                    message: root.permissionBlocked()
+                                             ? qsTr("Open privacy settings and allow microphone access for Speakr.")
+                                             : qsTr("Speakr can use the system microphone locally. macOS may also ask for Accessibility and Input Monitoring so text can be inserted.")
+                                    detail: qsTr("Return here after changing a permission and choose Recheck.")
+                                    actionText: root.permissionBlocked()
+                                                ? qsTr("Open system settings") : ""
+                                    actionDescription: qsTr("Open operating-system privacy and permission settings")
+                                    onActionRequested: bridge.openSystemSettings()
                                 }
 
                                 QuietButton {
+                                    objectName: "onboardingRecheckButton"
                                     tokens: root.tokens
                                     text: qsTr("Recheck")
+                                    kind: root.permissionBlocked() ? "secondary" : "quiet"
                                     accessibleDescription: qsTr("Retry local microphone and permission checks")
                                     onClicked: bridge.retrySetup()
                                 }
                             }
-                        }
 
-                        ColumnLayout {
-                            spacing: root.tokens.space16
+                            ColumnLayout {
+                                spacing: root.tokens.space16
 
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: qsTr("Choose how dictation starts")
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.statusHeading
-                                font.weight: Font.DemiBold
-                                wrapMode: Text.Wrap
-                                Accessible.role: Accessible.Heading
-                            }
+                                StatusOrb {
+                                    Layout.fillWidth: true
+                                    tokens: root.tokens
+                                    statusKind: root.modelFailed() ? "danger"
+                                                : (root.modelBusy() ? "active" : "success")
+                                    symbol: root.modelFailed() ? "!"
+                                            : (root.modelBusy() ? "\u2022" : "\u2713")
+                                    label: root.modelFailed()
+                                           ? qsTr("The local model could not be prepared")
+                                           : (root.modelBusy()
+                                              ? qsTr("Getting the speech model ready")
+                                              : qsTr("Local speech model ready"))
+                                    description: root.modelBusy()
+                                                 ? qsTr("This step has no time limit")
+                                                 : qsTr("No cloud speech service is used")
+                                }
 
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: qsTr("Shortcut capture never times out. Select Cancel or press Escape if you change your mind.")
-                                color: root.tokens.mutedText
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.body
-                                wrapMode: Text.Wrap
+                                PlainText {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Automatic is recommended. It chooses a model for this computer and safely falls back to CPU.")
+                                    color: root.tokens.mutedText
+                                    font.family: root.tokens.fontFamily
+                                    font.pixelSize: root.tokens.body
+                                    wrapMode: Text.Wrap
+                                }
+
+                                QuietComboBox {
+                                    Layout.fillWidth: true
+                                    tokens: root.tokens
+                                    model: [qsTr("Automatic"), "tiny", "base", "small",
+                                            "medium", "large-v3-turbo", "large-v3"]
+                                    currentIndex: root.modelIndex(root.selectedModel)
+                                    accessibleName: qsTr("Local speech model")
+                                    accessibleDescription: qsTr("The selection is applied when you continue")
+                                    onActivated: root.selectedModel = root.modelValue(currentIndex)
+                                }
+
+                                InlineNotice {
+                                    id: modelNotice
+                                    objectName: "onboardingModelNotice"
+                                    Layout.fillWidth: true
+                                    visible: root.modelBusy() || root.modelFailed()
+                                    tokens: root.tokens
+                                    kind: root.modelFailed() ? "danger" : "info"
+                                    title: root.modelFailed()
+                                           ? qsTr("Model setup stopped")
+                                           : qsTr("Preparing locally")
+                                    message: root.modelFailed()
+                                             ? qsTr("The speech model is not ready. Retry before continuing.")
+                                             : qsTr("Speakr is preparing the local speech model. You can leave this window open as long as needed.")
+                                    actionText: root.modelFailed() ? qsTr("Retry") : ""
+                                    actionDescription: qsTr("Try preparing the local speech model again")
+                                    onActionRequested: bridge.retrySetup()
+                                }
                             }
 
                             ColumnLayout {
-                                spacing: root.tokens.space8
+                                spacing: root.tokens.space16
 
-                                PlainText {
-                                    text: bridge.capturingHotkey
-                                          ? (String(root.value(root.appState, "pending_hotkey", "")).length > 0
-                                             ? qsTr("Captured: %1").arg(root.value(root.appState, "pending_hotkey", ""))
-                                             : qsTr("Press your new shortcut"))
-                                          : qsTr("Current shortcut: %1").arg(root.value(root.appState, "hotkey", root.setting("hotkey", "right ctrl")))
-                                    color: root.tokens.text
-                                    font.family: root.tokens.fontFamily
-                                    font.pixelSize: root.tokens.body
-                                    font.weight: Font.DemiBold
-                                    wrapMode: Text.Wrap
-                                    Accessible.name: text
+                                StatusOrb {
+                                    Layout.fillWidth: true
+                                    tokens: root.tokens
+                                    statusKind: bridge.capturingHotkey ? "active" : "success"
+                                    symbol: bridge.capturingHotkey ? "\u2022" : "\u2713"
+                                    label: bridge.capturingHotkey
+                                           ? qsTr("Waiting for a shortcut")
+                                           : qsTr("Shortcut ready")
+                                    description: qsTr("Capture never times out")
+                                }
+
+                                InlineNotice {
+                                    id: captureNotice
+                                    objectName: "onboardingHotkeyCaptureNotice"
+                                    Layout.fillWidth: true
+                                    tokens: root.tokens
+                                    kind: bridge.capturingHotkey ? "info" : "success"
+                                    title: bridge.capturingHotkey
+                                           ? qsTr("Press your new shortcut")
+                                           : qsTr("Current shortcut")
+                                    message: bridge.capturingHotkey
+                                             ? (String(root.value(root.appState, "pending_hotkey", "")).length > 0
+                                                ? qsTr("Captured: %1").arg(root.value(root.appState, "pending_hotkey", ""))
+                                                : qsTr("Press the key or key combination you want to use."))
+                                             : String(root.value(root.appState, "hotkey",
+                                                                root.setting("hotkey", "right ctrl")))
+                                    detail: qsTr("There is no time limit. Choose Cancel or press Escape to stop capture.")
                                 }
 
                                 Flow {
+                                    Layout.fillWidth: true
                                     spacing: root.tokens.space8
 
                                     QuietButton {
+                                        objectName: "onboardingCaptureButton"
                                         tokens: root.tokens
-                                        text: bridge.capturingHotkey ? qsTr("Cancel") : qsTr("Change shortcut")
+                                        text: bridge.capturingHotkey
+                                              ? qsTr("Cancel") : qsTr("Change shortcut")
                                         kind: bridge.capturingHotkey ? "danger" : "secondary"
+                                        accessibleDescription: bridge.capturingHotkey
+                                                               ? qsTr("Cancel shortcut capture")
+                                                               : qsTr("Start untimed shortcut capture")
                                         onClicked: bridge.capturingHotkey
-                                                   ? bridge.cancelHotkeyCapture() : bridge.beginHotkeyCapture()
+                                                   ? bridge.cancelHotkeyCapture()
+                                                   : bridge.beginHotkeyCapture()
                                     }
 
                                     QuietButton {
+                                        objectName: "onboardingConfirmHotkeyButton"
                                         visible: bridge.capturingHotkey
                                                  && String(root.value(root.appState, "pending_hotkey", "")).length > 0
                                         tokens: root.tokens
                                         text: qsTr("Use shortcut")
                                         kind: "primary"
+                                        accessibleDescription: qsTr("Confirm the captured shortcut")
                                         onClicked: bridge.confirmHotkey()
                                     }
                                 }
@@ -566,131 +555,178 @@ Item {
                                     tokens: root.tokens
                                     candidate: String(root.value(root.appState, "pending_hotkey", ""))
                                 }
+
+                                SectionHeading {
+                                    Layout.fillWidth: true
+                                    tokens: root.tokens
+                                    title: qsTr("Shortcut behavior")
+                                    description: qsTr("Hold is familiar; Toggle can help when holding a key is difficult.")
+                                }
+
+                                QuietComboBox {
+                                    Layout.fillWidth: true
+                                    tokens: root.tokens
+                                    model: [qsTr("Hold to speak"),
+                                            qsTr("Press to start and stop")]
+                                    currentIndex: root.selectedToggleMode ? 1 : 0
+                                    accessibleName: qsTr("Shortcut behavior")
+                                    onActivated: root.selectedToggleMode = currentIndex === 1
+                                }
                             }
 
-                            PlainText {
-                                text: qsTr("Shortcut behavior")
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.body
-                                font.weight: Font.DemiBold
-                            }
+                            ColumnLayout {
+                                spacing: root.tokens.space16
 
-                            QuietComboBox {
-                                tokens: root.tokens
-                                model: [qsTr("Hold to speak"), qsTr("Press to start and stop")]
-                                currentIndex: root.selectedToggleMode ? 1 : 0
-                                accessibleName: qsTr("Shortcut behavior")
-                                onActivated: root.selectedToggleMode = currentIndex === 1
-                            }
-                        }
+                                StatusOrb {
+                                    Layout.fillWidth: true
+                                    tokens: root.tokens
+                                    statusKind: root.value(root.practice, "active", false)
+                                                ? "active"
+                                                : (root.value(root.practice, "busy", false)
+                                                   ? "active" : "neutral")
+                                    symbol: root.value(root.practice, "active", false)
+                                            ? "\u2022" : "\u2713"
+                                    label: root.value(root.practice, "active", false)
+                                           ? qsTr("Listening")
+                                           : (root.value(root.practice, "busy", false)
+                                              ? qsTr("Transcribing locally")
+                                              : qsTr("Practice is optional"))
+                                    description: root.value(root.practice, "active", false)
+                                                 ? qsTr("Microphone input: %1").arg(root.levelLabel())
+                                                 : qsTr("You can finish setup without recording")
+                                }
 
-                        ColumnLayout {
-                            spacing: root.tokens.space16
+                                InlineNotice {
+                                    Layout.fillWidth: true
+                                    tokens: root.tokens
+                                    kind: "info"
+                                    title: qsTr("Temporary local practice")
+                                    message: qsTr("Practice never inserts text, updates learning, enters cleanup context, touches the clipboard, or writes transcript logs.")
+                                    detail: qsTr("Not stored by Speakr; clears when you leave Practice.")
+                                }
 
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: qsTr("Try a private practice dictation")
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.statusHeading
-                                font.weight: Font.DemiBold
-                                wrapMode: Text.Wrap
-                                Accessible.role: Accessible.Heading
-                            }
+                                RowLayout {
+                                    id: practiceMeter
+                                    objectName: "onboardingPracticeMeter"
+                                    Layout.fillWidth: true
+                                    spacing: root.tokens.space8
+                                    Accessible.role: Accessible.ProgressBar
+                                    Accessible.name: qsTr("Microphone input level: %1").arg(root.levelLabel())
 
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: qsTr("Practice is optional. It never inserts text, updates learning, enters cleanup context, touches the clipboard, or writes transcript logs.")
-                                color: root.tokens.mutedText
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.body
-                                wrapMode: Text.Wrap
-                            }
+                                    Repeater {
+                                        objectName: "onboardingPracticeMeterSegments"
+                                        model: 5
 
-                            PlainText {
-                                Layout.fillWidth: true
-                                text: qsTr("Not stored by Speakr; clears when you leave Practice.")
-                                color: root.tokens.text
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.body
-                                font.weight: Font.DemiBold
-                                wrapMode: Text.Wrap
-                                Accessible.name: text
-                            }
+                                        Rectangle {
+                                            objectName: "onboardingPracticeMeterSegment"
+                                            required property int index
+                                            Layout.preferredWidth: root.tokens.metric(28)
+                                            Layout.preferredHeight: root.tokens.space12
+                                            radius: root.tokens.radiusSmall
+                                            color: index < root.levelCount()
+                                                   ? root.tokens.accent
+                                                   : root.tokens.surfaceRaised
+                                            border.width: root.tokens.borderWidth
+                                            border.color: index < root.levelCount()
+                                                          ? root.tokens.accent
+                                                          : root.tokens.border
 
-                            RowLayout {
-                                spacing: root.tokens.space8
-                                Accessible.role: Accessible.ProgressBar
-                                Accessible.name: qsTr("Microphone input level")
+                                            Behavior on color {
+                                                ColorAnimation { duration: root.tokens.motionFast }
+                                            }
+                                        }
+                                    }
 
-                                Repeater {
-                                    model: 5
-                                    Rectangle {
-                                        required property int index
-                                        width: root.tokens.metric(28)
-                                        height: root.tokens.metric(10)
-                                        radius: height / 2
-                                        color: index < root.levelCount() ? root.tokens.accent : root.tokens.surfaceRaised
-                                        border.width: 1
-                                        border.color: index < root.levelCount() ? root.tokens.accent : root.tokens.border
+                                    PlainText {
+                                        Layout.fillWidth: true
+                                        text: root.levelLabel()
+                                        color: root.tokens.mutedText
+                                        font.family: root.tokens.fontFamily
+                                        font.pixelSize: root.tokens.secondary
+                                        wrapMode: Text.Wrap
                                     }
                                 }
-                            }
 
-                            QuietButton {
-                                tokens: root.tokens
-                                text: root.value(root.practice, "active", false) ? qsTr("Stop Practice") : qsTr("Start Practice")
-                                kind: root.value(root.practice, "active", false) ? "secondary" : "primary"
-                                enabled: !root.value(root.practice, "busy", false)
-                                onClicked: root.value(root.practice, "active", false)
-                                           ? bridge.stopPractice() : bridge.startPractice()
-                            }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: root.tokens.space8
 
-                            PlainText {
-                                Layout.fillWidth: true
-                                visible: String(root.value(root.practice, "error", "")).length > 0
-                                text: String(root.value(root.practice, "error", ""))
-                                color: root.tokens.danger
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.body
-                                wrapMode: Text.Wrap
-                                Accessible.role: Accessible.AlertMessage
-                                Accessible.name: text
-                            }
+                                    QuietButton {
+                                        objectName: "onboardingPracticeStartButton"
+                                        tokens: root.tokens
+                                        text: root.value(root.practice, "active", false)
+                                              ? qsTr("Stop Practice") : qsTr("Start Practice")
+                                        kind: root.value(root.practice, "active", false)
+                                              ? "secondary" : "primary"
+                                        enabled: root.value(root.practice, "active", false)
+                                                 || !root.value(root.practice, "busy", false)
+                                        accessibleDescription: root.value(root.practice, "active", false)
+                                                               ? qsTr("Stop this temporary practice recording")
+                                                               : qsTr("Start a temporary practice recording")
+                                        onClicked: root.value(root.practice, "active", false)
+                                                   ? bridge.stopPractice()
+                                                   : bridge.startPractice()
+                                    }
 
-                            PlainTextArea {
-                                Layout.fillWidth: true
-                                Layout.minimumHeight: root.tokens.metric(140)
-                                readOnly: true
-                                text: root.value(root.practice, "text", "")
-                                placeholderText: qsTr("Your temporary practice text will appear here.")
-                                wrapMode: TextEdit.Wrap
-                                color: root.tokens.text
-                                placeholderTextColor: root.tokens.mutedText
-                                font.family: root.tokens.fontFamily
-                                font.pixelSize: root.tokens.body
-                                leftPadding: root.tokens.space16
-                                rightPadding: root.tokens.space16
-                                topPadding: root.tokens.space16
-                                bottomPadding: root.tokens.space16
-                                Accessible.role: Accessible.EditableText
-                                Accessible.name: qsTr("Temporary practice transcript")
-
-                                background: Rectangle {
-                                    radius: root.tokens.radius
-                                    color: root.tokens.surface
-                                    border.width: 1
-                                    border.color: root.tokens.border
+                                    QuietButton {
+                                        objectName: "onboardingPracticeClearButton"
+                                        tokens: root.tokens
+                                        text: qsTr("Clear")
+                                        enabled: root.practiceText().length > 0
+                                        accessibleDescription: qsTr("Clear temporary practice text from memory")
+                                        onClicked: bridge.clearPractice()
+                                    }
                                 }
-                            }
 
-                            QuietButton {
-                                tokens: root.tokens
-                                text: qsTr("Clear")
-                                enabled: String(root.value(root.practice, "text", "")).length > 0
-                                accessibleDescription: qsTr("Clear temporary practice text from memory")
-                                onClicked: bridge.clearPractice()
+                                InlineNotice {
+                                    Layout.fillWidth: true
+                                    visible: String(root.value(root.practice, "error", "")).length > 0
+                                    tokens: root.tokens
+                                    kind: "warning"
+                                    title: qsTr("Practice did not finish")
+                                    message: String(root.value(root.practice, "error", ""))
+                                }
+
+                                PlainTextArea {
+                                    id: practiceResult
+                                    objectName: "onboardingPracticeResult"
+                                    Layout.fillWidth: true
+                                    Layout.minimumHeight: root.tokens.metric(150)
+                                    readOnly: true
+                                    text: root.practiceText()
+                                    placeholderText: qsTr("Your temporary practice text will appear here.")
+                                    wrapMode: TextEdit.Wrap
+                                    color: root.tokens.text
+                                    placeholderTextColor: root.tokens.mutedText
+                                    selectionColor: root.tokens.accent
+                                    selectedTextColor: root.tokens.accentText
+                                    font.family: root.tokens.fontFamily
+                                    font.pixelSize: root.tokens.body
+                                    leftPadding: root.tokens.space16
+                                    rightPadding: root.tokens.space16
+                                    topPadding: root.tokens.space16
+                                    bottomPadding: root.tokens.space16
+                                    Accessible.role: Accessible.EditableText
+                                    Accessible.name: qsTr("Temporary practice transcript")
+                                    Accessible.description: qsTr("Read only. Held in memory and cleared when Practice closes.")
+
+                                    background: Item {
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: root.tokens.radiusControl
+                                            color: root.tokens.contentSurface
+                                            border.width: root.tokens.borderWidth
+                                            border.color: root.tokens.border
+                                        }
+
+                                        FocusRing {
+                                            anchors.fill: parent
+                                            tokens: root.tokens
+                                            shown: practiceResult.activeFocus
+                                            cornerRadius: root.tokens.radiusControl
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -700,19 +736,20 @@ Item {
             }
         }
 
-        Rectangle {
+        GlassSurface {
+            id: setupFooter
+            objectName: "onboardingFooter"
             Layout.fillWidth: true
-            implicitHeight: footer.implicitHeight + root.tokens.space24
-            color: root.tokens.surface
-            border.width: 1
-            border.color: root.tokens.border
+            implicitHeight: footerLayout.implicitHeight + padding * 2
+            tokens: root.tokens
+            role: "notice"
+            cornerRadius: root.tokens.radiusControl
+            elevated: false
+            padding: root.tokens.space12
 
             GridLayout {
-                id: footer
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.margins: root.tokens.space12
+                id: footerLayout
+                anchors.fill: parent
                 columns: width >= root.tokens.metric(520) ? 2 : 1
                 columnSpacing: root.tokens.space16
                 rowSpacing: root.tokens.space8
@@ -731,8 +768,10 @@ Item {
                     layoutDirection: Qt.RightToLeft
 
                     QuietButton {
+                        objectName: "onboardingContinueButton"
                         tokens: root.tokens
-                        text: root.currentStep === root.stepNames.length - 1 ? qsTr("Finish setup") : qsTr("Continue")
+                        text: root.currentStep === root.stepNames.length - 1
+                              ? qsTr("Finish setup") : qsTr("Continue")
                         kind: "primary"
                         enabled: !(root.currentStep === 3 && bridge.capturingHotkey)
                                  && !(root.currentStep === 1 && root.permissionBlocked())
@@ -745,11 +784,13 @@ Item {
                     }
 
                     QuietButton {
+                        id: skipPracticeButton
+                        objectName: "skipPracticeButton"
                         visible: root.currentStep === root.stepNames.length - 1
                         tokens: root.tokens
                         text: qsTr("Skip Practice")
                         accessibleDescription: qsTr("Finish setup without a practice dictation")
-                        onClicked: root.next()
+                        onClicked: root.finishSetup()
                     }
                 }
             }
@@ -758,20 +799,23 @@ Item {
 
     ParallelAnimation {
         id: transition
+
         NumberAnimation {
-            target: animatedContent
+            target: cardLayout
             property: "opacity"
             from: root.tokens.reduceMotion ? 1 : 0
             to: 1
-            duration: root.tokens.reduceMotion ? 0 : 180
+            duration: root.tokens.motionOnboarding
             easing.type: Easing.OutQuint
         }
+
         NumberAnimation {
             target: pageShift
             property: "x"
-            from: root.tokens.reduceMotion ? 0 : root.tokens.metric(12) * root.transitionDirection
+            from: root.tokens.reduceMotion
+                  ? 0 : root.tokens.space12 * root.transitionDirection
             to: 0
-            duration: root.tokens.reduceMotion ? 0 : 180
+            duration: root.tokens.motionOnboarding
             easing.type: Easing.OutQuint
         }
     }
