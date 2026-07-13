@@ -68,6 +68,40 @@ macOS uses Vibrancy behind the main QML scene. The HUD never uses native
 desktop-backed blur. `scene_glass` is drawn from local QML colors and shapes;
 it never samples the screen.
 
+Qt Quick renderer selection is process-global. Speakr requests any RDP, SSH,
+or explicit software policy once, before QApplication and every QQuickWindow,
+then preflights a no-exposure `QQuickRenderControl` scene graph/device before
+the QML engine, main window, tray, or core. GPU APIs must initialize the render
+control and emit scene-graph readiness. Qt forbids that initialization for its
+software adaptation, so software is proven by rendering into a two-pixel local
+`QImage`. The offscreen test QPA, which does not support render control, uses a
+bounded opacity-zero offscreen-window gate. Only the proven effective API
+drives `softwareRenderer` and the effects tier.
+
+A retryable default-renderer failure may start one guarded fresh process. The
+parent retains both its launch gate and primary lock while a fresh child
+authenticates through two small atomic JSON state files in a random, private,
+verified-local temporary directory. The child completes renderer, QML, native
+frame or recovery construction with core work deferred. Only after the tray
+is visible and any required main window is visible and exposed does it publish
+token-bound `PREPARED`. The parent then releases primary; the child publishes
+`CLAIMED`, the parent probes that the lock is unavailable and publishes `ACK`,
+and the child publishes `COMPLETE` before microphone/core work may start.
+On Windows, an exited venv launcher is ignored until authenticated `PREPARED`
+supplies the runtime PID; the parent pins that process with a native handle and
+proves it alive before releasing primary. The same handle governs later
+liveness and failure termination, while success only closes the handle. A
+failure after `PREPARED` terminates that pinned runtime before the parent
+reacquires ownership. Before `PREPARED`, the parent keeps primary, publishes a
+rejection for cooperative child shutdown, and commits visible local recovery.
+If a post-`PREPARED` runtime cannot be proven stopped after the bounded hard
+and cooperative exit attempts, the parent suppresses recovery rather than
+constructing a second frontend.
+Ordinary launchers remain fenced and leave a
+level-triggered window-show request for whichever frontend commits. Remote
+temporary shares, sockets, IP traffic, user content, and global fixed
+acknowledgement paths do not participate in this protocol.
+
 | Surface | Full effects | Reduced effects | Off |
 |---|---:|---:|---|
 | Outer shell veil | 72% dark / 78% light | 94% | Solid canvas |

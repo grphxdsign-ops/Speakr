@@ -1580,6 +1580,10 @@ Window {
             native_window,
             "_adapter_for_platform",
             return_value=native_window._NullAdapter(),
+        ), mock.patch.object(
+            qt_ui,
+            "_probe_effective_renderer",
+            return_value=True,
         ):
             self.assertEqual(qt_ui.run_native_ui(App()), 0)
             calls_after_cleanup = preferences.call_count
@@ -1682,16 +1686,24 @@ Window {
             controllers.append(controller)
             return controller
 
-        def create_root(qt, engine, path, before_complete=None):
+        def create_root(
+            qt, engine, path, before_complete=None, renderer_retryable=False
+        ):
             if Path(path).name != "Main.qml":
-                return real_create(qt, engine, path, before_complete=before_complete)
+                return real_create(
+                    qt,
+                    engine,
+                    path,
+                    before_complete=before_complete,
+                    renderer_retryable=renderer_retryable,
+                )
             root = QQuickWindow()
             root.setObjectName("mainWindow")
             root.setProperty("customChromeReady", True)
             original_flags = root.flags()
             if before_complete is not None:
                 before_complete(root)
-            roots.append((root, original_flags))
+            roots.append((original_flags, root.flags()))
             return root, qt.QObject()
 
         accessibility = {
@@ -1704,6 +1716,8 @@ Window {
         ), mock.patch.object(
             qt_ui, "_create_qml_root", side_effect=create_root
         ), mock.patch.object(
+            qt_ui, "_probe_effective_renderer", return_value=True
+        ), mock.patch.object(
             qt_ui,
             "_system_accessibility_preferences",
             return_value=accessibility,
@@ -1715,7 +1729,7 @@ Window {
         self.assertEqual(controllers[0].material, "scene_glass")
         self.assertEqual(objc_module.calls, 0)
         self.assertEqual(len(roots), 1)
-        self.assertEqual(roots[0][0].flags(), roots[0][1])
+        self.assertEqual(roots[0][1], roots[0][0])
 
 
 if __name__ == "__main__":

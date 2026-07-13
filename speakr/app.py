@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import webbrowser
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from speakr import config as cfg_mod
@@ -33,10 +34,134 @@ from speakr.injector import inject, read_selection_via_clipboard
 from speakr.inputs import HotkeyListener, capture_next_key
 from speakr.interface_state import InterfaceState
 from speakr.learning import VocabLearner, extract_notable_tokens
+from speakr.renderer_handoff import (
+    ADDRESS_ENV as _SOFTWARE_RELAUNCH_ADDRESS_ENV,
+    GUARD_ENV as _SOFTWARE_RELAUNCH_GUARD_ENV,
+    NONCE_ENV as _SOFTWARE_RELAUNCH_NONCE_ENV,
+    PARENT_ENV as _SOFTWARE_RELAUNCH_PARENT_ENV,
+    TOKEN_ENV as _SOFTWARE_RELAUNCH_AUTH_ENV,
+    RendererHandoffChild as _RendererHandoffChild,
+    RendererHandoffParent as _RendererHandoffParent,
+    is_guarded as _software_relaunch_is_guarded,
+)
 from speakr.streaming import DictationSession
 from speakr.transcriber import Transcriber
 from speakr.tray import Tray
 from speakr.webui import WebUI
+
+
+_SINGLE_INSTANCE_HANDOFF_SECONDS = 10.0
+_SINGLE_INSTANCE_POLL_SECONDS = 0.05
+_SINGLE_INSTANCE_MUTEX_NAME = "SpeakrSingleInstance"
+_LAUNCH_GATE_MUTEX_NAME = "SpeakrLaunchGate"
+
+
+def _native_relaunch_command() -> list[str]:
+    """Build a fixed, shell-free command for source and frozen releases."""
+
+    executable = str(sys.executable or "").strip()
+    if not executable:
+        raise OSError("the Python executable path is unavailable")
+    if bool(getattr(sys, "frozen", False)):
+        return [executable]
+    return [executable, "-m", "speakr"]
+
+
+def _native_relaunch_working_directory() -> Path:
+    if bool(getattr(sys, "frozen", False)):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+def _relaunch_with_software_renderer(logger) -> bool:
+    """Return whether a renderer child owns the outcome and blocks recovery."""
+
+    if _software_relaunch_is_guarded():
+        return False
+    try:
+        gate_acquired = _acquire_launch_gate(
+            wait_seconds=_SINGLE_INSTANCE_HANDOFF_SECONDS
+        )
+    except OSError as exc:
+        logger.warning("Could not create the renderer handoff launch gate: %s", exc)
+        return False
+    if not gate_acquired:
+        logger.warning("Could not reserve the renderer handoff launch gate")
+        return False
+    handoff = None
+    child = None
+    released_instance = False
+    child_ready = False
+    child_unresolved = False
+    reacquired = False
+    environment = os.environ.copy()
+    environment["SPEAKR_QT_SOFTWARE"] = "1"
+    environment[_SOFTWARE_RELAUNCH_GUARD_ENV] = "1"
+    environment[_SOFTWARE_RELAUNCH_PARENT_ENV] = str(os.getpid())
+    try:
+        handoff = _RendererHandoffParent()
+        environment.update(handoff.environment())
+        child = subprocess.Popen(
+            _native_relaunch_command(),
+            cwd=str(_native_relaunch_working_directory()),
+            env=environment,
+            close_fds=True,
+        )
+        if handoff.wait_for_ready(
+            child,
+            timeout=_SINGLE_INSTANCE_HANDOFF_SECONDS,
+            release_primary=_release_single_instance,
+            claim_is_exclusive=_renderer_child_holds_primary,
+        ):
+            child_ready = True
+            logger.warning(
+                "Relaunched the native interface with Qt software rendering"
+            )
+            return True
+        logger.warning(
+            "Qt software-renderer child did not acknowledge a visible frontend"
+        )
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not relaunch with Qt software rendering: %s", exc)
+    finally:
+        released_instance = bool(
+            handoff is not None and handoff.primary_released is True
+        )
+        if child is not None and not child_ready:
+            child_stopped = handoff.stop_child(child)
+            child_unresolved = released_instance and not child_stopped
+            if child_unresolved:
+                logger.error(
+                    "Renderer runtime could not be proven stopped; "
+                    "suppressing a second frontend"
+                )
+        if released_instance and not child_ready and not child_unresolved:
+            try:
+                reacquired = _acquire_single_instance(
+                    wait_seconds=_SINGLE_INSTANCE_HANDOFF_SECONDS
+                )
+            except OSError as exc:
+                reacquired = False
+                logger.error(
+                    "Could not recreate the primary lock after renderer handoff: %s",
+                    exc,
+                )
+            if not reacquired:
+                # The launch gate still gives this parent exclusive startup
+                # ownership. Keep it for the visible recovery lifetime rather
+                # than allowing a third launcher to become a second primary.
+                logger.error(
+                    "Could not reacquire the primary lock after renderer handoff; "
+                    "retaining the launch gate for recovery"
+                )
+        if child_ready:
+            _release_launch_gate()
+        # Otherwise recovery startup keeps the gate until the main thread has
+        # started the local browser surface. Process exit is the final safety
+        # release if recovery cannot be constructed.
+        if handoff is not None:
+            handoff.close()
+    return child_unresolved
 
 
 def _open_path(path):
@@ -160,6 +285,7 @@ class SpeakrApp:
         self.webui = WebUI(self)
         self._fallback_active = False
         self._qt_frontend = None
+        self._renderer_handoff = None
 
         self._recording = False
         self._record_started_at = 0.0
@@ -193,32 +319,37 @@ class SpeakrApp:
 
         if sys.version_info < (3, 10):
             self.log.info("Python below 3.10 uses the local recovery interface")
-            self._start_core()
             self._start_legacy_interface()
             return
 
         try:
-            from speakr.qt_ui import run_native_ui
+            from speakr.qt_ui import _prefer_software_renderer, run_native_ui
         except (ImportError, ModuleNotFoundError) as exc:
             self.log.warning("Native UI unavailable (%s); using recovery interface", exc)
         else:
             native_error = None
-            for software_retry in (False, True):
-                if software_retry:
-                    # A failed scene-graph initialization gets one explicit
-                    # local software-renderer attempt before recovery mode.
-                    os.environ["SPEAKR_QT_SOFTWARE"] = "1"
-                    self.log.warning("Retrying the native interface with Qt software rendering")
-                try:
-                    result = run_native_ui(self)
-                    if result is not False:
-                        return
-                except Exception as exc:
-                    native_error = exc
-                    if isinstance(exc, (ImportError, ModuleNotFoundError)):
-                        break
-                    if software_retry:
-                        break
+            software_requested = _prefer_software_renderer()
+            try:
+                result = run_native_ui(self)
+                if result is not False:
+                    return
+                native_error = RuntimeError("the native interface exited before starting")
+            except Exception as exc:
+                native_error = exc
+
+            can_relaunch = (
+                native_error is not None
+                and bool(getattr(native_error, "renderer_retryable", False))
+                and not isinstance(native_error, (ImportError, ModuleNotFoundError))
+                and not software_requested
+                and not _software_relaunch_is_guarded()
+                and not self._core_started
+                and not self._fallback_active
+                and self._qt_frontend is None
+            )
+            if can_relaunch and _relaunch_with_software_renderer(self.log):
+                return
+
             if native_error is not None:
                 if native_error.__class__.__name__ != "QtUnavailable":
                     self.log.error(
@@ -229,8 +360,27 @@ class SpeakrApp:
                         "Native UI unavailable (%s); using recovery interface", native_error
                     )
 
-        self._start_core()
+        handoff = self._renderer_handoff
+        if handoff is not None and handoff.attempted:
+            self.log.error("Renderer handoff was rejected after frontend preparation")
+            return
         self._start_legacy_interface()
+
+    def _frontend_committed(self, frontend: str) -> bool:
+        """Acknowledge only after native or recovery UI is visibly committed."""
+
+        handoff = self._renderer_handoff
+        if handoff is None:
+            return True
+        accepted = handoff.prepare(
+            frontend,
+            timeout=_SINGLE_INSTANCE_HANDOFF_SECONDS,
+            acquire_primary=_acquire_single_instance,
+            release_primary=_release_single_instance,
+        )
+        if accepted:
+            self._renderer_handoff = None
+        return accepted
 
     def _start_core(self):
         if self._core_started or self._shutting_down:
@@ -261,7 +411,35 @@ class SpeakrApp:
         self.interface_state.update(fallback_active=True)
         self.webui.start()
         self.open_panel()
-        self.tray.run()
+        # A failed handoff can deliberately retain the launch gate until
+        # recovery exists. Release it here on the same main thread that
+        # acquired the Win32 mutex only when the primary lock also proves
+        # ownership. If primary reacquisition failed, the gate remains this
+        # recovery process's sole exclusivity proof until exit.
+        if _instance_lock is not None:
+            _release_launch_gate()
+
+        def visible_tray_ready(icon):
+            try:
+                icon.visible = True
+                if not self._frontend_committed("legacy"):
+                    raise RuntimeError(
+                        "the renderer handoff parent did not accept recovery readiness"
+                    )
+                self._start_core()
+            except Exception as exc:
+                self.log.error("Could not commit the recovery interface: %s", exc)
+                try:
+                    icon.visible = False
+                except Exception:
+                    pass
+                self.webui.stop()
+                try:
+                    icon.stop()
+                except Exception:
+                    pass
+
+        self.tray.run(setup=visible_tray_ready)
 
     def _load_model(self):
         self.interface_state.dismiss_issue("model_load_failed")
@@ -406,6 +584,10 @@ class SpeakrApp:
             self.tray.stop()
         except Exception:
             pass
+        handoff, self._renderer_handoff = self._renderer_handoff, None
+        if handoff is not None:
+            handoff.close()
+        _release_launch_gate()
         frontend = self._qt_frontend
         if frontend is not None and hasattr(frontend, "request_quit"):
             frontend.request_quit()
@@ -1728,46 +1910,186 @@ class SpeakrApp:
 
 
 _instance_lock = None
+_launch_gate = None
 
 
-def _acquire_single_instance() -> bool:
-    """Two instances would mean two hotkey hooks and doubled injection."""
-    global _instance_lock
+def _try_process_lock(existing, windows_name, unix_name, *, owned=False):
+    if existing is not None:
+        return existing, True
     if sys.platform == "win32":
         import ctypes
+        from ctypes import wintypes
 
         ERROR_ALREADY_EXISTS = 183
+        WAIT_OBJECT_0 = 0
+        WAIT_ABANDONED = 0x80
         kernel32 = ctypes.windll.kernel32
-        _instance_lock = kernel32.CreateMutexW(None, False, "SpeakrSingleInstance")
-        return kernel32.GetLastError() != ERROR_ALREADY_EXISTS
+        kernel32.CreateMutexW.argtypes = [
+            ctypes.c_void_p,
+            wintypes.BOOL,
+            wintypes.LPCWSTR,
+        ]
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.CreateMutexW(None, owned, windows_name)
+        if not handle:
+            raise OSError(f"could not create the {windows_name} mutex")
+        if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            acquired = owned and kernel32.WaitForSingleObject(handle, 0) in {
+                WAIT_OBJECT_0,
+                WAIT_ABANDONED,
+            }
+            if not acquired:
+                kernel32.CloseHandle(handle)
+                return None, False
+        return handle, True
+
     import fcntl
 
-    _instance_lock = open(cfg_mod.ROOT / ".speakr.lock", "w")
+    lock_file = open(cfg_mod.ROOT / unix_name, "w")
     try:
-        fcntl.flock(_instance_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return True
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_file, True
     except OSError:
-        return False
+        lock_file.close()
+        return None, False
+
+
+def _wait_for_process_lock(try_acquire, wait_seconds):
+    deadline = time.monotonic() + max(0.0, float(wait_seconds))
+    while True:
+        if try_acquire():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_SINGLE_INSTANCE_POLL_SECONDS)
+
+
+def _release_process_lock(lock, *, owned=False):
+    if lock is None:
+        return
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.windll.kernel32
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+            if owned:
+                kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
+                kernel32.ReleaseMutex.restype = wintypes.BOOL
+                kernel32.ReleaseMutex(lock)
+            kernel32.CloseHandle(lock)
+        except Exception:
+            pass
+        return
+    try:
+        import fcntl
+
+        fcntl.flock(lock, fcntl.LOCK_UN)
+    except (OSError, ValueError):
+        pass
+    try:
+        lock.close()
+    except (OSError, ValueError):
+        pass
+
+
+def _try_acquire_launch_gate():
+    global _launch_gate
+    _launch_gate, acquired = _try_process_lock(
+        _launch_gate,
+        _LAUNCH_GATE_MUTEX_NAME,
+        ".speakr.launch-gate.lock",
+        owned=True,
+    )
+    return acquired
+
+
+def _acquire_launch_gate(*, wait_seconds=0.0):
+    return _wait_for_process_lock(_try_acquire_launch_gate, wait_seconds)
+
+
+def _release_launch_gate():
+    global _launch_gate
+    lock, _launch_gate = _launch_gate, None
+    _release_process_lock(lock, owned=True)
+
+
+def _try_acquire_single_instance():
+    global _instance_lock
+    _instance_lock, acquired = _try_process_lock(
+        _instance_lock, _SINGLE_INSTANCE_MUTEX_NAME, ".speakr.lock"
+    )
+    return acquired
+
+
+def _acquire_single_instance(*, wait_seconds=0.0):
+    return _wait_for_process_lock(_try_acquire_single_instance, wait_seconds)
+
+
+def _release_single_instance():
+    global _instance_lock
+    lock, _instance_lock = _instance_lock, None
+    _release_process_lock(lock)
+
+
+def _renderer_child_holds_primary() -> bool:
+    """Probe that the renderer child exclusively owns the primary lock."""
+
+    if not _try_acquire_single_instance():
+        return True
+    _release_single_instance()
+    return False
 
 
 def main():
-    if not _acquire_single_instance():
+    acquired = False
+    handoff = _RendererHandoffChild.from_environment()
+    if handoff is None:
+        try:
+            gate_acquired = _try_acquire_launch_gate()
+            waited_for_handoff = not gate_acquired
+            if not gate_acquired:
+                gate_acquired = _acquire_launch_gate(
+                    wait_seconds=_SINGLE_INSTANCE_HANDOFF_SECONDS
+                )
+        except OSError as exc:
+            setup_logging().warning(
+                "Could not use the launch gate; using the primary lock: %s", exc
+            )
+            gate_acquired = False
+            waited_for_handoff = False
+            acquired = _acquire_single_instance()
+        if gate_acquired:
+            try:
+                acquired = _acquire_single_instance()
+            finally:
+                _release_launch_gate()
+    if handoff is None and not acquired:
         setup_logging().warning("Speakr is already running; requesting its window")
         try:
             cfg_mod.SHOW_REQUEST_PATH.write_text(str(time.time_ns()), encoding="utf-8")
         except OSError:
             pass
-        _open_running_legacy_panel()
+        if not waited_for_handoff:
+            _open_running_legacy_panel()
         return
-    # Remove only a stale request left by an earlier crashed/exited primary.
-    # This must happen immediately after acquiring the mutex, before QML or
-    # the delayed core startup. A duplicate launched during UI startup then
-    # writes a fresh request that the watcher cannot accidentally delete.
-    try:
-        cfg_mod.SHOW_REQUEST_PATH.unlink()
-    except OSError:
-        pass
-    SpeakrApp().start()
+    if handoff is None:
+        # Remove only a stale request left by an earlier crashed/exited
+        # primary. The renderer-handoff parent already did this; its guarded
+        # child must preserve any fresh wake request written during handoff.
+        try:
+            cfg_mod.SHOW_REQUEST_PATH.unlink()
+        except OSError:
+            pass
+    application = SpeakrApp()
+    application._renderer_handoff = handoff
+    application.start()
 
 
 if __name__ == "__main__":
