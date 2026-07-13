@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -30,12 +31,19 @@ log = logging.getLogger("speakr.qt_ui")
 class QtUnavailable(RuntimeError):
     """Raised when the native frontend cannot be initialized safely."""
 
+    def __init__(self, message: str, *, renderer_retryable: bool = False):
+        super().__init__(message)
+        self.renderer_retryable = bool(renderer_retryable)
+
 
 # Older callers used the longer name while the native UI was experimental.
 NativeUIUnavailable = QtUnavailable
 
 _QT = None
 _BRIDGE_TYPE = None
+_RENDERER_STATE_LOCK = threading.RLock()
+_RENDERER_REQUEST = None
+_QUICK_WINDOW_CREATED = False
 
 
 def _load_qt():
@@ -44,19 +52,37 @@ def _load_qt():
     if _QT is not None:
         return _QT
     try:
-        from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot, Qt
+        from PySide6.QtCore import (
+            Property,
+            QCoreApplication,
+            QEvent,
+            QEventLoop,
+            QObject,
+            QTimer,
+            QUrl,
+            Signal,
+            Slot,
+            Qt,
+        )
         from PySide6.QtGui import (
             QAction,
             QAccessible,
             QAccessibleAnnouncementEvent,
+            QColor,
             QCursor,
             QFont,
             QFontDatabase,
             QGuiApplication,
             QIcon,
+            QImage,
         )
         from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
-        from PySide6.QtQuick import QQuickWindow, QSGRendererInterface
+        from PySide6.QtQuick import (
+            QQuickRenderControl,
+            QQuickRenderTarget,
+            QQuickWindow,
+            QSGRendererInterface,
+        )
         from PySide6.QtQuickControls2 import QQuickStyle
         from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
     except (ImportError, OSError) as exc:
@@ -65,17 +91,24 @@ def _load_qt():
         QAction=QAction,
         QAccessible=QAccessible,
         QAccessibleAnnouncementEvent=QAccessibleAnnouncementEvent,
+        QColor=QColor,
         QApplication=QApplication,
         QCursor=QCursor,
         QFont=QFont,
         QFontDatabase=QFontDatabase,
         QGuiApplication=QGuiApplication,
         QIcon=QIcon,
+        QImage=QImage,
         QMenu=QMenu,
         QObject=QObject,
         Property=Property,
+        QCoreApplication=QCoreApplication,
+        QEvent=QEvent,
+        QEventLoop=QEventLoop,
         QQmlApplicationEngine=QQmlApplicationEngine,
         QQmlComponent=QQmlComponent,
+        QQuickRenderControl=QQuickRenderControl,
+        QQuickRenderTarget=QQuickRenderTarget,
         QQuickWindow=QQuickWindow,
         QQuickStyle=QQuickStyle,
         QSGRendererInterface=QSGRendererInterface,
@@ -148,6 +181,258 @@ def _prefer_software_renderer() -> bool:
         return True
     session = os.environ.get("SESSIONNAME", "").upper()
     return session.startswith("RDP-") or bool(os.environ.get("SSH_CONNECTION"))
+
+
+def _qt_quick_environment_selects_software() -> bool:
+    """Return whether Qt itself was told to use its software adaptation."""
+
+    return os.environ.get("QT_QUICK_BACKEND", "").strip().lower() == "software"
+
+
+def _live_quick_window_exists(qt) -> bool:
+    """Best-effort guard against changing the process-global renderer late."""
+
+    try:
+        application = qt.QGuiApplication.instance()
+        if application is None:
+            return False
+        return any(isinstance(window, qt.QQuickWindow) for window in application.allWindows())
+    except (AttributeError, RuntimeError, TypeError):
+        return False
+
+
+def _configure_renderer(qt, software_requested: bool) -> None:
+    """Select one renderer policy before the process creates a Quick window.
+
+    Qt's graphics API is process-global and cannot be changed after the first
+    QQuickWindow. Repeating the same policy is intentionally a no-op; changing
+    it requires a fresh process and is refused without calling Qt.
+    """
+
+    global _RENDERER_REQUEST
+    desired = "software" if software_requested else "default"
+    with _RENDERER_STATE_LOCK:
+        if _RENDERER_REQUEST == desired:
+            return
+        if _RENDERER_REQUEST is not None:
+            raise QtUnavailable(
+                "Qt's renderer is already configured for this process; "
+                "a renderer change requires a fresh process"
+            )
+
+        if desired == "software":
+            # QT_QUICK_BACKEND is consumed by Qt before its first Quick window.
+            # Calling setGraphicsApi as well is redundant and, in hosted test
+            # processes, can produce a false late-switch diagnostic.
+            if not _qt_quick_environment_selects_software():
+                if _QUICK_WINDOW_CREATED or _live_quick_window_exists(qt):
+                    raise QtUnavailable(
+                        "Qt's software renderer was requested after a Quick "
+                        "window was created; a fresh process is required"
+                    )
+                try:
+                    graphics_api = qt.QSGRendererInterface.GraphicsApi.Software
+                    qt.QQuickWindow.setGraphicsApi(graphics_api)
+                except (AttributeError, RuntimeError) as exc:
+                    raise QtUnavailable(
+                        "Qt's software renderer could not be requested"
+                    ) from exc
+
+        _RENDERER_REQUEST = desired
+
+
+def _mark_quick_window_created() -> None:
+    global _QUICK_WINDOW_CREATED
+    with _RENDERER_STATE_LOCK:
+        _QUICK_WINDOW_CREATED = True
+
+
+def _graphics_api_name(api: Any) -> str:
+    name = getattr(api, "name", None)
+    if name:
+        return str(name)
+    return str(api).rsplit(".", 1)[-1] or "Unknown"
+
+
+def _probe_effective_renderer(qt, *, software_requested: bool) -> bool:
+    """Render through a no-exposure scene graph and verify its renderer.
+
+    ``graphicsApi()`` alone reports only Qt's selected API.  A
+    ``QQuickRenderControl`` creates the renderer/device for GPU APIs. Qt's
+    software adaptation must not call ``initialize()``, so that path proves
+    rendering into a local two-pixel image instead. Its associated
+    ``QQuickWindow`` never becomes visible or active. This keeps failures
+    inside the pre-main retry boundary.
+    """
+
+    probe = None
+    render_control = None
+    paint_device = None
+    render_target = None
+    effective = None
+    initialized = []
+    scene_graph_errors = []
+    software_api = qt.QSGRendererInterface.GraphicsApi.Software
+    try:
+        def scene_graph_initialized():
+            initialized.append(True)
+
+        def scene_graph_error(error, message):
+            scene_graph_errors.append((error, str(message or "")))
+
+        direct = qt.Qt.ConnectionType.DirectConnection
+        platform_name = str(qt.QGuiApplication.platformName()).lower()
+        if platform_name == "offscreen":
+            # Qt's offscreen QPA does not support QQuickRenderControl, but it
+            # can still initialize the real software scene graph through an
+            # exposed offscreen window. It has no native surface to flash or
+            # activate. Production Windows/macOS paths stay no-exposure.
+            probe = qt.QQuickWindow()
+            loop = qt.QEventLoop()
+
+            def initialized_and_stop():
+                scene_graph_initialized()
+                loop.quit()
+
+            def error_and_stop(error, message):
+                scene_graph_error(error, message)
+                loop.quit()
+
+            probe.sceneGraphInitialized.connect(initialized_and_stop, direct)
+            probe.sceneGraphError.connect(error_and_stop, direct)
+            probe.setFlags(
+                qt.Qt.WindowType.Tool
+                | qt.Qt.WindowType.FramelessWindowHint
+                | qt.Qt.WindowType.WindowDoesNotAcceptFocus
+                | qt.Qt.WindowType.WindowTransparentForInput
+            )
+            probe.setWidth(1)
+            probe.setHeight(1)
+            probe.setPosition(-32000, -32000)
+            probe.setOpacity(0.0)
+            _mark_quick_window_created()
+            timeout = qt.QTimer()
+            timeout.setSingleShot(True)
+            timeout.timeout.connect(loop.quit)
+            timeout.start(1500)
+            probe.show()
+            if not initialized and not scene_graph_errors:
+                loop.exec()
+            timeout.stop()
+            probe.hide()
+            if not initialized and not scene_graph_errors:
+                raise RuntimeError("Qt scene graph initialization timed out")
+        else:
+            render_control = qt.QQuickRenderControl()
+            probe = qt.QQuickWindow(render_control)
+            _mark_quick_window_created()
+            probe.sceneGraphInitialized.connect(scene_graph_initialized, direct)
+            probe.sceneGraphError.connect(scene_graph_error, direct)
+            renderer = probe.rendererInterface()
+            selected = renderer.graphicsApi()
+            if selected == software_api:
+                # Qt 6 explicitly forbids initialize() for the software
+                # adaptation. A paint-device target proves that sync/render
+                # executes and mutates a local buffer without a native window.
+                paint_device = qt.QImage(
+                    2,
+                    2,
+                    qt.QImage.Format.Format_ARGB32_Premultiplied,
+                )
+                untouched = qt.QColor("#010203")
+                rendered = qt.QColor("#112233")
+                paint_device.fill(untouched)
+                render_target = qt.QQuickRenderTarget.fromPaintDevice(
+                    paint_device
+                )
+                probe.setRenderTarget(render_target)
+                probe.setWidth(2)
+                probe.setHeight(2)
+                probe.setColor(rendered)
+                render_control.polishItems()
+                render_control.sync()
+                render_control.render()
+                if paint_device.pixelColor(0, 0) != rendered:
+                    raise RuntimeError("Qt's software render proof was unchanged")
+            else:
+                initialize_result = render_control.initialize()
+                if initialize_result is not True or not initialized:
+                    raise RuntimeError("Qt did not initialize the scene graph")
+            effective = renderer.graphicsApi()
+        if scene_graph_errors:
+            _error, message = scene_graph_errors[0]
+            raise RuntimeError(message or "Qt reported a scene graph error")
+        if effective is None:
+            renderer = probe.rendererInterface()
+            effective = renderer.graphicsApi()
+    except Exception as exc:
+        raise QtUnavailable(
+            "Qt's renderer/device preflight failed",
+            renderer_retryable=not software_requested,
+        ) from exc
+    finally:
+        if render_control is not None:
+            try:
+                render_control.invalidate()
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+        if probe is not None:
+            try:
+                probe.close()
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+            try:
+                probe.destroy()
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+            try:
+                probe.deleteLater()
+                qt.QCoreApplication.sendPostedEvents(
+                    probe, qt.QEvent.Type.DeferredDelete
+                )
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+        if render_control is not None:
+            try:
+                render_control.deleteLater()
+                qt.QCoreApplication.sendPostedEvents(
+                    render_control, qt.QEvent.Type.DeferredDelete
+                )
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+
+    unknown_api = qt.QSGRendererInterface.GraphicsApi.Unknown
+    null_api = getattr(qt.QSGRendererInterface.GraphicsApi, "Null", None)
+    is_software = effective == software_api
+    if effective == unknown_api or (null_api is not None and effective == null_api):
+        raise QtUnavailable(
+            f"Qt's effective renderer is {_graphics_api_name(effective)}",
+            renderer_retryable=not software_requested,
+        )
+    if software_requested and not is_software:
+        raise QtUnavailable(
+            "Qt's software renderer request resolved to "
+            f"{_graphics_api_name(effective)}"
+        )
+    if is_software:
+        log.info("Qt's effective renderer is the local software scene graph")
+    return is_software
+
+
+def _wait_for_required_main_window(qapp, window, *, timeout_ms: int = 1500) -> bool:
+    """Bound startup until a required main surface is visible and exposed."""
+
+    deadline = time.monotonic() + max(0, int(timeout_ms)) / 1000.0
+    while True:
+        qapp.processEvents()
+        try:
+            if window.isVisible() and window.isExposed():
+                return True
+        except (AttributeError, RuntimeError, TypeError):
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
 
 
 _SYSTEM_ACCESSIBILITY = None
@@ -1237,13 +1522,6 @@ def _bridge_type(qt):
 def Bridge(app, interface_state=None, parent=None):
     """Construct the runtime QObject bridge without importing Qt at module load."""
     qt = _load_qt()
-    if _prefer_software_renderer():
-        try:
-            graphics_api = qt.QSGRendererInterface.GraphicsApi.Software
-            qt.QQuickWindow.setGraphicsApi(graphics_api)
-            log.info("Using Qt's software renderer for this remote display session")
-        except (AttributeError, RuntimeError) as exc:
-            raise QtUnavailable("Qt's software renderer could not be enabled") from exc
     return _bridge_type(qt)(app, interface_state=interface_state, parent=parent)
 
 
@@ -1283,7 +1561,14 @@ def _component_errors(component) -> str:
         return "unknown QML component error"
 
 
-def _create_qml_root(qt, engine, path: Path, *, before_complete=None):
+def _create_qml_root(
+    qt,
+    engine,
+    path: Path,
+    *,
+    before_complete=None,
+    renderer_retryable: bool = False,
+):
     """Create a QML root in two phases and retain its component.
 
     ``Component.onCompleted`` may show an ApplicationWindow.  The optional
@@ -1300,7 +1585,10 @@ def _create_qml_root(qt, engine, path: Path, *, before_complete=None):
         if root is None:
             raise QtUnavailable(f"QML failed to create: {path}: {_component_errors(component)}")
         if before_complete is not None:
-            before_complete(root)
+            try:
+                before_complete(root)
+            except Exception as exc:
+                raise QtUnavailable("native window setup failed") from exc
         component.completeCreate()
         if component.isError():
             try:
@@ -1326,7 +1614,10 @@ def _create_qml_root(qt, engine, path: Path, *, before_complete=None):
             except (AttributeError, RuntimeError):
                 pass
         component.deleteLater()
-        raise QtUnavailable(f"QML failed to create: {path}") from exc
+        raise QtUnavailable(
+            f"QML failed to create: {path}",
+            renderer_retryable=renderer_retryable,
+        ) from exc
 
 
 def _native_preferences(app) -> tuple[dict[str, Any], dict[str, bool]]:
@@ -1459,6 +1750,67 @@ def _build_tray(qt, app, bridge, icon):
     return tray
 
 
+def _dispose_native_ui(
+    qt,
+    qapp,
+    engine,
+    app,
+    bridge,
+    native_window,
+    tray,
+    qml_roots,
+    qml_components,
+    system_preference_connections,
+):
+    """Destroy QML while every object exported into its context is alive."""
+
+    _disconnect_signal_callbacks(system_preference_connections)
+    if tray is not None:
+        tray.hide()
+    if bridge is not None:
+        bridge.close()
+    if native_window is not None:
+        native_window.detach()
+    if getattr(app, "_qt_frontend", None) is bridge:
+        app._qt_frontend = None
+
+    def drain():
+        for _ in range(4):
+            qapp.processEvents()
+            qt.QCoreApplication.sendPostedEvents(
+                None, qt.QEvent.Type.DeferredDelete
+            )
+        qapp.processEvents()
+
+    for root in qml_roots:
+        try:
+            root.hide()
+            root.deleteLater()
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+    for component in qml_components:
+        try:
+            component.deleteLater()
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+    if tray is not None:
+        tray.deleteLater()
+    drain()
+    try:
+        engine.collectGarbage()
+    except (AttributeError, RuntimeError, TypeError):
+        pass
+    engine.deleteLater()
+    drain()
+    # NativeWindowController has no QObject parent and remains under Python
+    # ownership.  Do not force-delete it here: callers may retain the wrapper
+    # to inspect the negotiated fallback after run_native_ui() returns.  QML
+    # and the engine are already gone, so normal reference lifetime is safe.
+    if bridge is not None:
+        bridge.deleteLater()
+    drain()
+
+
 def run_native_ui(app):
     """Run the native frontend and return the Qt event-loop exit code.
 
@@ -1471,6 +1823,8 @@ def run_native_ui(app):
     if threading.current_thread() is not threading.main_thread():
         raise QtUnavailable("the native UI must run on the main thread")
     qt = _load_qt()
+    software_requested = _prefer_software_renderer()
+    _configure_renderer(qt, software_requested)
     # Windows/macOS native control styles deliberately reject customized
     # backgrounds/content.  Quiet Signal supplies those accessible visuals,
     # so select Qt's supported customizable base before any QML is loaded.
@@ -1504,7 +1858,13 @@ def run_native_ui(app):
         raise QtUnavailable("the local Speakr icon could not be loaded")
     qapp.setWindowIcon(icon)
 
-    engine = qt.QQmlApplicationEngine()
+    software_renderer = _probe_effective_renderer(
+        qt, software_requested=software_requested
+    )
+    try:
+        engine = qt.QQmlApplicationEngine()
+    except Exception as exc:
+        raise QtUnavailable("could not create the QML engine") from exc
     bridge = None
     native_window = None
     tray = None
@@ -1531,7 +1891,7 @@ def run_native_ui(app):
             reduce_transparency=bool(
                 accessibility.get("system_reduce_transparency", False)
             ),
-            software_renderer=_prefer_software_renderer(),
+            software_renderer=software_renderer,
         )
         engine.rootContext().setContextProperty("nativeWindow", native_window)
 
@@ -1562,11 +1922,20 @@ def run_native_ui(app):
         )
 
         main_root, main_component = _create_qml_root(
-            qt, engine, main_qml, before_complete=native_window.attach
+            qt,
+            engine,
+            main_qml,
+            before_complete=native_window.attach,
+            renderer_retryable=not software_renderer,
         )
         qml_roots.append(main_root)
         qml_components.append(main_component)
-        hud_root, hud_component = _create_qml_root(qt, engine, hud_qml)
+        hud_root, hud_component = _create_qml_root(
+            qt,
+            engine,
+            hud_qml,
+            renderer_retryable=not software_renderer,
+        )
         qml_roots.append(hud_root)
         qml_components.append(hud_component)
 
@@ -1578,59 +1947,44 @@ def run_native_ui(app):
         bridge.attach_frontend(main_window, hud_window, tray)
         app._qt_frontend = bridge
         tray.show()
+        qapp.processEvents()
+        if not tray.isVisible():
+            raise QtUnavailable("the native tray did not become visible")
+        main_window_required = (
+            not bool(native_ui.get("onboarding_complete", False))
+            or bool(native_ui.get("open_window_on_start", True))
+        )
+        if main_window_required and not _wait_for_required_main_window(
+            qapp, main_window
+        ):
+            raise QtUnavailable(
+                "the required native main window did not appear",
+                renderer_retryable=not software_renderer,
+            )
+        frontend_committed = _callable(app, "_frontend_committed")
+        if frontend_committed is not None and frontend_committed("native") is False:
+            raise QtUnavailable(
+                "the renderer handoff parent did not accept the native frontend"
+            )
         start_core = _callable(app, "_start_core")
         if start_core is not None:
             qt.QTimer.singleShot(120, start_core)
-    except QtUnavailable:
-        _disconnect_signal_callbacks(system_preference_connections)
-        if tray is not None:
-            tray.hide()
-        if bridge is not None:
-            bridge.close()
-        if native_window is not None:
-            native_window.detach()
-        if getattr(app, "_qt_frontend", None) is bridge:
-            app._qt_frontend = None
-        for root in qml_roots:
-            root.deleteLater()
-        for component in qml_components:
-            component.deleteLater()
-        engine.deleteLater()
-        raise
     except Exception as exc:
-        _disconnect_signal_callbacks(system_preference_connections)
-        if tray is not None:
-            tray.hide()
-        if bridge is not None:
-            bridge.close()
-        if native_window is not None:
-            native_window.detach()
-        if getattr(app, "_qt_frontend", None) is bridge:
-            app._qt_frontend = None
-        for root in qml_roots:
-            root.deleteLater()
-        for component in qml_components:
-            component.deleteLater()
-        engine.deleteLater()
+        _dispose_native_ui(
+            qt, qapp, engine, app, bridge, native_window, tray,
+            qml_roots, qml_components, system_preference_connections,
+        )
+        if isinstance(exc, QtUnavailable):
+            raise
         raise QtUnavailable("native UI initialization failed") from exc
 
     try:
         return int(qapp.exec())
     finally:
-        _disconnect_signal_callbacks(system_preference_connections)
-        if tray is not None:
-            tray.hide()
-        if bridge is not None:
-            bridge.close()
-        if native_window is not None:
-            native_window.detach()
-        if getattr(app, "_qt_frontend", None) is bridge:
-            app._qt_frontend = None
-        for root in qml_roots:
-            root.deleteLater()
-        for component in qml_components:
-            component.deleteLater()
-        engine.deleteLater()
+        _dispose_native_ui(
+            qt, qapp, engine, app, bridge, native_window, tray,
+            qml_roots, qml_components, system_preference_connections,
+        )
 
 
 __all__ = [

@@ -117,6 +117,47 @@ The effective material is exactly one of `mica`, `vibrancy`, `scene_glass`,
 or `solid`. Settings may expose this resolved value as read-only expert
 information. It is not a readiness or error state.
 
+Renderer policy is selected exactly once before QApplication and the first
+QQuickWindow. A no-exposure `QQuickRenderControl` proves the actual scene
+graph/device and reports the effective graphics API before the QML engine,
+main window, tray, or core is created. GPU APIs must initialize and emit the
+scene-graph signal. Qt's software adaptation must not call `initialize()`, so
+it instead renders into a two-pixel local `QImage` and verifies the changed
+pixel. The offscreen test QPA uses a bounded, opacity-zero, input-transparent
+offscreen-window gate because that QPA does not support render control.
+Unknown, Null, false, exception, missing-signal, unchanged-render, and
+scene-graph-error outcomes fail this boundary. Only the proven effective API,
+not the requested value, controls `softwareRenderer` and effects resolution.
+
+Qt cannot switch this API in-process. A retryable default-renderer failure may
+therefore relaunch once in a guarded fresh process. The parent holds its launch
+gate and primary lock while the exact child completes renderer, QML, native
+frame or recovery construction with core work deferred. Two atomically
+replaced JSON state files live in a random private directory rooted only on a
+verified local fixed/RAM temp drive on Windows or local `/tmp` on Unix.
+Windows obtains that path without `tempfile`'s write probe and rejects UNC,
+mapped-remote, and reparse-point paths before creating or reading the
+directory. The child publishes nonce/token-bound `PREPARED` only after its
+tray is visible and any required main window is visible and exposed. The
+parent then releases primary ownership; the child publishes `CLAIMED`, the
+parent independently probes that the lock remains held and publishes `ACK`,
+and the child publishes `COMPLETE`. Microphone/core startup follows successful
+completion, never merely process launch or frontend construction. A Windows
+venv launcher may exit before the actual interpreter; the parent therefore
+ignores that launcher until authenticated `PREPARED` supplies the runtime PID,
+then pins a native process handle and proves it alive before releasing primary.
+The handle governs post-release liveness and failure termination and is only
+closed on success. A failure after `PREPARED` terminates that pinned runtime
+before the parent reacquires ownership. Before `PREPARED`, the parent retains
+primary and publishes rejection for cooperative child shutdown while it shows
+local recovery. If the post-`PREPARED` runtime cannot be proven stopped after
+the bounded hard and cooperative exit attempts, same-process recovery is
+suppressed rather than constructing a second frontend. Third launchers cannot
+race the designated child and publish a level-triggered Show request without
+opening stale recovery URLs. The protocol rejects remote temp shares and uses
+no socket, IP networking, audio, transcript, window title, clipboard, screen
+content, or global fixed acknowledgement path.
+
 ### Windows material and chrome
 
 - Windows 11 build 22621 or newer requests the DWM main-window backdrop type.
@@ -391,6 +432,12 @@ interface, not only isolated boards.
       text targets 7:1; control boundaries and focus meet 3:1.
 - [ ] Light, dark, High Contrast, full, reduced, off, and software-rendered
       states are represented and testable.
+- [ ] Renderer subprocess tests prove one-time early selection, effective-API
+      reporting after device initialization, exact probe destruction, zero
+      nested renderer/QML diagnostics, and guarded three-process handoff to a
+      fresh software process. Native Windows QPA evidence is automated;
+      Cocoa and packaged-source/frozen relaunch evidence remains a manual
+      platform/artifact gate.
 - [ ] 960 by 700 and 640 by 520 at 200% contain no clipped labels, controls,
       focus, or shadows.
 - [ ] Custom chrome retains Windows snap/system-menu and macOS native

@@ -113,8 +113,8 @@ class Tray:
         if self.icon.visible:
             self.icon.update_menu()
 
-    def run(self):
-        self.icon.run()
+    def run(self, setup=None):
+        self.icon.run(setup=setup)
 
     def stop(self):
         self.icon.stop()
