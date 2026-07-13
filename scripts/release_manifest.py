@@ -42,6 +42,14 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _dependency_lock_sha256(path: Path) -> str:
+    """Hash the checked-in lock content independent of checkout line endings."""
+
+    text = path.read_text(encoding="utf-8")
+    canonical = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _read_json(path: Path) -> object:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -145,7 +153,7 @@ def create_manifest(
         },
         "dependency_lock": {
             "name": dependency_lock.name,
-            "sha256": _sha256(dependency_lock),
+            "sha256": _dependency_lock_sha256(dependency_lock),
         },
         "signature": {
             "signed": bool(signed),
@@ -257,7 +265,7 @@ def verify_manifest(
     else:
         if lock_record.get("name") != dependency_lock.name:
             errors.append("dependency lock name does not match")
-        if lock_record.get("sha256") != _sha256(dependency_lock):
+        if lock_record.get("sha256") != _dependency_lock_sha256(dependency_lock):
             errors.append("dependency lock hash does not match")
 
     runtime = payload.get("runtime")

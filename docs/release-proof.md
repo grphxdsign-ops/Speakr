@@ -114,7 +114,7 @@ environment variables are absent.
 
 Each platform emits a JSON manifest beside its artifact. The manifest binds
 the full source commit and optional version tag to the artifact SHA-256, the
-`requirements-release.txt` SHA-256, platform architecture, public signing
+LF-normalized `requirements-release.txt` SHA-256, platform architecture, public signing
 identity/team evidence, notarization status, both scan stages, and the two
 fixed runtime receipts. It contains no runner path, username, log text,
 configuration, transcript, or model name.

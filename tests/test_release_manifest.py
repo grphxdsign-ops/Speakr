@@ -28,7 +28,7 @@ class ReleaseManifestTests(unittest.TestCase):
         native = root / "native.json"
         core = root / "core.json"
         artifact.write_bytes(b"exact signed artifact")
-        lock.write_text("PyInstaller==6.21.0\n", encoding="utf-8")
+        lock.write_bytes(b"PyInstaller==6.21.0\r\n")
         native.write_text(
             json.dumps(
                 {
@@ -88,6 +88,10 @@ class ReleaseManifestTests(unittest.TestCase):
             )
             manifest = root / "Speakr-Windows-manifest.json"
             write_manifest(manifest, payload)
+
+            # The manifest must survive Git's LF/CRLF checkout policy when the
+            # two platform artifacts are verified together on Linux.
+            lock.write_bytes(b"PyInstaller==6.21.0\n")
 
             self.assertEqual(
                 verify_manifest(
