@@ -319,6 +319,10 @@ QtObject {
     readonly property int motionDisclosure: reduceMotion ? 0 : 120
     readonly property int motionStage: motionStandard
     readonly property int motionOnboarding: reduceMotion ? 0 : 180
+    // DESIGN.md success rule: retain a 1.2-second reading window before
+    // dependent actions change. Reduced Motion makes transformations instant
+    // but preserves reading time, so this token never collapses to zero.
+    readonly property int motionReading: 1200
 
     function fontSize(value) {
         return Math.max(1, Math.round(value * textScale))

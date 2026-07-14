@@ -173,6 +173,13 @@ plain-language categories plus searchable Advanced controls; Help contains
 local recovery and diagnostics. Practice content is cleared when you leave it
 and is never written to transcript logs or learning context.
 
+First-run setup uses a vertical step rail (Privacy, Permissions, Speech
+model, Shortcut, Practice): completing a step draws its check and fills the
+connector to the next step, and a practice result shows one check draw
+followed by a 1.2-second reading window before the action row changes to
+Try again and Finish. Reduced Motion makes the drawing instant but keeps the
+reading window.
+
 The window follows system light/dark and accessibility preferences, supports
 keyboard-complete navigation and visible focus, and reflows instead of hiding
 navigation labels at narrow sizes. The dictation HUD is non-focusable and
