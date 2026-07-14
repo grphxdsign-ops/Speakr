@@ -43,6 +43,37 @@ Item {
         return hasResult() || practiceMessage().length > 0
     }
 
+    // Result contract (DESIGN.md success rule): one 220 ms check draw, then a
+    // 1.2 s reading window before the action row changes. Reduced Motion
+    // keeps the reading window; only the drawing becomes instant.
+    readonly property bool resultVisible: hasResult()
+    property bool resultActionsReady: false
+    readonly property bool resultPending: resultVisible && !resultActionsReady
+
+    onResultVisibleChanged: {
+        if (resultVisible) {
+            resultActionsReady = false
+            resultReveal.restart()
+        } else {
+            resultReveal.stop()
+            resultActionsReady = false
+        }
+    }
+
+    Component.onCompleted: {
+        // A result that already exists when the page loads was read earlier;
+        // only newly arriving results replay the check draw and reading pause.
+        if (resultVisible)
+            resultActionsReady = true
+    }
+
+    SequentialAnimation {
+        id: resultReveal
+
+        PauseAnimation { duration: root.tokens.motionReading }
+        ScriptAction { script: root.resultActionsReady = true }
+    }
+
     function levelCount() {
         if (!isActive()) return 0
         var level = String(value(practice, "mic_level_band",
@@ -255,21 +286,38 @@ Item {
 
                             QuietButton {
                                 objectName: "practiceStartStopButton"
+                                // During the reading window the action row holds its
+                                // processing presentation; Retry appears only once the
+                                // 1.2 s pause completes.
                                 visible: root.isActive() || root.isBusy()
+                                         || root.resultPending
                                          || !root.attemptExists()
                                 tokens: root.tokens
                                 text: root.isActive() ? qsTr("Stop")
-                                      : (root.isBusy() ? qsTr("Processing…")
-                                                       : qsTr("Start"))
-                                kind: root.isBusy() ? "secondary" : "primary"
-                                enabled: root.isActive() || !root.isBusy()
+                                      : (root.isBusy() || root.resultPending
+                                         ? qsTr("Processing…")
+                                         : qsTr("Start"))
+                                kind: root.isBusy() || root.resultPending
+                                      ? "secondary" : "primary"
+                                enabled: root.isActive()
+                                         || (!root.isBusy() && !root.resultPending)
+                                // DESIGN.md press contract: scale never below .99,
+                                // 100 ms (tokens.motionFast; instant when reduced).
+                                scale: down && enabled ? 0.99 : 1
                                 accessibleDescription: root.isActive()
                                                        ? qsTr("Stop this temporary practice recording")
-                                                       : (root.isBusy()
+                                                       : (root.isBusy() || root.resultPending
                                                           ? qsTr("Temporary practice is processing locally")
                                                           : qsTr("Start a temporary practice recording"))
                                 onClicked: root.isActive()
                                            ? bridge.stopPractice() : bridge.startPractice()
+
+                                Behavior on scale {
+                                    NumberAnimation {
+                                        duration: root.tokens.motionFast
+                                        easing.type: Easing.OutQuint
+                                    }
+                                }
                             }
                         }
                     }
@@ -340,6 +388,34 @@ Item {
                                   ? qsTr("Practice is not ready yet")
                                   : qsTr("Nothing was added"))
                         message: root.practiceMessage()
+                    }
+
+                    RowLayout {
+                        objectName: "practiceResultCheck"
+                        visible: root.resultVisible
+                        Layout.fillWidth: true
+                        spacing: root.tokens.space8
+
+                        CheckDraw {
+                            objectName: "practiceResultCheckDraw"
+                            Layout.preferredWidth: root.tokens.metric(16)
+                            Layout.preferredHeight: root.tokens.metric(16)
+                            tokens: root.tokens
+                            drawn: root.resultVisible
+                            strokeColor: root.tokens.highContrast
+                                         ? root.tokens.text
+                                         : root.tokens.accentForeground
+                        }
+
+                        PlainText {
+                            Layout.fillWidth: true
+                            text: qsTr("Cleaned up locally")
+                            color: root.tokens.text
+                            font.family: root.tokens.fontFamily
+                            font.pixelSize: root.tokens.secondary
+                            font.weight: Font.DemiBold
+                            wrapMode: Text.Wrap
+                        }
                     }
 
                     GridLayout {
@@ -469,7 +545,7 @@ Item {
 
                         QuietButton {
                             objectName: "practiceRetryButton"
-                            visible: root.attemptExists()
+                            visible: root.attemptExists() && !root.resultPending
                             tokens: root.tokens
                             text: qsTr("Retry")
                             enabled: !root.isActive() && !root.isBusy()
@@ -481,7 +557,8 @@ Item {
                             objectName: "practiceClearButton"
                             tokens: root.tokens
                             text: qsTr("Clear")
-                            enabled: root.hasResult() || root.practiceMessage().length > 0
+                            enabled: (root.hasResult() || root.practiceMessage().length > 0)
+                                     && !root.resultPending
                             accessibleDescription: qsTr("Clear temporary practice text and messages from memory")
                             onClicked: bridge.clearPractice()
                         }

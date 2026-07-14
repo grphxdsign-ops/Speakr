@@ -1,7 +1,24 @@
 """Speakr smoke test — exercises every pipeline stage except live mic/hotkey.
 
 Run:  .venv\\Scripts\\python.exe scripts\\smoke_test.py <path-to-16k-mono-wav>
-The wav should contain spoken English; the test checks it transcribes.
+The wav must contain the spoken sentence "The quick brown fox jumps over the
+lazy dog." — the end-to-end check asserts those words appear in the
+transcript.  Follow it with a couple of different sentences: the streaming
+check loops the clip, and a clip that is ONLY one short repeated sentence can
+trip whisper's repetition suppression when chunks are conditioned on prior
+text (observed: 3 repeats collapsed to 1, similarity 0.5).  A local, offline
+way to produce a suitable wav on Windows:
+
+  Add-Type -AssemblyName System.Speech
+  $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+  $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000,
+      [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen,
+      [System.Speech.AudioFormat.AudioChannel]::Mono)
+  $s.SetOutputToWaveFile("$env:TEMP\\speakr_smoke.wav", $fmt)
+  $s.Speak('The quick brown fox jumps over the lazy dog. I bought three ' +
+      'apples and twelve oranges at the market yesterday. Please email the ' +
+      'quarterly report to Sarah before the meeting on Friday afternoon.')
+  $s.Dispose()
 """
 
 import sys
@@ -299,10 +316,21 @@ def test_transcription_e2e():
     print(f"        model device: {t.device_in_use}")
     import time
 
+    # The first real transcription in a process pays a device warm-up cost
+    # that varies with GPU memory pressure (observed here: 1.0s typical,
+    # 17.7s worst case with Ollama resident on the same GPU). README already
+    # documents "slow first transcription" as expected, so the speed bound is
+    # asserted on the steady state and the first-use cost is only reported.
+    start = time.monotonic()
+    text = t.transcribe(audio)
+    first_use = time.monotonic() - start
     start = time.monotonic()
     text = t.transcribe(audio)
     elapsed = time.monotonic() - start
-    print(f"        transcript ({elapsed:.2f}s for {len(audio)/16000:.1f}s audio): {text!r}")
+    print(
+        f"        transcript (first use {first_use:.2f}s, steady {elapsed:.2f}s "
+        f"for {len(audio)/16000:.1f}s audio): {text!r}"
+    )
     lowered = text.lower()
     for word in ("quick", "brown", "fox"):
         assert word in lowered, f"expected {word!r} in transcript"

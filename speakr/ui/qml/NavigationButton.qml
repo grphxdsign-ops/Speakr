@@ -59,7 +59,7 @@ QuietButton {
             radius: control.tokens.radiusControl
             color: control.selected
                    ? (control.tokens.highContrast ? control.tokens.accent
-                                                  : control.tokens.navigationSurface)
+                                                  : control.tokens.hover)
                    : (control.down ? control.tokens.pressed
                                    : (control.hovered ? control.tokens.hover
                                                       : "transparent"))
