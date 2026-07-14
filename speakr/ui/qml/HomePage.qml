@@ -10,6 +10,10 @@ Item {
     required property var tokens
     property var appState: ({})
     property var settings: ({})
+    // Same responsive side padding as the other pages and the approved
+    // prototype boards: 32 px wide, 16 px in the narrow reading column.
+    readonly property int pageMargin: width < tokens.metric(760)
+                                      ? tokens.space16 : tokens.space32
     signal navigateRequested(string page)
 
     function focusHeading() {
@@ -253,8 +257,8 @@ Item {
                 objectName: "homeBoundedHeader"
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
-                Layout.leftMargin: root.tokens.space24
-                Layout.rightMargin: root.tokens.space24
+                Layout.leftMargin: root.pageMargin
+                Layout.rightMargin: root.pageMargin
                 columns: width >= root.tokens.metric(520) ? 2 : 1
                 columnSpacing: root.tokens.space16
                 rowSpacing: root.tokens.space8
@@ -312,8 +316,8 @@ Item {
                 objectName: "homeBody"
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
-                Layout.leftMargin: root.tokens.space24
-                Layout.rightMargin: root.tokens.space24
+                Layout.leftMargin: root.pageMargin
+                Layout.rightMargin: root.pageMargin
                 columns: width >= root.tokens.metric(620)
                          && root.tokens.textScale <= 1.25 ? 2 : 1
                 columnSpacing: root.tokens.space16
@@ -482,7 +486,7 @@ Item {
                             Layout.minimumWidth: 0
                             Layout.bottomMargin: root.tokens.space4
                             tokens: root.tokens
-                            title: qsTr("At a glance")
+                            title: qsTr("Status")
                         }
 
                         Repeater {
