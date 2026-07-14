@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import unittest
 from pathlib import Path
 
@@ -175,6 +176,15 @@ class SetupPracticeQmlTests(unittest.TestCase):
         for _ in range(4):
             self.qapp.processEvents()
             page.ensurePolished()
+
+    def _wait_until(self, page, predicate, timeout_ms=4000):
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            QTest.qWait(25)
+            page.ensurePolished()
+        return bool(predicate())
 
     @staticmethod
     def _find_by_property(root, name, expected):
@@ -638,6 +648,29 @@ class SetupPracticeQmlTests(unittest.TestCase):
                 with self.subTest(state=name):
                     page.setProperty("practice", practice)
                     self._settle(page)
+                    if name == "outcome":
+                        # Result contract: the action row holds its
+                        # processing presentation for the 1.2 s reading
+                        # window before Try again + Finish appear.
+                        self.assertEqual(start.property("text"), "Processing…")
+                        self.assertFalse(start.property("enabled"))
+                        self.assertFalse(continue_button.property("visible"))
+                        self.assertTrue(skip.property("visible"))
+                        self.assertFalse(skip.property("enabled"))
+                        self.assertFalse(clear.property("enabled"))
+                        self.assertEqual(primary_count(), 0)
+                        self.assertTrue(
+                            bool(page.property("practiceResultPending"))
+                        )
+                        self.assertTrue(
+                            self._wait_until(
+                                page,
+                                lambda: bool(
+                                    page.property("practiceResultActionsReady")
+                                ),
+                            )
+                        )
+                        self._settle(page)
                     self.assertTrue(start.property("visible"))
                     self.assertEqual(start.property("text"), start_state[0])
                     self.assertEqual(bool(start.property("enabled")), start_state[1])
@@ -823,6 +856,23 @@ class SetupPracticeQmlTests(unittest.TestCase):
                 },
             )
             self._settle(page)
+            # Result contract: one check draw plus a 1.2 s reading window
+            # before the action row changes to Retry.
+            self.assertTrue(bool(page.property("resultPending")))
+            self.assertTrue(start_stop.property("visible"))
+            self.assertEqual(start_stop.property("text"), "Processing…")
+            self.assertFalse(start_stop.property("enabled"))
+            self.assertFalse(retry.property("visible"))
+            self.assertFalse(clear.property("enabled"))
+            check = page.findChild(QObject, "practiceResultCheckDraw")
+            self.assertIsNotNone(check)
+            self.assertTrue(check.property("drawn"))
+            self.assertTrue(
+                self._wait_until(
+                    page, lambda: bool(page.property("resultActionsReady"))
+                )
+            )
+            self._settle(page)
             self.assertEqual(status.property("label"), "Ready to review")
             self.assertFalse(start_stop.property("visible"))
             self.assertTrue(retry.property("visible"))
@@ -916,7 +966,9 @@ class SetupPracticeQmlTests(unittest.TestCase):
     def test_pages_use_shared_visual_tokens_and_no_remote_or_idle_effects(self):
         onboarding = (self.qml / "OnboardingPage.qml").read_text(encoding="utf-8")
         practice = (self.qml / "PracticePage.qml").read_text(encoding="utf-8")
-        combined = onboarding + practice
+        rail = (self.qml / "OnboardingStepRail.qml").read_text(encoding="utf-8")
+        check = (self.qml / "CheckDraw.qml").read_text(encoding="utf-8")
+        combined = onboarding + practice + rail + check
 
         self.assertEqual(
             combined.count("Not stored by Speakr; clears when you leave Practice."),
@@ -943,10 +995,171 @@ class SetupPracticeQmlTests(unittest.TestCase):
             self.assertNotIn(forbidden, combined)
         self.assertIsNone(re.search(r"#[0-9A-Fa-f]{3,8}", combined))
         self.assertNotIn("duration: 180", combined)
+        self.assertNotIn("duration: 1200", combined)
         self.assertIn("duration: root.tokens.motionOnboarding", onboarding)
         self.assertIn("Keys.onEscapePressed", onboarding)
         self.assertIn("bridge.cancelHotkeyCapture()", onboarding)
-        self.assertIn("onClicked: root.goTo(index)", onboarding)
+        # The rail owns the step nodes; activating one still routes through
+        # goTo so leaving-step side effects stay in one place.
+        self.assertIn("onStepActivated: function(index) { root.goTo(index) }",
+                      onboarding)
+        self.assertIn("onClicked: rail.stepActivated(index)", rail)
+        # Storyboard motion stays token-driven: 220 ms check draw, 160 ms
+        # connector fill, 100 ms press scale, 1.2 s reading window.
+        self.assertIn("duration: Math.round(root.tokens.motionEmphasis * 0.4)",
+                      check)
+        self.assertIn("duration: Math.round(root.tokens.motionEmphasis * 0.6)",
+                      check)
+        self.assertIn("duration: rail.tokens.motionStage", rail)
+        self.assertEqual(onboarding.count("scale: down && enabled ? 0.99 : 1"), 1)
+        self.assertEqual(practice.count("scale: down && enabled ? 0.99 : 1"), 1)
+        for source in (onboarding, practice):
+            self.assertIn(
+                "PauseAnimation { duration: root.tokens.motionReading }", source
+            )
+
+    def test_step_rail_check_draw_connector_fill_and_return_navigation(self):
+        engine, bridge, theme, page, window, warnings = self._fixture(
+            "OnboardingPage.qml"
+        )
+        try:
+            page.setProperty("currentStep", 2)
+            self._settle(page)
+
+            def by_name(name):
+                return next(
+                    (
+                        item
+                        for item in self._visual_items(page)
+                        if item.objectName() == name
+                    ),
+                    None,
+                )
+
+            checks = [by_name(f"onboardingStepCheck{index}") for index in range(5)]
+            fills = [
+                by_name(f"onboardingStepConnectorFill{index}") for index in range(4)
+            ]
+            states = [by_name(f"onboardingStepState{index}") for index in range(5)]
+            self.assertTrue(all(item is not None for item in checks))
+            self.assertTrue(all(item is not None for item in fills))
+            self.assertTrue(all(item is not None for item in states))
+
+            self.assertEqual(
+                [bool(item.property("drawn")) for item in checks],
+                [True, True, False, False, False],
+            )
+            self.assertEqual(
+                [bool(item.property("visible")) for item in checks],
+                [True, True, False, False, False],
+            )
+            self.assertEqual(
+                [bool(item.property("filled")) for item in fills],
+                [True, True, False, False],
+            )
+            self.assertEqual(
+                [item.property("text") for item in states],
+                ["Completed", "Completed", "Current", "Upcoming", "Upcoming"],
+            )
+
+            # Completing another step draws its check and fills its connector.
+            page.setProperty("currentStep", 3)
+            self._settle(page)
+            self.assertTrue(bool(checks[2].property("drawn")))
+            self.assertTrue(bool(fills[2].property("filled")))
+
+            # A completed step stays keyboard-activatable and returns.
+            first = by_name("onboardingStepButton0")
+            self.assertIsNotNone(first)
+            self.assertTrue(QMetaObject.invokeMethod(first, "click"))
+            self._settle(page)
+            self.assertEqual(page.property("currentStep"), 0)
+            self.assertEqual(warnings, [])
+        finally:
+            self._dispose(engine, bridge, theme, page, window, warnings)
+
+    def test_practice_result_reading_window_holds_actions_even_reduced_motion(self):
+        for reduce_motion in (False, True):
+            with self.subTest(reduce_motion=reduce_motion):
+                engine, bridge, theme, page, window, warnings = self._fixture(
+                    "OnboardingPage.qml"
+                )
+                try:
+                    theme.setProperty("reduceMotion", reduce_motion)
+                    # Reduced Motion collapses transformations but must
+                    # preserve the 1.2 s reading window.
+                    self.assertEqual(theme.property("motionReading"), 1200)
+                    page.setProperty("currentStep", 4)
+                    page.setProperty(
+                        "practice",
+                        {"processing": True, "mic_level_band": "silent"},
+                    )
+                    self._settle(page)
+
+                    start = page.findChild(
+                        QObject, "onboardingPracticeStartButton"
+                    )
+                    continue_button = page.findChild(
+                        QObject, "onboardingContinueButton"
+                    )
+                    skip = page.findChild(QObject, "skipPracticeButton")
+                    meter = page.findChild(QObject, "onboardingPracticeMeter")
+                    self.assertIsNotNone(start)
+                    self.assertIsNotNone(continue_button)
+                    self.assertIsNotNone(skip)
+                    self.assertIsNotNone(meter)
+
+                    # Processing: the meter left with capture and no primary
+                    # action is enabled.
+                    self.assertFalse(meter.property("visible"))
+                    self.assertFalse(start.property("enabled"))
+                    self.assertFalse(continue_button.property("visible"))
+                    self.assertFalse(skip.property("enabled"))
+
+                    page.setProperty(
+                        "practice",
+                        {"text": "Hello Speakr", "mic_level_band": "silent"},
+                    )
+                    self._settle(page)
+
+                    # Result: check drawn, action row still held.
+                    check = page.findChild(
+                        QObject, "onboardingPracticeResultCheckDraw"
+                    )
+                    self.assertIsNotNone(check)
+                    self.assertTrue(check.property("drawn"))
+                    self.assertTrue(bool(page.property("practiceResultPending")))
+                    self.assertEqual(start.property("text"), "Processing…")
+                    self.assertFalse(start.property("enabled"))
+                    self.assertFalse(continue_button.property("visible"))
+                    self.assertTrue(skip.property("visible"))
+                    self.assertFalse(skip.property("enabled"))
+
+                    started = time.monotonic()
+                    self.assertTrue(
+                        self._wait_until(
+                            page,
+                            lambda: bool(
+                                page.property("practiceResultActionsReady")
+                            ),
+                        )
+                    )
+                    elapsed_ms = (time.monotonic() - started) * 1000.0
+                    self.assertGreaterEqual(elapsed_ms, 600.0)
+                    self._settle(page)
+
+                    self.assertEqual(start.property("text"), "Try again")
+                    self.assertEqual(start.property("kind"), "secondary")
+                    self.assertTrue(start.property("enabled"))
+                    self.assertTrue(continue_button.property("visible"))
+                    self.assertEqual(
+                        continue_button.property("text"), "Finish setup"
+                    )
+                    self.assertEqual(continue_button.property("kind"), "primary")
+                    self.assertFalse(skip.property("visible"))
+                    self.assertEqual(warnings, [])
+                finally:
+                    self._dispose(engine, bridge, theme, page, window, warnings)
 
 
 if __name__ == "__main__":
