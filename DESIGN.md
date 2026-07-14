@@ -211,6 +211,9 @@ control regions never overlap.
 - `ChromeButton`: accessible window control mapped to native behavior.
 - Signal path: three labeled nodes for Transcribe, Clean up, and Insert with
   state-driven connectors only.
+- Setup step rail: vertical done/current/upcoming nodes with a drawn check on
+  completion and state-driven connector fill; every node pairs its dot with a
+  number or check plus a written state line, never color alone.
 - Setting row: visible label, description, control, save state, and inline
   validation.
 - HUD: two reserved text lines, coarse five-segment input meter, and no
@@ -232,13 +235,14 @@ reduced, and off effects modes.
 - Press: scale no lower than `.99`, 100 ms.
 - Pipeline stage: connector fill and crossfade, 160 ms.
 - Success: one check draw or restrained bloom, 220 ms; retain a 1.2-second
-  reading window.
+  reading window (`motionReading`).
 - Error: icon, border, and label crossfade only.
 
 Motion explains a state transition. There is no bounce, elastic easing,
 shake, parallax, idle drift, breathing glow, fake progress, or delayed stage
 completion. Reduced Motion makes transformations and drawing instant while
-preserving success and error reading time.
+preserving success and error reading time; `motionReading` is the one motion
+token that never collapses to zero under Reduced Motion.
 
 ### Runtime motion flow
 
@@ -252,6 +256,9 @@ Inserting --220 ms check draw--> Inserted --1.2 s reading time--> hidden
 Any state --160 ms icon/border/label crossfade--> recoverable error
 Page A --160 ms fade + 8 px settle--> Page B (focus moves to heading)
 Onboarding step A --180 ms directional fade--> step B
+Step completion --220 ms check draw + 160 ms connector fill--> next step current
+Practice result --220 ms check draw--> 1.2 s reading window
+  --> action row becomes secondary Try again + primary Finish
 ```
 
 ## Product flows and content

@@ -496,6 +496,145 @@ class AppLifecycleTests(unittest.TestCase):
         self.assertEqual(app.practice_snapshot()["heard"], "")
         self.assertFalse(app.practice_snapshot()["hasResult"])
 
+    def test_full_dictation_reports_ordered_truthful_stages_without_transcript(self):
+        """Drive the real capture -> worker path and assert the HUD contract.
+
+        The stages a user sees must appear in pipeline order (listening,
+        transcribing, formatting, injecting, success), the input meter must
+        publish a real band while listening, the success state must retire to
+        ready after its reading window, and no InterfaceState snapshot may
+        ever contain transcript text.
+        """
+
+        marker = "zephyr marmalade proving sentence"
+
+        class Recorder:
+            sample_rate = 16000
+
+            def __init__(self):
+                self._audio = np.full(16000, 0.3, dtype=np.float32)
+                self._recording = False
+
+            def start_recording(self):
+                self._recording = True
+
+            def stop_recording(self):
+                self._recording = False
+                return self._audio
+
+            def snapshot(self):
+                return self._audio
+
+            def recorded_samples(self):
+                return len(self._audio)
+
+            def current_level(self):
+                return 0.3 if self._recording else 0.0
+
+        class Transcriber:
+            @staticmethod
+            def wait_ready(timeout=0):
+                return True
+
+            @staticmethod
+            def transcribe(audio, sample_rate=16000, **kwargs):
+                return marker
+
+        app = SpeakrApp.__new__(SpeakrApp)
+        app.enabled = True
+        app.log = mock.Mock()
+        app._recording = False
+        app._practice_recording = False
+        app._shutting_down = False
+        app._session = None
+        app._capture_job_id = 0
+        app._job_counter = 0
+        app._job_lock = threading.Lock()
+        app._queue = queue.Queue()
+        app._capture_context = mock.Mock()
+        app._legacy_state = mock.Mock()
+        app.config = _Config(
+            {
+                "hotkey_exclude_apps": [],
+                "min_duration_seconds": 0.2,
+                "max_duration_seconds": 120,
+                "streaming": {"enabled": False},
+                "injection": "paste",
+                "restore_clipboard": True,
+            }
+        )
+        app.recorder = Recorder()
+        app.transcriber = Transcriber()
+        app.dictionary = mock.Mock(apply=lambda value: value)
+        app.formatter = mock.Mock(
+            format=lambda text, ctx: text,
+            note_result=mock.Mock(),
+            _ollama_ok=False,
+        )
+        app.learner = mock.Mock()
+        app.interface_state = InterfaceState({"availability": "ready"})
+
+        snapshots = []
+        lock = threading.Lock()
+
+        def observe(snapshot):
+            with lock:
+                snapshots.append(snapshot)
+
+        app.interface_state.subscribe(observe)
+
+        with mock.patch("speakr.app.inject") as inject_mock:
+            worker = threading.Thread(target=app._worker, daemon=True)
+            worker.start()
+            app._begin_recording()
+            time.sleep(0.4)  # allow at least one real meter tick
+            app._end_recording()
+
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                if app.interface_state.snapshot()["pipeline"] == "success":
+                    break
+                time.sleep(0.02)
+            # The 1.2 s reading window must retire success to a truthful ready.
+            deadline = time.monotonic() + 4.0
+            while time.monotonic() < deadline:
+                snapshot = app.interface_state.snapshot()
+                if snapshot["pipeline"] == "idle" and snapshot["status_code"] == "ready":
+                    break
+                time.sleep(0.05)
+            app._queue.put(None)
+            worker.join(timeout=2.0)
+
+        inject_mock.assert_called_once()
+        self.assertEqual(inject_mock.call_args.args[0], marker)
+
+        with lock:
+            stages = [s["pipeline"] for s in snapshots]
+            statuses = [s["status_code"] for s in snapshots]
+            listening_bands = {
+                s["mic_level_band"] for s in snapshots if s["capture"] == "listening"
+            }
+            payload = repr(snapshots)
+
+        self.assertIn("listening", statuses)
+        expected_order = ["transcribing", "formatting", "injecting", "success"]
+        seen_order = [stage for stage in stages if stage in expected_order]
+        deduped = [
+            stage
+            for index, stage in enumerate(seen_order)
+            if index == 0 or stage != seen_order[index - 1]
+        ]
+        self.assertEqual(deduped, expected_order)
+        self.assertIn("good", listening_bands)
+
+        final = app.interface_state.snapshot()
+        self.assertEqual(final["pipeline"], "idle")
+        self.assertEqual(final["status_code"], "ready")
+        self.assertEqual(final["latest_outcome_code"], "success")
+
+        for word in ("zephyr", "marmalade", "proving"):
+            self.assertNotIn(word, payload)
+
 
 if __name__ == "__main__":
     unittest.main()
