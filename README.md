@@ -317,7 +317,14 @@ Press `Win+R`, run `shell:startup`, and drop a shortcut to `run.bat` there.
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Runs unit checks plus an end-to-end transcription of the given wav.
+Runs unit checks plus an end-to-end transcription of the given wav. The wav
+must contain the spoken sentence "The quick brown fox jumps over the lazy
+dog." — the transcription check asserts those words appear — followed by a
+few different sentences, because the streaming-equivalence check loops the
+clip and a lone repeated sentence can trip whisper's repetition suppression.
+The `scripts/smoke_test.py` docstring shows how to synthesize a suitable wav
+locally and offline with Windows' built-in speech synthesizer; never commit
+audio files.
 
 Every pull request runs the Python and native-interface contract suite on
 Python 3.11 for both supported desktop platforms. Branch protection should
