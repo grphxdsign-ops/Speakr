@@ -283,7 +283,9 @@ Window {
         anchors.fill: parent
         tokens: tokens
         role: "hud"
-        cornerRadius: tokens.radiusPanel
+        // The HUD is its own top-level capsule, so it carries the shell
+        // radius from the approved prototype rather than the panel radius.
+        cornerRadius: tokens.radiusShell
         padding: 0
         elevated: false
         fillColor: root.displayedKind === "danger" ? tokens.dangerSurface : tokens.hudSurface

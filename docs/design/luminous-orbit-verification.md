@@ -201,3 +201,39 @@ The Windows foreground/caret probe may report `skipped` when an interactive
 desktop cannot supply stable identities. The aggregate harness rejects that
 skip on Windows, records the missing proof, and leaves the manual
 focus-retention gate open.
+
+## Prototype visual parity audit (2026-07-14)
+
+The four approved prototype boards (`home-dark.html`, `home-light.html`,
+`hud.html`, `settings.html` in the Speakr design workspace) were diffed
+against the implemented QML (`HomePage.qml`, `Hud.qml`, `SettingsPage.qml`,
+shared components, `Theme.qml`). Every row was classified before editing.
+The written contract (DESIGN.md, `luminous-orbit-spec.md`) and the PR-12
+consensus resolutions remain authoritative where a board differs; nothing a
+merged lane or persona vote settled was reopened.
+
+### Real deltas (resolved)
+
+| Screen | Delta | Resolution |
+|---|---|---|
+| HUD | Capsule radius was `radiusPanel` (20 px); the approved board and the token contract give a standalone top-level capsule the 28 px shell radius. | `Hud.qml` binds `cornerRadius` to `tokens.radiusShell`. No new value. |
+| Home (dark and light) | Page side padding was `space24` while every other page and the boards use 32 px (16 px in the narrow column). Home was the only page off the shared step. | `HomePage.qml` adds the same responsive `pageMargin` (`space16`/`space32`) already used by Practice and Vocabulary. |
+| Home (dark and light) | Status surface heading read `At a glance`; the approved board and the literal-copy rule use `Status`. | Heading copy changed to `Status`. The accessible group name `Local dictation status` is unchanged. |
+| Shell navigation + Settings categories | Selected item fill was `navigationSurface`, visually indistinguishable from the panel behind it; the boards show a low-alpha accent tint (14% dark / 10% light). | `NavigationButton.qml` binds the selected fill to the existing `hover` token (accent at 20% dark / 12% light). High Contrast branch unchanged (`accent`/`accentText`, still test-asserted). |
+
+### Not deltas (justified, unchanged)
+
+| Screen | Board shows | Why the implementation stands |
+|---|---|---|
+| Home | `Insertion` status row; static check icon per row | Spec Home contract fixes the five rows as microphone, model, cleanup, privacy, latest outcome (PR-12 veto 9 resolution, test-asserted). Static per-row checks would claim state that is not verified; rows stay truth-driven. |
+| Home | Dictation switch inside the readiness panel | Veto 9 restructure paired the switch with the heading directly above the readiness surface and passed the five-persona rerun; spec requires pairing and above-the-fold visibility, both satisfied. |
+| Home | `Hold Right Ctrl and speak. Release to insert your words.` with a key chip | Mode-truthful Hold/Toggle copy is the veto 1/2 resolution and is exact-string test-asserted; a chip inside the translated sentence is board decoration. |
+| Home | State name at 22 px with 64 px orb | Spec makes the hotkey instruction the primary line; `StatusOrb` is the shared settled marker. Written contract outranks board emphasis. |
+| Home | Readiness and status surfaces both at major (84%) opacity | Spec material table gives the text-heavy status well 94% content opacity inside the page surface. |
+| HUD | Mic icon at left with meter at right; 24 px horizontal padding | Lane 9 plus the Large-HUD 200% material veto fixed the capsule geometry so wrapped recovery copy never leaves the fixed capsule; the meter-only-while-listening rule is what the contract fixes, and it holds. |
+| HUD | No processing rail | The runtime signal path rail is the settled hud-motion board behavior; warning/error outcomes already omit it (consensus round 1). |
+| Settings | Segmented choice controls | Corrective PR-26 settled combo boxes for value reflow at large text; spec only fixes the option sets. |
+| Settings | Per-row `Saved` + `Undo` | Lane 7 settled the single persistent `Saved on this device` notice with Undo; behavior is test-asserted. |
+| Settings | `Basic cleanup active — Ollama isn't running` notice | Ollama fallback is presented as the truthful `Basic cleanup active` status on Home/HUD per DESIGN.md product flows; a Settings notice would need a retry action the bridge does not own on this surface. |
+| Shell | Nav flush to window edge, per-item icons | Floating-panel shell composition and label-only navigation are the merged lane 5 structure that passed all three audit rounds; spec requires labeled navigation only. |
+| All | Browser scrollbars, desktop framing, static aria-img markup | Prototype artifacts, not product surfaces. |
