@@ -911,7 +911,12 @@ class BlankSceneRecoveryTests(unittest.TestCase):
                 self.assertFalse(qt_ui._persisted_software_preference())
 
     def test_prefer_software_honors_marker_and_hardware_escape_hatch(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        # The marker semantics are platform-neutral; macOS separately
+        # defaults to software regardless of any marker, so pin a
+        # non-darwin platform here to isolate what this test specifies.
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+            qt_ui.sys, "platform", "linux"
+        ):
             state = Path(temporary) / "renderer_state.json"
             with mock.patch.object(qt_ui, "_renderer_state_path", return_value=state):
                 clean = self._environment_without_renderer_keys()
