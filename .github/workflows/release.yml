@@ -203,7 +203,26 @@ jobs:
           security import ci/apple-intermediates/DeveloperIDCA.cer -k build.keychain
           security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain >/dev/null
           security list-keychains -d user -s build.keychain login.keychain-db
-          rm -f cert.p12
+
+          # Diagnostics print only public certificate metadata (subject,
+          # issuer, validity, trust verdicts) — never key material.
+          echo "--- p12 leaf certificate ---"
+          leaf="$RUNNER_TEMP/speakr-leaf.pem"
+          { openssl pkcs12 -in cert.p12 -nokeys \
+              -passin env:MACOS_CERTIFICATE_PASSWORD 2>/dev/null \
+            || openssl pkcs12 -legacy -in cert.p12 -nokeys \
+              -passin env:MACOS_CERTIFICATE_PASSWORD; } > "$leaf" || true
+          openssl x509 -in "$leaf" -noout -subject -issuer -dates -ext extendedKeyUsage || true
+          echo "--- leaf chain verification against vendored intermediates ---"
+          openssl verify -untrusted ci/apple-intermediates/DeveloperIDG2CA.cer \
+            -untrusted ci/apple-intermediates/DeveloperIDCA.cer "$leaf" || true
+          echo "--- certificates present in build.keychain ---"
+          security find-certificate -a build.keychain | awk -F'"' '/"labl"/{print $4}' || true
+          echo "--- identities (any policy) ---"
+          security find-identity -v build.keychain || true
+          echo "--- identities (codesigning policy) ---"
+          security find-identity -v -p codesigning build.keychain || true
+          rm -f cert.p12 "$leaf"
 
           identity="$(security find-identity -v -p codesigning build.keychain \
             | awk -F'"' '/Developer ID Application/{print $2; exit}')"
