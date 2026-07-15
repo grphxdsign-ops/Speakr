@@ -11,9 +11,11 @@ networking.
   both platform artifacts, uploads immutable workflow artifacts, and never
   creates or mutates a GitHub release.
 - A `v*` tag is **publish-eligible** only when both platform proof jobs pass
-  and every signing/notarization credential is present. Publication is one
-  final job depending on both platforms, so a partial release cannot be
-  published.
+  and every macOS signing/notarization credential is present. Windows
+  Authenticode credentials are optional: when absent, the tag ships an
+  explicitly-unsigned Windows installer whose manifest records
+  `signed: false` / `kind: unsigned`. Publication is one final job depending
+  on both platforms, so a partial release cannot be published.
 
 The release source identity is the checked-out commit. A tag build must prove
 that the tag resolves to that same commit. A manual run cannot redirect its
@@ -121,10 +123,12 @@ configuration, transcript, or model name.
 
 The final tag-only publisher downloads both platform artifacts and manifests,
 recomputes both artifact and dependency-lock hashes, rechecks source/tag
-identity, revalidates both receipt schemas, and requires Authenticode for
-Windows plus Developer ID signing and notarization for macOS. The four files
-are then published together. Manual proof runs retain the same manifests but
-cannot enter the publisher.
+identity, revalidates both receipt schemas, and requires Developer ID signing
+and notarization for macOS. Windows evidence must be either Authenticode
+signed or explicitly unsigned (`signed: false`, `kind: unsigned`) — a tagged
+Windows manifest may never carry ad-hoc or inconsistent signature evidence.
+The four files are then published together. Manual proof runs retain the same
+manifests but cannot enter the publisher.
 
 ## Platform evidence
 
@@ -138,7 +142,10 @@ launches the copied app for both receipts, validates them, asserts its arm64
 executable, and checks Gatekeeper, codesigning, and notarization when the run
 is publish-eligible.
 
-Missing release credentials are an explicit tag-release failure. They may not
-be replaced with an ad-hoc signature while publishing. Proof-only runs may
-produce clearly labeled non-distributable artifacts so the packaging and
+Missing macOS release credentials are an explicit tag-release failure. They
+may not be replaced with an ad-hoc signature while publishing. Missing Windows
+Authenticode credentials downgrade the tag to an explicitly-unsigned Windows
+installer with a workflow warning; partially-configured Windows credentials
+(PFX without password or vice versa) remain a hard failure. Proof-only runs
+may produce clearly labeled non-distributable artifacts so the packaging and
 runtime paths remain testable without impersonating a signed release.

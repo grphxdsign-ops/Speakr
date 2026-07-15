@@ -320,6 +320,8 @@ Release builds use one pinned Python 3.11/PyInstaller contract and scan the
 unpacked plus installed/copied artifact. Exact-artifact smoke runs prove the
 native tray/window first, then load a preseeded local model with Ollama off,
 Hugging Face offline, and a loopback-only DNS/socket guard. Tag publication is
-centralized, requires both platform manifests, and fails closed unless Windows
-is Authenticode signed and macOS is Developer ID signed and notarized. See
+centralized, requires both platform manifests, and fails closed unless macOS is
+Developer ID signed and notarized. Windows is Authenticode signed when the
+certificate secrets are configured; without them the tag publishes an
+explicitly-unsigned Windows installer and the manifest records that fact. See
 `docs/release-proof.md` for the receipt and evidence schemas.

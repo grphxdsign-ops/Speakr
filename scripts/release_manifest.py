@@ -299,12 +299,23 @@ def verify_manifest(
         elif "\n" in team or "\r" in team:
             errors.append("signer team is malformed")
         if tag:
-            if payload.get("platform") == "windows" and (
-                signature.get("signed") is not True
-                or signature.get("notarized") is not False
-                or kind != "authenticode"
+            windows_signed = (
+                signature.get("signed") is True
+                and signature.get("notarized") is False
+                and kind == "authenticode"
+            )
+            windows_unsigned = (
+                signature.get("signed") is False
+                and signature.get("notarized") is False
+                and kind == "unsigned"
+            )
+            if payload.get("platform") == "windows" and not (
+                windows_signed or windows_unsigned
             ):
-                errors.append("tagged Windows evidence is not Authenticode signed")
+                errors.append(
+                    "tagged Windows evidence is neither Authenticode signed"
+                    " nor explicitly unsigned"
+                )
             if payload.get("platform") == "macos" and (
                 signature.get("signed") is not True
                 or signature.get("notarized") is not True
