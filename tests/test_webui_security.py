@@ -293,7 +293,6 @@ class WebUISecurityTests(unittest.TestCase):
             "This Windows key combination always uses press-to-start and press-to-stop.",
             page,
         )
-
     def test_every_api_read_and_mutation_requires_header_token(self):
         status, _headers, _body = self.request("GET", "/api/state")
         self.assertEqual(status, 403)

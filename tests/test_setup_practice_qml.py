@@ -570,7 +570,6 @@ class SetupPracticeQmlTests(unittest.TestCase):
             self.assertEqual(warnings, [])
         finally:
             self._dispose(engine, bridge, theme, page, window, warnings)
-
     def test_required_onboarding_copy_stays_plain_and_local(self):
         source = (self.qml / "OnboardingPage.qml").read_text(encoding="utf-8")
 
@@ -788,7 +787,6 @@ class SetupPracticeQmlTests(unittest.TestCase):
             self.assertEqual(warnings, [])
         finally:
             self._dispose(engine, bridge, theme, page, window, warnings)
-
     def test_practice_states_actions_and_temporary_results(self):
         engine, bridge, theme, page, window, warnings = self._fixture(
             "PracticePage.qml"
