@@ -132,7 +132,8 @@ open /Applications/Speakr.app
   (`Speakr.app` already exists in `/Applications` after the first install, so
   it must be removed before the `mv`, not overwritten in place.)
 - Start at login: System Settings → General → Login Items → add Speakr.
-- No Dock icon by design — it's a menu-bar app.
+- Speakr shows a Dock icon and appears in Cmd-Tab like a regular app; the
+  menu-bar icon is additional. Clicking the Dock icon reopens the window.
 
 ## Quick start — macOS (from Terminal instead)
 
@@ -309,6 +310,14 @@ Press `Win+R`, run `shell:startup`, and drop a shortcut to `run.bat` there.
   is still running only as a tray process, fully quit that copy and reinstall
   the current `Speakr-Setup.exe`. Your config and vocabulary under
   `%APPDATA%\Speakr` are preserved by reinstalling.
+- **The window opens blank (macOS)**: Speakr grabs one frame after launch;
+  if the GPU renderer drew nothing it automatically relaunches with Qt's
+  software renderer and remembers that choice in `renderer_state.json`
+  next to `config.json`. To retry the GPU path later (e.g. after a macOS
+  update), launch once with `SPEAKR_QT_HARDWARE=1` or delete that file.
+- **Dictation feels slow to finish**: Settings → show advanced →
+  Accuracy → Speech model — `base` is noticeably faster than the default
+  `small` on CPU-only machines, at a small accuracy cost.
 - **No text appears**: some elevated (admin) windows ignore input from
   non-elevated processes — run Speakr as admin if you dictate into those.
 - **Mic not recording**: Windows Settings → Privacy → Microphone → allow

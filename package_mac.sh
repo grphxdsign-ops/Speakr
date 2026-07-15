@@ -65,8 +65,10 @@ Speakr does not modify Qt source files.
 NOTICE
 
 PLIST="$APP/Contents/Info.plist"
-plutil -replace LSUIElement -bool true "$PLIST" 2>/dev/null \
-    || plutil -insert LSUIElement -bool true "$PLIST"
+# Regular app presence: Dock icon and Cmd-Tab entry (the menu-bar tray icon
+# is additional, not a replacement — user decision 2026-07-15).
+plutil -replace LSUIElement -bool false "$PLIST" 2>/dev/null \
+    || plutil -insert LSUIElement -bool false "$PLIST"
 plutil -replace NSMicrophoneUsageDescription \
     -string "Speakr transcribes your dictation locally on this Mac. Audio never leaves the machine." \
     "$PLIST" 2>/dev/null \

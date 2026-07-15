@@ -885,5 +885,90 @@ class PreparedHandoffTests(CleanChildMixin, unittest.TestCase):
         process.kill.assert_called_once_with()
 
 
+class BlankSceneRecoveryTests(unittest.TestCase):
+    """Regression for 2026-07-15: a Mac's Metal renderer exposed a visible
+    main window whose scene drew nothing, and the app never fell back to
+    the working software renderer."""
+
+    def _environment_without_renderer_keys(self, **overrides):
+        removed = set(_RENDERER_ENV_KEYS) | {"SPEAKR_QT_HARDWARE"}
+        environment = {
+            key: value for key, value in os.environ.items() if key not in removed
+        }
+        environment.update(overrides)
+        return environment
+
+    def test_persisted_preference_roundtrip_and_malformed_state_is_ignored(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / "renderer_state.json"
+            with mock.patch.object(qt_ui, "_renderer_state_path", return_value=state):
+                self.assertFalse(qt_ui._persisted_software_preference())
+                qt_ui._persist_software_preference("hardware scene blank")
+                self.assertTrue(qt_ui._persisted_software_preference())
+                state.write_text("{not json", encoding="utf-8")
+                self.assertFalse(qt_ui._persisted_software_preference())
+                state.write_text("[1, 2]", encoding="utf-8")
+                self.assertFalse(qt_ui._persisted_software_preference())
+
+    def test_prefer_software_honors_marker_and_hardware_escape_hatch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / "renderer_state.json"
+            with mock.patch.object(qt_ui, "_renderer_state_path", return_value=state):
+                clean = self._environment_without_renderer_keys()
+                with mock.patch.dict(os.environ, clean, clear=True):
+                    self.assertFalse(qt_ui._prefer_software_renderer())
+                qt_ui._persist_software_preference("hardware scene blank")
+                with mock.patch.dict(os.environ, clean, clear=True):
+                    self.assertTrue(qt_ui._prefer_software_renderer())
+                overridden = self._environment_without_renderer_keys(
+                    SPEAKR_QT_HARDWARE="1"
+                )
+                with mock.patch.dict(os.environ, overridden, clear=True):
+                    self.assertFalse(qt_ui._prefer_software_renderer())
+                # The escape hatch retries hardware without erasing evidence.
+                self.assertTrue(state.is_file())
+
+    @unittest.skipUnless(qt_ui.qt_available(), "PySide6-Essentials is optional")
+    def test_uniform_grab_is_blank_and_any_content_is_not(self):
+        from PySide6.QtGui import QColor, QImage
+
+        blank = QImage(64, 64, QImage.Format.Format_RGB32)
+        blank.fill(QColor(20, 20, 24))
+        self.assertTrue(qt_ui._image_is_uniform(blank))
+
+        # Real scenes contain multi-pixel content (text, controls); the
+        # probe samples a grid, so detection is specified for content at
+        # least a few pixels wide, not for a single stray pixel.
+        content = QImage(64, 64, QImage.Format.Format_RGB32)
+        content.fill(QColor(20, 20, 24))
+        for x in range(36, 47):
+            for y in range(36, 47):
+                content.setPixelColor(x, y, QColor(200, 200, 210))
+        self.assertFalse(qt_ui._image_is_uniform(content))
+
+        empty = QImage()
+        self.assertFalse(qt_ui._image_is_uniform(empty))
+
+    @unittest.skipUnless(qt_ui.qt_available(), "PySide6-Essentials is optional")
+    def test_scene_probe_reports_blank_and_fails_safe_on_grab_errors(self):
+        from PySide6.QtGui import QColor, QImage
+
+        qapp = mock.Mock()
+        qapp.processEvents.return_value = None
+
+        blank = QImage(32, 32, QImage.Format.Format_RGB32)
+        blank.fill(QColor(0, 0, 0))
+        window = mock.Mock()
+        window.grabWindow.return_value = blank
+        self.assertTrue(
+            qt_ui._rendered_scene_is_blank(qapp, window, settle_ms=0)
+        )
+
+        window.grabWindow.side_effect = RuntimeError("no scene")
+        self.assertFalse(
+            qt_ui._rendered_scene_is_blank(qapp, window, settle_ms=0)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

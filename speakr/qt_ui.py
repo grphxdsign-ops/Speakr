@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import ctypes
 import inspect
+import json
 import logging
 import os
 import subprocess
@@ -177,8 +178,48 @@ def qt_available() -> bool:
     return True
 
 
+_RENDERER_STATE_FILENAME = "renderer_state.json"
+
+
+def _renderer_state_path() -> Path:
+    from speakr.config import ROOT
+
+    return Path(ROOT) / _RENDERER_STATE_FILENAME
+
+
+def _persisted_software_preference() -> bool:
+    """Whether an earlier launch proved this machine needs software rendering."""
+
+    try:
+        payload = json.loads(_renderer_state_path().read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("prefer_software") is True
+
+
+def _persist_software_preference(reason: str) -> None:
+    try:
+        _renderer_state_path().write_text(
+            json.dumps(
+                {
+                    "prefer_software": True,
+                    "reason": str(reason),
+                    "detected_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        log.debug("Could not persist the renderer preference", exc_info=True)
+
+
 def _prefer_software_renderer() -> bool:
     """Use Qt's local software scene graph in known remote-display sessions."""
+    # Explicit escape hatch: retry the hardware renderer and ignore (without
+    # deleting) a persisted software preference from a past blank-scene launch.
+    if os.environ.get("SPEAKR_QT_HARDWARE", "").lower() in {"1", "true", "yes"}:
+        return False
     if os.environ.get("SPEAKR_QT_SOFTWARE", "").lower() in {"1", "true", "yes"}:
         return True
     if os.environ.get("QT_QUICK_BACKEND", "").lower() == "software":
@@ -186,7 +227,9 @@ def _prefer_software_renderer() -> bool:
     if os.environ.get("QSG_RHI_BACKEND", "").lower() == "software":
         return True
     session = os.environ.get("SESSIONNAME", "").upper()
-    return session.startswith("RDP-") or bool(os.environ.get("SSH_CONNECTION"))
+    if session.startswith("RDP-") or bool(os.environ.get("SSH_CONNECTION")):
+        return True
+    return _persisted_software_preference()
 
 
 def _qt_quick_environment_selects_software() -> bool:
@@ -439,6 +482,54 @@ def _wait_for_required_main_window(qapp, window, *, timeout_ms: int = 1500) -> b
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.01)
+
+
+def _image_is_uniform(image, *, tolerance: int = 3, max_samples: int = 400) -> bool:
+    """Whether every sampled pixel matches the first within ``tolerance``.
+
+    A real Speakr scene always contains text and controls, so a uniform
+    grab means the renderer produced nothing — the blank-window failure.
+    Unreadable images return False so an inspection failure can never
+    force a renderer downgrade on its own.
+    """
+
+    try:
+        width = int(image.width())
+        height = int(image.height())
+        if width <= 0 or height <= 0:
+            return False
+        step = max(1, int(((width * height) / max_samples) ** 0.5))
+        first = image.pixel(0, 0)
+        first_rgb = ((first >> 16) & 0xFF, (first >> 8) & 0xFF, first & 0xFF)
+        for y in range(0, height, step):
+            for x in range(0, width, step):
+                pixel = image.pixel(x, y)
+                rgb = ((pixel >> 16) & 0xFF, (pixel >> 8) & 0xFF, pixel & 0xFF)
+                if any(
+                    abs(channel - reference) > tolerance
+                    for channel, reference in zip(rgb, first_rgb)
+                ):
+                    return False
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return False
+    return True
+
+
+def _rendered_scene_is_blank(qapp, window, *, settle_ms: int = 300) -> bool:
+    """Grab the exposed scene once and report whether it rendered blank."""
+
+    deadline = time.monotonic() + max(0, int(settle_ms)) / 1000.0
+    while time.monotonic() < deadline:
+        try:
+            qapp.processEvents()
+        except (AttributeError, RuntimeError):
+            return False
+        time.sleep(0.01)
+    try:
+        image = window.grabWindow()
+    except (AttributeError, RuntimeError, TypeError):
+        return False
+    return _image_is_uniform(image)
 
 
 _SYSTEM_ACCESSIBILITY = None
@@ -2003,6 +2094,27 @@ def run_native_ui(app):
         tray = _build_tray(qt, app, bridge, icon)
         bridge.attach_frontend(main_window, hud_window, tray)
         app._qt_frontend = bridge
+        if sys.platform == "darwin":
+            # A Dock click or Cmd-Tab activates the app; reopen the window
+            # when it is hidden. The startup grace period keeps a configured
+            # hidden start from being overridden by launch activation.
+            dock_grace_deadline = time.monotonic() + 3.0
+
+            def show_main_on_activate(state):
+                if state != qt.Qt.ApplicationState.ApplicationActive:
+                    return
+                if time.monotonic() < dock_grace_deadline:
+                    return
+                try:
+                    if not main_window.isVisible():
+                        bridge.show_main()
+                except (AttributeError, RuntimeError):
+                    pass
+
+            qapp.applicationStateChanged.connect(show_main_on_activate)
+            system_preference_connections.append(
+                (qapp.applicationStateChanged, show_main_on_activate)
+            )
         tray.show()
         qapp.processEvents()
         if not tray.isVisible():
@@ -2017,6 +2129,21 @@ def run_native_ui(app):
             raise QtUnavailable(
                 "the required native main window did not appear",
                 renderer_retryable=not software_renderer,
+            )
+        # Some GPU stacks expose a window whose scene never draws (observed
+        # on macOS Metal: visible window, entirely blank content). Grab one
+        # frame and fall back to the proven software renderer, remembering
+        # the outcome so later launches skip the broken hardware attempt.
+        if (
+            main_window_required
+            and not software_renderer
+            and not _release_proof_requested()
+            and _rendered_scene_is_blank(qapp, main_window)
+        ):
+            _persist_software_preference("hardware renderer produced a blank scene")
+            raise QtUnavailable(
+                "the hardware renderer produced a blank scene",
+                renderer_retryable=True,
             )
         frontend_committed = _callable(app, "_frontend_committed")
         if frontend_committed is not None and frontend_committed("native") is False:
