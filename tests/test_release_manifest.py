@@ -106,6 +106,108 @@ class ReleaseManifestTests(unittest.TestCase):
             self.assertEqual(payload["runtime"]["core"]["blocked_attempts"], 0)
             self.assertEqual(list(root.glob("*.tmp")), [])
 
+    def test_tagged_windows_manifest_may_be_explicitly_unsigned(self):
+        # A tag without Windows Authenticode credentials publishes an
+        # explicitly-unsigned installer; the manifest must verify cleanly.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact, lock, native, core = self._fixture(root)
+            payload = create_manifest(
+                artifact=artifact,
+                dependency_lock=lock,
+                native_receipt=native,
+                core_receipt=core,
+                source_sha="c" * 40,
+                tag="v1.2.3",
+                version="1.2.3",
+                platform="windows",
+                architecture="x86_64",
+                signed=False,
+                notarized=False,
+                signature_kind="unsigned",
+                signer_identity="unsigned",
+                signer_team="none",
+            )
+            manifest = root / "Speakr-Windows-manifest.json"
+            write_manifest(manifest, payload)
+            self.assertEqual(
+                verify_manifest(
+                    manifest,
+                    artifact=artifact,
+                    dependency_lock=lock,
+                    source_sha="c" * 40,
+                    tag="v1.2.3",
+                ),
+                [],
+            )
+
+    def test_tagged_windows_manifest_rejects_ad_hoc_signature(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact, lock, native, core = self._fixture(root)
+            payload = create_manifest(
+                artifact=artifact,
+                dependency_lock=lock,
+                native_receipt=native,
+                core_receipt=core,
+                source_sha="d" * 40,
+                tag="v1.2.3",
+                version="1.2.3",
+                platform="windows",
+                architecture="x86_64",
+                signed=False,
+                notarized=False,
+                signature_kind="ad_hoc",
+                signer_identity="ad_hoc",
+                signer_team="none",
+            )
+            manifest = root / "Speakr-Windows-manifest.json"
+            write_manifest(manifest, payload)
+            errors = verify_manifest(
+                manifest,
+                artifact=artifact,
+                dependency_lock=lock,
+                source_sha="d" * 40,
+                tag="v1.2.3",
+            )
+            self.assertIn(
+                "tagged Windows evidence is neither Authenticode signed"
+                " nor explicitly unsigned",
+                errors,
+            )
+
+    def test_tagged_macos_manifest_still_requires_notarized_developer_id(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact, lock, native, core = self._fixture(root)
+            artifact = artifact.rename(artifact.with_name("Speakr.dmg"))
+            payload = create_manifest(
+                artifact=artifact,
+                dependency_lock=lock,
+                native_receipt=native,
+                core_receipt=core,
+                source_sha="e" * 40,
+                tag="v1.2.3",
+                version="1.2.3",
+                platform="macos",
+                architecture="arm64",
+                signed=False,
+                notarized=False,
+                signature_kind="unsigned",
+                signer_identity="unsigned",
+                signer_team="none",
+            )
+            manifest = root / "Speakr-macOS-manifest.json"
+            write_manifest(manifest, payload)
+            errors = verify_manifest(
+                manifest,
+                artifact=artifact,
+                dependency_lock=lock,
+                source_sha="e" * 40,
+                tag="v1.2.3",
+            )
+            self.assertIn("tagged macOS evidence is not signed and notarized", errors)
+
     def test_tampering_or_sensitive_receipt_expansion_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

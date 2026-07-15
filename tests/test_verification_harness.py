@@ -417,29 +417,64 @@ class VerificationHarnessTests(unittest.TestCase):
         self.assertFalse(native_rect_matches_work_area((0, 0, 1920), work, 8, 8))
 
     def test_diff_checks_cover_committed_and_working_changes(self):
-        expected_base = subprocess.run(
-            ["git", "merge-base", "HEAD", "origin/main"],
-            cwd=self.root,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        commands = diff_check_commands(
-            self.root,
-            {"SPEAKR_VERIFY_BASE": "origin/main"},
-        )
-        self.assertEqual(
-            [name for name, _command, _environment in commands],
-            ["committed_diff_check", "working_tree_diff_check"],
-        )
-        self.assertEqual(
-            tuple(commands[0][1]),
-            ("git", "diff", "--check", f"{expected_base}...HEAD"),
-        )
-        self.assertEqual(
-            tuple(commands[1][1]),
-            ("git", "diff", "--check"),
-        )
+        # A synthetic repository keeps this deterministic: the ambient
+        # checkout may sit exactly on origin/main (tag/release builds),
+        # where no committed range exists and only the working-tree
+        # check may truthfully run.
+        def run_git(repo: Path, *arguments: str) -> None:
+            subprocess.run(
+                ["git", *arguments],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            run_git(repo, "init")
+            run_git(repo, "config", "user.email", "verify@example.invalid")
+            run_git(repo, "config", "user.name", "Verify Harness")
+            run_git(repo, "config", "commit.gpgsign", "false")
+            (repo / "seed.txt").write_text("base\n", encoding="utf-8")
+            run_git(repo, "add", "seed.txt")
+            run_git(repo, "commit", "-m", "base")
+            expected_base = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            run_git(repo, "branch", "base")
+
+            tag_style = diff_check_commands(
+                repo,
+                {"SPEAKR_VERIFY_BASE": "base"},
+            )
+            self.assertEqual(
+                tag_style,
+                [("working_tree_diff_check", ("git", "diff", "--check"), {})],
+            )
+
+            (repo / "seed.txt").write_text("head\n", encoding="utf-8")
+            run_git(repo, "commit", "-am", "head")
+            commands = diff_check_commands(
+                repo,
+                {"SPEAKR_VERIFY_BASE": "base"},
+            )
+            self.assertEqual(
+                [name for name, _command, _environment in commands],
+                ["committed_diff_check", "working_tree_diff_check"],
+            )
+            self.assertEqual(
+                tuple(commands[0][1]),
+                ("git", "diff", "--check", f"{expected_base}...HEAD"),
+            )
+            self.assertEqual(
+                tuple(commands[1][1]),
+                ("git", "diff", "--check"),
+            )
 
         with tempfile.TemporaryDirectory() as directory:
             fallback = diff_check_commands(
