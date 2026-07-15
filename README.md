@@ -310,11 +310,18 @@ Press `Win+R`, run `shell:startup`, and drop a shortcut to `run.bat` there.
   is still running only as a tray process, fully quit that copy and reinstall
   the current `Speakr-Setup.exe`. Your config and vocabulary under
   `%APPDATA%\Speakr` are preserved by reinstalling.
-- **The window opens blank (macOS)**: Speakr grabs one frame after launch;
-  if the GPU renderer drew nothing it automatically relaunches with Qt's
-  software renderer and remembers that choice in `renderer_state.json`
-  next to `config.json`. To retry the GPU path later (e.g. after a macOS
-  update), launch once with `SPEAKR_QT_HARDWARE=1` or delete that file.
+- **The window opens blank (macOS)**: macOS builds default to Qt's
+  software renderer because macOS gives an app no way to verify that the
+  GPU path actually presented anything on screen. To opt into the GPU
+  renderer anyway, launch with `SPEAKR_QT_HARDWARE=1`. On other platforms
+  Speakr grabs one frame after launch; a blank GPU scene automatically
+  relaunches with the software renderer and remembers that choice in
+  `renderer_state.json` next to `config.json`.
+- **Installed an update but nothing changed**: a launch that finds an
+  older Speakr build still running now replaces it automatically (a
+  graceful exit request, then a verified force-quit if it doesn't
+  respond). Relaunching the same build still just raises the existing
+  window.
 - **Dictation feels slow to finish**: Settings → show advanced →
   Accuracy → Speech model — `base` is noticeably faster than the default
   `small` on CPU-only machines, at a small accuracy cost.

@@ -229,6 +229,13 @@ def _prefer_software_renderer() -> bool:
     session = os.environ.get("SESSIONNAME", "").upper()
     if session.startswith("RDP-") or bool(os.environ.get("SSH_CONNECTION")):
         return True
+    if sys.platform == "darwin":
+        # macOS cannot verify on-screen presentation without the Screen
+        # Recording permission, so a Metal path that draws nothing is
+        # indistinguishable from success (observed 2026-07-15: visible
+        # window, blank scene, clean grabs). Software is the proven
+        # default; opt back in with SPEAKR_QT_HARDWARE=1.
+        return True
     return _persisted_software_preference()
 
 

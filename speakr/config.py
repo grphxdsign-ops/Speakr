@@ -21,6 +21,11 @@ LOG_PATH = ROOT / "speakr.log"
 # Where the running instance publishes its control-panel URL (the port can
 # differ per run), so a second launch can open the panel instead of dying.
 PANEL_URL_PATH = ROOT / "panel.url"
+# Written by the running primary instance (pid + executable identity) so a
+# newer build can recognize and replace a stale one; removed on clean exit.
+PRIMARY_INFO_PATH = ROOT / "primary.json"
+# Written by a newer launch to ask the running primary to exit for takeover.
+QUIT_REQUEST_PATH = ROOT / "quit.request"
 # File-system wake signal used by a second launch to show the native window
 # without keeping a browser or network listener alive in the normal Qt path.
 SHOW_REQUEST_PATH = ROOT / "show.request"

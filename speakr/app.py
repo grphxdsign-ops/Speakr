@@ -394,6 +394,14 @@ class SpeakrApp:
         if core_proof is not None and not core_proof.attach(self):
             return
 
+        # A stale quit request from a crashed takeover must not stop this
+        # fresh primary; publish this build's identity for future launches.
+        try:
+            cfg_mod.QUIT_REQUEST_PATH.unlink()
+        except OSError:
+            pass
+        _write_primary_info()
+
         threading.Thread(target=self._load_model, name="model-loader", daemon=True).start()
         threading.Thread(target=self._prepare_formatter, name="ollama-prepare", daemon=True).start()
         try:
@@ -542,6 +550,16 @@ class SpeakrApp:
             if stamp and stamp != last_seen:
                 last_seen = stamp
                 self.show_main_window()
+            if cfg_mod.QUIT_REQUEST_PATH.exists():
+                try:
+                    cfg_mod.QUIT_REQUEST_PATH.unlink()
+                except OSError:
+                    pass
+                self.log.warning(
+                    "A newer Speakr launch requested takeover; exiting"
+                )
+                self.quit()
+                return
             time.sleep(0.35)
 
     @staticmethod
@@ -615,6 +633,7 @@ class SpeakrApp:
             cfg_mod.SHOW_REQUEST_PATH.unlink()
         except OSError:
             pass
+        _clear_primary_info()
 
     # ----- single source of visible state ---------------------------------
 
@@ -2074,6 +2093,193 @@ def _renderer_child_holds_primary() -> bool:
     return False
 
 
+# ----- stale-primary takeover ---------------------------------------------
+#
+# Regression context (2026-07-15): installing an update while an older
+# Speakr still ran left every new launch deferring to the stale process,
+# so the update silently never executed. A new launch now replaces a
+# primary from a different build; a same-build primary keeps the existing
+# show-its-window behavior.
+
+_SPEAKR_PROCESS_NAMES = {"speakr", "speakr.exe"}
+
+
+def _executable_identity() -> dict:
+    executable = Path(sys.executable).resolve()
+    try:
+        mtime = executable.stat().st_mtime_ns
+    except OSError:
+        mtime = 0
+    return {"executable": str(executable), "executable_mtime_ns": mtime}
+
+
+def _write_primary_info():
+    payload = {"protocol": 1, "pid": os.getpid(), **_executable_identity()}
+    try:
+        cfg_mod.PRIMARY_INFO_PATH.write_text(
+            json.dumps(payload, sort_keys=True), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def _clear_primary_info():
+    for path in (cfg_mod.PRIMARY_INFO_PATH, cfg_mod.QUIT_REQUEST_PATH):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _read_primary_info():
+    try:
+        payload = json.loads(
+            cfg_mod.PRIMARY_INFO_PATH.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _primary_is_current_build(info) -> bool:
+    if not isinstance(info, dict) or info.get("protocol") != 1:
+        return False
+    if not isinstance(info.get("pid"), int):
+        return False
+    ours = _executable_identity()
+    return (
+        info.get("executable") == ours["executable"]
+        and info.get("executable_mtime_ns") == ours["executable_mtime_ns"]
+    )
+
+
+def _pid_process_name(pid: int) -> str:
+    """Best-effort process name for pid; empty string when unknown."""
+
+    try:
+        if sys.platform == "win32":
+            completed = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            line = completed.stdout.strip().splitlines()
+            if not line or not line[0].startswith('"'):
+                return ""
+            return line[0].split('","')[0].strip('"').lower()
+        completed = subprocess.run(
+            ["ps", "-p", str(int(pid)), "-o", "comm="],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        name = completed.stdout.strip()
+        return Path(name).name.lower() if name else ""
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ""
+
+
+def _discover_stale_speakr_pids() -> list[int]:
+    """Find packaged Speakr processes other than this one, by exact name.
+
+    Source-tree runs appear as python processes and are deliberately not
+    discoverable — only a verifiably-named packaged process may be replaced.
+    """
+
+    pids: list[int] = []
+    try:
+        if sys.platform == "win32":
+            if not getattr(sys, "frozen", False):
+                return []
+            completed = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq Speakr.exe", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            for line in completed.stdout.strip().splitlines():
+                if not line.startswith('"'):
+                    continue
+                columns = line.split('","')
+                if len(columns) >= 2:
+                    try:
+                        pids.append(int(columns[1].strip('"')))
+                    except ValueError:
+                        continue
+        else:
+            completed = subprocess.run(
+                ["pgrep", "-x", "Speakr"],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            for token in completed.stdout.split():
+                try:
+                    pids.append(int(token))
+                except ValueError:
+                    continue
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [pid for pid in pids if pid != os.getpid()]
+
+
+def _terminate_stale_speakr(pid: int, logger) -> None:
+    """Terminate pid only after verifying it is a packaged Speakr process."""
+
+    if _pid_process_name(pid) not in _SPEAKR_PROCESS_NAMES:
+        logger.warning(
+            "Not replacing pid %s: it is not a verifiable Speakr process", pid
+        )
+        return
+    logger.warning("Replacing stale Speakr instance (pid %s)", pid)
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(int(pid)), "/T", "/F"],
+                capture_output=True, check=False, timeout=10,
+            )
+            return
+        import signal
+
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return
+            time.sleep(0.1)
+        os.kill(pid, signal.SIGKILL)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+
+
+def _replace_stale_primary(logger) -> bool:
+    """Try to become primary by retiring an older-build instance.
+
+    Returns True when this process now holds the single-instance lock.
+    Never touches a same-build primary and never kills a process it cannot
+    verify as a packaged Speakr executable.
+    """
+
+    info = _read_primary_info()
+    if _primary_is_current_build(info):
+        return False
+    if info is not None and isinstance(info.get("pid"), int):
+        # Protocol-aware but different build: ask it to exit gracefully.
+        try:
+            cfg_mod.QUIT_REQUEST_PATH.write_text(
+                str(time.time_ns()), encoding="utf-8"
+            )
+        except OSError:
+            pass
+        logger.warning("Asked the outdated Speakr instance to exit for takeover")
+        if _acquire_single_instance(wait_seconds=8.0):
+            return True
+        _terminate_stale_speakr(int(info["pid"]), logger)
+        return _acquire_single_instance(wait_seconds=5.0)
+    # Pre-protocol primary (no identity file): replace by verified name only.
+    candidates = _discover_stale_speakr_pids()
+    if not candidates:
+        return False
+    for pid in candidates:
+        _terminate_stale_speakr(pid, logger)
+    return _acquire_single_instance(wait_seconds=5.0)
+
+
 def main():
     acquired = False
     handoff = _RendererHandoffChild.from_environment()
@@ -2098,14 +2304,20 @@ def main():
             finally:
                 _release_launch_gate()
     if handoff is None and not acquired:
-        setup_logging().warning("Speakr is already running; requesting its window")
-        try:
-            cfg_mod.SHOW_REQUEST_PATH.write_text(str(time.time_ns()), encoding="utf-8")
-        except OSError:
-            pass
-        if not waited_for_handoff:
-            _open_running_legacy_panel()
-        return
+        logger = setup_logging()
+        if _replace_stale_primary(logger):
+            acquired = True
+        else:
+            logger.warning("Speakr is already running; requesting its window")
+            try:
+                cfg_mod.SHOW_REQUEST_PATH.write_text(
+                    str(time.time_ns()), encoding="utf-8"
+                )
+            except OSError:
+                pass
+            if not waited_for_handoff:
+                _open_running_legacy_panel()
+            return
     if handoff is None:
         # Remove only a stale request left by an earlier crashed/exited
         # primary. The renderer-handoff parent already did this; its guarded
