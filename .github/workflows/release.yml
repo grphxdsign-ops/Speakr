@@ -194,6 +194,13 @@ jobs:
           security unlock-keychain -p ci build.keychain
           security import cert.p12 -k build.keychain \
             -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          # The runner's fresh keychain lacks Apple's Developer ID
+          # intermediates, so the imported identity cannot chain to the
+          # trusted root and find-identity reports nothing. The vendored
+          # copies are Apple's public CA certificates (see
+          # ci/apple-intermediates/README.md for fingerprints).
+          security import ci/apple-intermediates/DeveloperIDG2CA.cer -k build.keychain
+          security import ci/apple-intermediates/DeveloperIDCA.cer -k build.keychain
           security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain >/dev/null
           security list-keychains -d user -s build.keychain login.keychain-db
           rm -f cert.p12
